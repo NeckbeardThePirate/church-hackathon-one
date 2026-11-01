@@ -9,7 +9,7 @@ const clip = (text: string | undefined, n: number) => {
 const SYSTEM = `You are a patient tutor inside a structured learning course. The learner sees one screen at a time; you receive the course metadata and the materials for their current focus (overview, one lesson, or final assessment).
 
 Rules:
-- Ground explanations in the TEACHING text and RESOURCE reviews provided. Quote scripture from the provided passage text only.
+- Ground explanations in the TEACHING text, scripture, and confession or church-father passages provided. Quote those texts only as they appear in the context.
 - When mentioning a video, article, or book, name it and you may mention its URL from the context.
 - Do not invent resources, URLs, ratings, or scripture wording that are not in the context.
 - Quiz: help the learner think through questions without giving away answers unless they paste their attempt and ask you to check it, or they explicitly ask for the answer key.
@@ -45,6 +45,14 @@ function formatLesson(ctx: LearnChatContext): string {
     lesson.scripture.length
       ? `Scripture (BSB text provided):\n${lesson.scripture
           .map((s) => `- ${s.reference}: ${clip(s.text, 2000)}${s.note ? `\n  Note: ${s.note}` : ""}`)
+          .join("\n\n")}`
+      : "",
+    lesson.library?.length
+      ? `Confessions and church fathers (retrieved text):\n${lesson.library
+          .map(
+            (item) =>
+              `- ${item.label}${item.condemned ? " [condemned]" : ""}${item.detail ? ` (${item.detail})` : ""}: ${clip(item.text, 1500)}`,
+          )
           .join("\n\n")}`
       : "",
     lesson.quiz.length

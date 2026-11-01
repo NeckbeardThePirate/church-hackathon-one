@@ -126,22 +126,37 @@ export function AppShell({
             })
           )}
         </nav>
-        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
-          <div
-            className={`mt-auto border-t border-[var(--line)] pt-3 ${
-              sidebarCompact ? "flex justify-center px-0" : "px-2"
-            }`}
-          >
+        <div
+          className={`mt-auto flex items-center gap-3 border-t border-[var(--line)] pt-3 ${
+            sidebarCompact ? "justify-center px-0" : "px-2"
+          }`}
+        >
+          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
             <UserButton
-              afterSignOutUrl="/sign-in"
               appearance={{
                 elements: {
                   avatarBox: sidebarCompact ? "size-8" : "size-9",
                 },
               }}
             />
-          </div>
-        ) : null}
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              void fetch("/api/auth/signout", { method: "POST", credentials: "same-origin" }).finally(() => {
+                const clerk = (window as unknown as { Clerk?: { signOut: (opts?: { redirectUrl?: string }) => Promise<void> } }).Clerk;
+                if (clerk?.signOut) {
+                  void clerk.signOut({ redirectUrl: "/" });
+                  return;
+                }
+                window.location.assign("/");
+              });
+            }}
+            className={`text-xs text-[var(--ink-muted)] hover:text-[var(--ink)] ${sidebarCompact ? "sr-only" : ""}`}
+          >
+            Sign out
+          </button>
+        </div>
       </aside>
       <div className="relative min-w-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto">{children}</div>
     </div>

@@ -18,14 +18,13 @@ export function ClerkAppProvider({ children }: { children: ReactNode }) {
       signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/"
       signUpFallbackRedirectUrl="/"
+      afterSignOutUrl="/"
       appearance={{
-        baseTheme: dark,
+        theme: dark,
         variables: {
           colorBackground: "#191919",
-          colorInputBackground: "#202020",
+          colorInput: "#202020",
           colorPrimary: "#c9b896",
-          colorText: "#ebebea",
-          colorTextSecondary: "#9b9a97",
         },
       }}
     >

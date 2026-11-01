@@ -38,6 +38,7 @@ import type {
   LearnLesson,
   LearnPlan,
   QuizItem,
+  LibraryCitation,
   ScriptureReading,
   TeachBlock,
   VideoResource,
@@ -116,6 +117,23 @@ function ResourceCard({
           {reviewNote ? <span className="italic"> {reviewNote}</span> : null}
         </p>
       ) : null}
+    </li>
+  );
+}
+
+function LibraryCallout({ item }: { item: LibraryCitation }) {
+  const heading = item.condemned ? `${item.label} · condemned` : item.label;
+  return (
+    <li className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--sidebar)_90%,var(--canvas))] px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
+        {item.source === "confession" ? "Confession" : "Church father"}
+      </p>
+      <p className="mt-1 text-sm font-medium text-[var(--ink)]">
+        {item.url ? <ExternalLink href={item.url}>{heading}</ExternalLink> : heading}
+        {item.detail ? <span className="font-normal text-[var(--ink-muted)]"> · {item.detail}</span> : null}
+      </p>
+      <p className="mt-2 text-sm leading-relaxed text-[var(--ink)]">{item.text}</p>
+      {item.note ? <p className="mt-2 text-sm italic text-[var(--ink-muted)]">{item.note}</p> : null}
     </li>
   );
 }
@@ -600,6 +618,17 @@ function LessonBody({
           <ul className="mt-3 space-y-2">
             {lesson.books.map((b) => (
               <ResourceCard key={b.url} href={b.url} title={b.title} meta={bookMeta(b)} review={b.review} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {lesson.library?.length ? (
+        <div className="mt-8">
+          <h2 className="text-base font-semibold text-[var(--ink)]">Confessions and church fathers</h2>
+          <ul className="mt-3 space-y-3">
+            {lesson.library.map((item) => (
+              <LibraryCallout key={`${item.source}-${item.id}`} item={item} />
             ))}
           </ul>
         </div>

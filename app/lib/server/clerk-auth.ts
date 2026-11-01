@@ -1,11 +1,13 @@
 import { createClerkClient } from "@clerk/backend";
 import { env } from "cloudflare:workers";
+import { readSession, resolveSessionSecret } from "./session";
 
 export type AuthContext = {
   userId: string;
+  provider: "clerk" | "chatgpt" | "dev";
 };
 
-function readClerkSecretKey(): string | undefined {
+export function readClerkSecretKey(): string | undefined {
   const fromBinding = env.CLERK_SECRET_KEY;
   if (fromBinding && fromBinding !== "CLERK_SECRET_KEY") return fromBinding;
   // Vinext loads `.env.local` into process.env in local dev.
@@ -13,7 +15,7 @@ function readClerkSecretKey(): string | undefined {
   return fromProcess?.trim() || undefined;
 }
 
-function readClerkPublishableKey(): string | undefined {
+export function readClerkPublishableKey(): string | undefined {
   const fromBinding = env.CLERK_PUBLISHABLE_KEY;
   if (fromBinding && fromBinding !== "CLERK_PUBLISHABLE_KEY" && /^(pk_test_|pk_live_)/.test(fromBinding)) {
     return fromBinding;
@@ -26,15 +28,13 @@ function readClerkPublishableKey(): string | undefined {
 
 export async function requireUser(request: Request): Promise<AuthContext | Response> {
   try {
+    const secret = resolveSessionSecret(request, env.SESSION_SECRET);
+    const session = await readSession(request, secret);
+    if (session) return { userId: session.userId, provider: session.provider };
+
     const secretKey = readClerkSecretKey();
     if (!secretKey) {
-      return Response.json(
-        {
-          error:
-            "Authentication is not configured. Set CLERK_SECRET_KEY in .env.local / .dev.vars (dev) or Worker secrets (prod).",
-        },
-        { status: 503 },
-      );
+      return Response.json({ error: "Sign in required." }, { status: 401 });
     }
 
     const publishableKey = readClerkPublishableKey();
@@ -56,7 +56,7 @@ export async function requireUser(request: Request): Promise<AuthContext | Respo
       return Response.json({ error: "Sign in required." }, { status: 401 });
     }
 
-    return { userId: auth.userId };
+    return { userId: auth.userId, provider: "clerk" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Authentication failed.";
     return Response.json({ error: message }, { status: 500 });

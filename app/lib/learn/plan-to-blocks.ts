@@ -70,6 +70,22 @@ function lessonBlocks(lesson: LearnLesson, total: number): BlockContent[] {
     }
   }
 
+  if (lesson.library?.length) {
+    out.push(createBlock("heading2", "Confessions and church fathers"));
+    for (const item of lesson.library) {
+      const label = item.condemned ? `${item.label} (condemned)` : item.label;
+      const title = item.url ? link(item.url, label) : esc(label);
+      out.push(
+        createBlock(
+          "quote",
+          `${title}${item.detail ? ` · ${esc(item.detail)}` : ""}<br>${esc(item.text)}${
+            item.note ? `<br><em>${esc(item.note)}</em>` : ""
+          }`,
+        ),
+      );
+    }
+  }
+
   if (lesson.scripture.length) {
     out.push(createBlock("heading2", "Scripture readings"));
     for (const reading of lesson.scripture) {

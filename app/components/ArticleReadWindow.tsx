@@ -338,7 +338,7 @@ export function ArticleReadWindow({
           <div
             ref={scrollerRef}
             tabIndex={0}
-            className="max-h-[min(70vh,34rem)] overflow-y-auto overscroll-contain px-5 py-4 text-[17px] leading-[1.7] text-[var(--ink)] outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent)_55%,transparent)]"
+            className="max-h-[min(70vh,34rem)] overflow-y-auto overscroll-contain px-5 py-4 text-[17px] leading-[1.7] text-[var(--ink)] outline-none [scrollbar-gutter:stable] focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent)_55%,transparent)]"
             style={{ fontFamily: "var(--font-serif), Georgia, 'Iowan Old Style', serif" }}
           >
             {!body && status !== "error" ? (

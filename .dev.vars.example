@@ -1,36 +1,31 @@
-# Workers AI + remote R2 in local dev use your Cloudflare account.
-# The Vite plugin defaults to remote bindings; authenticate once with:
-#   npx wrangler login
-# or set a token (Edit Cloudflare Workers + R2 read/write):
-#   CLOUDFLARE_API_TOKEN=...
+# Workers AI + remote R2/D1 in local dev use your Cloudflare account.
+#   CLOUDFLARE_API_TOKEN=...   # Workers Scripts, D1, R2, Vectorize, Workers AI, Queues
+#   CLOUDFLARE_ACCOUNT_ID=ddd73c1c002a8083f222af44faadeb0f
 #
-# Optional: pin the account used for remote bindings
-# CLOUDFLARE_ACCOUNT_ID=ddd73c1c002a8083f222af44faadeb0f
+# Loopback only. Never set these in production.
+# DEV_AUTH=1
+# MOCK_AI=1
 #
-# Berean Study Bible (BSB) in D1 — one-time seed:
-#   npm run bible:seed          # local wrangler DB (optional)
-#   npm run bible:seed:remote   # production D1 (required for `npm run dev` — BIBLE uses remote D1)
-# Quick test (John only):
-#   node --experimental-strip-types scripts/seed-bsb.mts --book=john
+# Session cookie HMAC. Required on any public host. Generate a long random string.
+# SESSION_SECRET=
 #
-# Clerk (https://dashboard.clerk.com/~/api-keys)
-# Also copy publishable key to .env.local as NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-CLERK_SECRET_KEY=sk_test_REPLACE_ME
-CLERK_PUBLISHABLE_KEY=pk_test_REPLACE_ME
+# Sign in with ChatGPT. Website clients need a registered OAuth client (no secret for a public PKCE client).
+# OPENAI_CLIENT_ID=
+# OPENAI_CLIENT_SECRET=
+# Optional Responses API model. Used only after Workers AI fails, and only if the user granted ChatGPT plan usage.
+# LEARN_CHATGPT_MODEL=
 #
-# Optional: real article/video results for Go Deeper "Further reading"
-# (https://api-dashboard.search.brave.com). Without it, links open curated site searches.
-# BRAVE_SEARCH_API_KEY=
+# AI Gateway `study-buddy` has authentication on. Without the token, calls fall back to Workers AI directly.
+# AI_GATEWAY_TOKEN=
 #
-# Learn pipeline (docs/learn-plan.md). Declare matching names in cloudflare.config.ts (bindings.secret()).
-# AI Gateway ID: every Learn model call routes through it. Unset = direct Workers AI (warns).
-# AI_GATEWAY_ID=
-# AI_GATEWAY_TOKEN=            # only if the gateway is authenticated
-# Model per role. Workers AI id, or "anthropic/<model>" via the gateway's Anthropic provider.
-# LEARN_MODEL_PLANNER=anthropic/claude-sonnet-5-5
-# LEARN_MODEL_WORKER=@cf/zai-org/glm-5.3-flash
-# ANTHROPIC_API_KEY=           # omit if the gateway stores the key (BYOK)
-# Exa — direct api.exa.ai (Learn article/video research + /contents verify). Not via AI Gateway yet.
-# Unset = research stage skips; plans still build without linked resources.
-# Prod: npx wrangler secret put EXA_API_KEY
+# Clerk (optional). Also set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env.local.
+# CLERK_SECRET_KEY=
+# CLERK_PUBLISHABLE_KEY=
+#
+# Optional. Plans still build from Scripture, confessions, fathers, Wikipedia, and Open Library without these.
 # EXA_API_KEY=
+# BRAVE_SEARCH_API_KEY=
+# ADMIN_TOKEN=
+#
+# LEARN_MODEL_PLANNER=@cf/zai-org/glm-5.3-flash
+# LEARN_MODEL_WORKER=@cf/zai-org/glm-5.3-flash

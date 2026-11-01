@@ -3,6 +3,7 @@
  * Owns notes/projects and small prefs. Learn pipeline state stays on LearnPlanDO.
  */
 import { DurableObject } from "cloudflare:workers";
+import type { ChatGptIdentity } from "./chatgpt-auth";
 import type { Project, ProjectKind } from "@/app/lib/projects";
 
 const KINDS = new Set<ProjectKind>(["lesson", "study", "learn"]);
@@ -64,7 +65,43 @@ export class UserWorkspaceDO extends DurableObject {
         `);
         this.ctx.storage.sql.exec("INSERT INTO _sql_schema_migrations (id) VALUES (1)");
       }
+      if (version < 2) {
+        this.ctx.storage.sql.exec(`
+          CREATE TABLE IF NOT EXISTS oauth (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload TEXT NOT NULL
+          )
+        `);
+        this.ctx.storage.sql.exec("INSERT INTO _sql_schema_migrations (id) VALUES (2)");
+      }
     });
+  }
+
+  /** Server-only ChatGPT credential. Never returned by the workspace HTTP API. */
+  getOauth(): ChatGptIdentity | null {
+    const row = this.ctx.storage.sql.exec<{ payload: string }>("SELECT payload FROM oauth WHERE id = 1").toArray()[0];
+    if (!row) return null;
+    try {
+      const parsed = JSON.parse(row.payload) as ChatGptIdentity;
+      if (!parsed || typeof parsed.accessToken !== "string" || typeof parsed.subject !== "string") return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  setOauth(identity: ChatGptIdentity): void {
+    const payload = JSON.stringify(identity);
+    if (payload.length > 20_000) throw new Error("OAuth credential is too large.");
+    this.ctx.storage.sql.exec(
+      `INSERT INTO oauth (id, payload) VALUES (1, ?)
+       ON CONFLICT(id) DO UPDATE SET payload = excluded.payload`,
+      payload,
+    );
+  }
+
+  clearOauth(): void {
+    this.ctx.storage.sql.exec("DELETE FROM oauth WHERE id = 1");
   }
 
   listProjects(): Project[] {

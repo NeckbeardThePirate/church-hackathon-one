@@ -45,6 +45,7 @@ export type SerializedLesson = {
   articles: { title: string; url: string; siteName?: string; review: string }[];
   books: { title: string; url: string; authors: string[]; review: string }[];
   scripture: { reference: string; text: string; note: string }[];
+  library?: { source: string; label: string; detail?: string; text: string; note: string; condemned?: boolean }[];
   quiz: { kind: string; question: string; choices?: string[]; sourceRef?: string }[];
   warnings: string[];
 };
@@ -140,6 +141,14 @@ export function serializeLesson(lesson: LearnLesson): SerializedLesson {
     articles: lesson.articles.map(serializeArticle),
     books: lesson.books.map(serializeBook),
     scripture: lesson.scripture.map(serializeScripture),
+    library: (lesson.library ?? []).map((item) => ({
+      source: item.source,
+      label: item.label,
+      detail: item.detail,
+      text: clip(item.text, 1500),
+      note: clip(item.note, 400),
+      ...(item.condemned ? { condemned: true } : {}),
+    })),
     quiz: lesson.quiz.map(serializeQuizItem),
     warnings: lesson.warnings,
   };

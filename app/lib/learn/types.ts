@@ -80,6 +80,18 @@ export type BookResource = ResourceBase & {
 };
 export type ScriptureReading = { reference: string; text: string; note: string };
 
+/** Passage text retrieved from D1. The model does not write `text`. */
+export type LibraryCitation = {
+  id: string;
+  source: "father" | "confession";
+  label: string;
+  detail?: string;
+  text: string;
+  note: string;
+  condemned?: boolean;
+  url?: string;
+};
+
 /** Output of S1 Scope. */
 export type ScopeResult = {
   title: string;
@@ -108,6 +120,8 @@ export type LearnLesson = LessonOutline & {
   articles: ArticleResource[];
   books: BookResource[];
   scripture: ScriptureReading[];
+  /** Fathers and confessions retrieved for this lesson. Absent on plans saved before this field existed. */
+  library?: LibraryCitation[];
   quiz: QuizItem[];
   warnings: string[];
 };

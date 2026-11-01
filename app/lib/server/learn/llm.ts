@@ -11,6 +11,8 @@
  */
 import { parseWorkersAiText } from "../ocr";
 import { REFINE_MODEL } from "../refine-ocr";
+import { extractJson } from "./json-text";
+import { mockModelText } from "./mock-llm";
 
 export type LlmRole = "planner" | "worker";
 
@@ -21,6 +23,11 @@ export type LlmEnv = {
   LEARN_MODEL_WORKER?: string;
   ANTHROPIC_API_KEY?: string;
   AI_GATEWAY_TOKEN?: string;
+  /** "1" only in local dev. Production must leave this unset. */
+  MOCK_AI?: string;
+  /** Optional Responses API model used with a user's ChatGPT plan after Workers AI fails. */
+  LEARN_CHATGPT_MODEL?: string;
+  USER_WORKSPACE?: DurableObjectNamespace;
 };
 
 export type LlmMeta = { planId: string; stage: string; lessonId?: string };
@@ -34,6 +41,8 @@ type JsonCall<T> = {
   temperature?: number;
   /** Throw to reject the output; the message is fed back to the model on retry. */
   validate: (value: unknown) => T;
+  /** Plan owner. Used only to look up a stored ChatGPT token for fallback compute. */
+  userId?: string;
 };
 
 const MAX_ATTEMPTS = 3;
@@ -54,6 +63,40 @@ function gatewayOptions(env: LlmEnv, meta: LlmMeta, attempt: number): GatewayOpt
 }
 
 let warnedNoGateway = false;
+let warnedGatewayAuth = false;
+
+function isGatewayAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /401|403|unauthorized|authentication|cf-aig/i.test(message);
+}
+
+async function runWorkers(
+  env: LlmEnv,
+  model: string,
+  system: string,
+  user: string,
+  meta: LlmMeta,
+  attempt: number,
+  maxTokens: number,
+  temperature: number,
+  gateway: GatewayOptions | undefined,
+): Promise<string> {
+  const result = await env.AI.run(
+    model as Parameters<Ai["run"]>[0],
+    {
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: { type: "json_object" },
+      reasoning_effort: "low",
+      max_tokens: maxTokens,
+      temperature,
+    } as never,
+    gateway ? ({ gateway } as never) : undefined,
+  );
+  return parseWorkersAiText(result);
+}
 
 async function complete(
   env: LlmEnv,
@@ -64,7 +107,10 @@ async function complete(
   attempt: number,
   maxTokens: number,
   temperature: number,
+  userId?: string,
 ): Promise<string> {
+  if (env.MOCK_AI === "1") return mockModelText(system, user, meta);
+
   if (!env.AI_GATEWAY_ID && !warnedNoGateway) {
     warnedNoGateway = true;
     console.warn("[learn] AI_GATEWAY_ID is not set; model calls bypass AI Gateway.");
@@ -96,30 +142,41 @@ async function complete(
     return (body.content ?? []).map((part) => part.text ?? "").join("").trim();
   }
 
-  const result = await env.AI.run(
-    model as Parameters<Ai["run"]>[0],
-    {
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      response_format: { type: "json_object" },
-      reasoning_effort: "low",
-      max_tokens: maxTokens,
-      temperature,
-    } as never,
-    { gateway: gatewayOptions(env, meta, attempt) } as never,
-  );
-  return parseWorkersAiText(result);
+  const gateway = gatewayOptions(env, meta, attempt);
+  try {
+    return await runWorkers(env, model, system, user, meta, attempt, maxTokens, temperature, gateway);
+  } catch (error) {
+    if (gateway && isGatewayAuthError(error)) {
+      if (!warnedGatewayAuth) {
+        warnedGatewayAuth = true;
+        console.warn("[learn] AI Gateway rejected the call; retrying on Workers AI directly.");
+      }
+      try {
+        return await runWorkers(env, model, system, user, meta, attempt, maxTokens, temperature, undefined);
+      } catch (directError) {
+        return chatGptOrThrow(env, userId, system, user, maxTokens, directError);
+      }
+    }
+    return chatGptOrThrow(env, userId, system, user, maxTokens, error);
+  }
 }
 
-export function extractJson(raw: string): unknown {
-  const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim();
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start === -1 || end <= start) throw new Error("No JSON object in model output.");
-  return JSON.parse(trimmed.slice(start, end + 1));
+async function chatGptOrThrow(
+  env: LlmEnv,
+  userId: string | undefined,
+  system: string,
+  user: string,
+  maxTokens: number,
+  error: unknown,
+): Promise<string> {
+  if (!userId || !env.LEARN_CHATGPT_MODEL?.trim() || !env.USER_WORKSPACE) throw error;
+  const { chatGptText } = await import("../chatgpt-compute");
+  const text = await chatGptText(env, userId, system, user, maxTokens);
+  if (!text) throw error;
+  return text;
 }
+
+export { extractJson };
 
 /** JSON call with schema validation and up to 2 corrective retries (§3). */
 export async function llmJson<T>(env: LlmEnv, call: JsonCall<T>): Promise<T> {
@@ -137,6 +194,7 @@ export async function llmJson<T>(env: LlmEnv, call: JsonCall<T>): Promise<T> {
         attempt,
         call.maxTokens ?? 4096,
         call.temperature ?? 0.3,
+        call.userId,
       );
       return call.validate(extractJson(raw));
     } catch (error) {

@@ -15,6 +15,9 @@ const LEARN_QUEUES = {
   LEARN_Q_ASSEMBLE: "learn-assemble",
 } as const;
 const LEARN_DLQ = "learn-dlq";
+/** Remote bindings need CLOUDFLARE_API_TOKEN. Without it, `vite dev` uses local simulations. */
+const useRemote = Boolean(process.env.CLOUDFLARE_API_TOKEN);
+const devBinding = { remote: useRemote };
 const learnConsumer = (name: string, maxConcurrency: number | null = null) =>
   triggers.queue({ name, deadLetterQueue: LEARN_DLQ, maxBatchSize: 5, maxBatchTimeout: 1, maxRetries: 3, maxConcurrency });
 
@@ -43,6 +46,12 @@ export default defineConfig({
     ],
     compatibilityDate: "2026-10-30",
     compatibilityFlags: ["nodejs_compat"],
+    observability: {
+      enabled: true,
+      headSamplingRate: 1,
+      logs: { enabled: true, invocationLogs: true, persist: true },
+      traces: { enabled: true, persist: true },
+    },
     assets: {
       htmlHandling: "none",
       notFoundHandling: "none",
@@ -51,15 +60,17 @@ export default defineConfig({
     env: {
       ASSETS: bindings.assets(),
       IMAGES: bindings.images(),
-      AI: bindings.ai({ dev: { remote: true } }),
-      MEDIA: bindings.r2({ name: "church-hackathon-media", dev: { remote: true } }),
+      // Workers AI cannot run locally. `remote: false` is rejected by the Vite plugin.
+      // Without a token, vite.config.ts disables remote bindings and MOCK_AI answers plans.
+      AI: useRemote ? bindings.ai({ dev: { remote: true } }) : bindings.ai(),
+      MEDIA: bindings.r2({ name: "church-hackathon-media", dev: devBinding }),
       BIBLE: bindings.d1({
         name: "church-hackathon-bible",
         id: "bb9958b5-2734-42bc-8552-10b3b8ab6c6d",
-        dev: { remote: true },
+        dev: devBinding,
       }),
-      SCRIPTURE_VECTORS: bindings.vectorize({ name: "church-hackathon-scripture", dev: { remote: true } }),
-      LIBRARY_VECTORS: bindings.vectorize({ name: "church-hackathon-library", dev: { remote: true } }),
+      SCRIPTURE_VECTORS: bindings.vectorize({ name: "church-hackathon-scripture", dev: devBinding }),
+      LIBRARY_VECTORS: bindings.vectorize({ name: "church-hackathon-library", dev: devBinding }),
       CLOUDFLARE_ACCOUNT_ID: bindings.text("ddd73c1c002a8083f222af44faadeb0f"),
       LEARN_PLAN: bindings.durableObject({ worker: WORKER_NAME, exportName: "LearnPlanDO" }),
       USER_WORKSPACE: bindings.durableObject({ worker: WORKER_NAME, exportName: "UserWorkspaceDO" }),
@@ -74,15 +85,22 @@ export default defineConfig({
       LEARN_Q_ASSEMBLE: bindings.queue({ name: LEARN_QUEUES.LEARN_Q_ASSEMBLE }),
       // Learn secrets — must be declared here to reach Worker env from `.dev.vars` / wrangler secrets.
       EXA_API_KEY: bindings.secret(),
-      AI_GATEWAY_ID: bindings.secret(),
+      AI_GATEWAY_ID: bindings.text("study-buddy"),
+      // Empty means the Workers AI default (@cf/zai-org/glm-5.3-flash). Set a model id to override.
+      LEARN_MODEL_PLANNER: bindings.text(""),
+      LEARN_MODEL_WORKER: bindings.text(""),
       AI_GATEWAY_TOKEN: bindings.secret(),
-      // Optional model overrides: add `bindings.secret()` if you set LEARN_MODEL_* or ANTHROPIC_API_KEY in .dev.vars.
-      CLERK_SECRET_KEY: bindings.text(process.env.CLERK_SECRET_KEY || "CLERK_SECRET_KEY"),
-      CLERK_PUBLISHABLE_KEY: bindings.text(
-        process.env.CLERK_PUBLISHABLE_KEY ||
-          process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
-          "CLERK_PUBLISHABLE_KEY",
-      ),
+      SESSION_SECRET: bindings.secret(),
+      OPENAI_CLIENT_ID: bindings.secret(),
+      OPENAI_CLIENT_SECRET: bindings.secret(),
+      LEARN_CHATGPT_MODEL: bindings.secret(),
+      ADMIN_TOKEN: bindings.secret(),
+      BRAVE_SEARCH_API_KEY: bindings.secret(),
+      CLERK_SECRET_KEY: bindings.secret(),
+      CLERK_PUBLISHABLE_KEY: bindings.secret(),
+      // Baked at process start. Production deploys must leave these unset so both stay "".
+      DEV_AUTH: bindings.text(process.env.DEV_AUTH === "1" ? "1" : ""),
+      MOCK_AI: bindings.text(process.env.MOCK_AI === "1" ? "1" : ""),
     },
   }),
 });

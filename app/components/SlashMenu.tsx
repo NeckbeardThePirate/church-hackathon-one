@@ -174,7 +174,7 @@ export function SlashMenu({
       ref={listRef}
       role="listbox"
       aria-label="Insert block"
-      className="slash-menu overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--sidebar)] p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.4)]"
+      className="slash-menu overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--sidebar)] p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.4)] [scrollbar-gutter:stable]"
       style={style}
     >
       <p className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ink-muted)]">
