@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "church-hackathon",
+  "account_id": "ddd73c1c002a8083f222af44faadeb0f",
+  "compatibility_date": "2026-10-30",
+  "d1_databases": [
+    {
+      "binding": "BIBLE",
+      "database_name": "church-hackathon-bible",
+      "database_id": "bb9958b5-2734-42bc-8552-10b3b8ab6c6d"
+    }
+  ],
+  "vectorize": [
+    { "binding": "SCRIPTURE_VECTORS", "index_name": "church-hackathon-scripture" },
+    { "binding": "LIBRARY_VECTORS", "index_name": "church-hackathon-library" }
+  ]
+}

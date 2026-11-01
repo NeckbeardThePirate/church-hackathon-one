@@ -1,0 +1,43 @@
+{
+  "name": "church_hackathon",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.19.0",
+  "dependencies": {
+    "@clerk/backend": "^3.26.5",
+    "@clerk/react": "^6.18.4",
+    "@clerk/themes": "^2.4.57",
+    "@vinext/cloudflare": "^1.3.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-server-dom-webpack": "^19.3.1",
+    "vinext": "^1.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^2.0.0-beta.v.8",
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-rsc": "^0.5.38",
+    "cf": "^1.0.0-beta.26",
+    "tailwindcss": "latest",
+    "typescript": "latest",
+    "vite": "^8.3.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "CLOUDFLARE_ACCOUNT_ID=ddd73c1c002a8083f222af44faadeb0f vite dev",
+    "build": "vite build",
+    "start": "vite preview",
+    "deploy": "vinext-cloudflare deploy",
+    "bible:migrate": "wrangler d1 execute church-hackathon-bible --local --file=migrations/0001_bsb.sql",
+    "bible:seed": "node --experimental-strip-types scripts/seed-bsb.mts",
+    "bible:fts": "wrangler d1 execute church-hackathon-bible --remote --file=migrations/0002_bible_fts.sql",
+    "bible:embed": "node --experimental-strip-types scripts/embed-bsb.mts --corpus=verses",
+    "library:schema": "wrangler d1 execute church-hackathon-bible --remote --file=migrations/0003_library.sql",
+    "library:embed": "node --experimental-strip-types scripts/embed-bsb.mts --corpus=fathers && node --experimental-strip-types scripts/embed-bsb.mts --corpus=confessions",
+    "bible:seed:remote": "node --experimental-strip-types scripts/seed-bsb.mts --remote"
+  }
+}

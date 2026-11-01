@@ -1,0 +1,73 @@
+import { createClerkClient } from "@clerk/backend";
+import { env } from "cloudflare:workers";
+
+export type AuthContext = {
+  userId: string;
+};
+
+function readClerkSecretKey(): string | undefined {
+  const fromBinding = env.CLERK_SECRET_KEY;
+  if (fromBinding && fromBinding !== "CLERK_SECRET_KEY") return fromBinding;
+  // Vinext loads `.env.local` into process.env in local dev.
+  const fromProcess = typeof process !== "undefined" ? process.env.CLERK_SECRET_KEY : undefined;
+  return fromProcess?.trim() || undefined;
+}
+
+function readClerkPublishableKey(): string | undefined {
+  const fromBinding = env.CLERK_PUBLISHABLE_KEY;
+  if (fromBinding && fromBinding !== "CLERK_PUBLISHABLE_KEY" && /^(pk_test_|pk_live_)/.test(fromBinding)) {
+    return fromBinding;
+  }
+  if (typeof process === "undefined") return undefined;
+  const fromProcess =
+    process.env.CLERK_PUBLISHABLE_KEY?.trim() || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim();
+  return fromProcess && /^(pk_test_|pk_live_)/.test(fromProcess) ? fromProcess : undefined;
+}
+
+export async function requireUser(request: Request): Promise<AuthContext | Response> {
+  try {
+    const secretKey = readClerkSecretKey();
+    if (!secretKey) {
+      return Response.json(
+        {
+          error:
+            "Authentication is not configured. Set CLERK_SECRET_KEY in .env.local / .dev.vars (dev) or Worker secrets (prod).",
+        },
+        { status: 503 },
+      );
+    }
+
+    const publishableKey = readClerkPublishableKey();
+    const clerk = createClerkClient({
+      secretKey,
+      ...(publishableKey ? { publishableKey } : {}),
+    });
+
+    const requestState = await clerk.authenticateRequest(request, {
+      authorizedParties: [new URL(request.url).origin],
+    });
+
+    if (!requestState.isSignedIn) {
+      return Response.json({ error: "Sign in required." }, { status: 401 });
+    }
+
+    const auth = requestState.toAuth();
+    if (!auth.userId) {
+      return Response.json({ error: "Sign in required." }, { status: 401 });
+    }
+
+    return { userId: auth.userId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Authentication failed.";
+    return Response.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function withAuth(
+  request: Request,
+  handler: (auth: AuthContext) => Promise<Response>,
+): Promise<Response> {
+  const auth = await requireUser(request);
+  if (auth instanceof Response) return auth;
+  return handler(auth);
+}

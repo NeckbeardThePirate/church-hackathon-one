@@ -1,0 +1,36 @@
+# Workers AI + remote R2 in local dev use your Cloudflare account.
+# The Vite plugin defaults to remote bindings; authenticate once with:
+#   npx wrangler login
+# or set a token (Edit Cloudflare Workers + R2 read/write):
+#   CLOUDFLARE_API_TOKEN=...
+#
+# Optional: pin the account used for remote bindings
+# CLOUDFLARE_ACCOUNT_ID=ddd73c1c002a8083f222af44faadeb0f
+#
+# Berean Study Bible (BSB) in D1 — one-time seed:
+#   npm run bible:seed          # local wrangler DB (optional)
+#   npm run bible:seed:remote   # production D1 (required for `npm run dev` — BIBLE uses remote D1)
+# Quick test (John only):
+#   node --experimental-strip-types scripts/seed-bsb.mts --book=john
+#
+# Clerk (https://dashboard.clerk.com/~/api-keys)
+# Also copy publishable key to .env.local as NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+CLERK_SECRET_KEY=sk_test_REPLACE_ME
+CLERK_PUBLISHABLE_KEY=pk_test_REPLACE_ME
+#
+# Optional: real article/video results for Go Deeper "Further reading"
+# (https://api-dashboard.search.brave.com). Without it, links open curated site searches.
+# BRAVE_SEARCH_API_KEY=
+#
+# Learn pipeline (docs/learn-plan.md). Declare matching names in cloudflare.config.ts (bindings.secret()).
+# AI Gateway ID: every Learn model call routes through it. Unset = direct Workers AI (warns).
+# AI_GATEWAY_ID=
+# AI_GATEWAY_TOKEN=            # only if the gateway is authenticated
+# Model per role. Workers AI id, or "anthropic/<model>" via the gateway's Anthropic provider.
+# LEARN_MODEL_PLANNER=anthropic/claude-sonnet-5-5
+# LEARN_MODEL_WORKER=@cf/zai-org/glm-5.3-flash
+# ANTHROPIC_API_KEY=           # omit if the gateway stores the key (BYOK)
+# Exa — direct api.exa.ai (Learn article/video research + /contents verify). Not via AI Gateway yet.
+# Unset = research stage skips; plans still build without linked resources.
+# Prod: npx wrangler secret put EXA_API_KEY
+# EXA_API_KEY=
