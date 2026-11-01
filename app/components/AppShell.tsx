@@ -2,6 +2,7 @@
 
 import { UserButton } from "@clerk/react";
 import type { ReactNode } from "react";
+import { useClerkKey } from "./ClerkAppProvider";
 import { defaultTitle, PROJECT_KIND_LABEL, type Project } from "../lib/projects";
 
 type AppShellProps = {
@@ -31,6 +32,7 @@ export function AppShell({
   onNewProject,
   sidebarCompact = false,
 }: AppShellProps) {
+  const { key: clerkKey } = useClerkKey();
   // Top-level pages by recency, each followed by its sub-pages (indented).
   const ids = new Set(projects.map((p) => p.id));
   const byRecent = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -131,7 +133,7 @@ export function AppShell({
             sidebarCompact ? "justify-center px-0" : "px-2"
           }`}
         >
-          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
+          {clerkKey ? (
             <UserButton
               appearance={{
                 elements: {

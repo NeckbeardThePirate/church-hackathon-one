@@ -17,7 +17,7 @@ It is a [vinext](https://github.com/cloudflare/vinext) app deployed as one Cloud
 
 Sign in with ChatGPT (OpenID Connect + PKCE) is the path that does not need another vendor. On a public host it needs `OPENAI_CLIENT_ID` from an OpenAI OAuth client you register. On `http://127.0.0.1` the open-source dynamic client can register without a secret.
 
-Clerk still works when `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` are set.
+Clerk sign-in is offered alongside ChatGPT when `CLERK_SECRET_KEY` is set. The publishable key comes from `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_PUBLISHABLE_KEY` if set, otherwise the Worker derives it from the secret key and serves it at `/api/auth/providers`.
 
 `DEV_AUTH=1` enables a loopback-only “Continue on this computer” button. It is refused on every other host. Leave it unset in production.
 

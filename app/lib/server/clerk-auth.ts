@@ -8,7 +8,7 @@ export type AuthContext = {
 };
 
 export function readClerkSecretKey(): string | undefined {
-  const fromBinding = env.CLERK_SECRET_KEY;
+  const fromBinding = env.CLERK_SECRET_KEY?.trim();
   if (fromBinding && fromBinding !== "CLERK_SECRET_KEY") return fromBinding;
   // Vinext loads `.env.local` into process.env in local dev.
   const fromProcess = typeof process !== "undefined" ? process.env.CLERK_SECRET_KEY : undefined;
@@ -26,6 +26,46 @@ export function readClerkPublishableKey(): string | undefined {
   return fromProcess && /^(pk_test_|pk_live_)/.test(fromProcess) ? fromProcess : undefined;
 }
 
+let derivedPublishableKey: Promise<string | undefined> | undefined;
+let derivedFailedAt = 0;
+
+/**
+ * The publishable key is public (it encodes the Clerk frontend API host). When it is not
+ * configured, derive it from the secret key so the Worker only needs CLERK_SECRET_KEY.
+ */
+export async function resolveClerkPublishableKey(): Promise<string | undefined> {
+  const configured = readClerkPublishableKey();
+  if (configured) return configured;
+  const secretKey = readClerkSecretKey();
+  if (!secretKey) return undefined;
+  if (!derivedPublishableKey && Date.now() - derivedFailedAt < 60_000) return undefined;
+  derivedPublishableKey ??= (async () => {
+    try {
+      const response = await fetch("https://api.clerk.com/v1/domains", {
+        headers: { authorization: `Bearer ${secretKey}` },
+      });
+      if (!response.ok) {
+        console.warn(`Clerk publishable key lookup failed: ${response.status}`);
+        return undefined;
+      }
+      const body = (await response.json()) as { data?: { is_satellite?: boolean; frontend_api_url?: string }[] };
+      const domain = body.data?.find((entry) => !entry.is_satellite && entry.frontend_api_url);
+      if (!domain?.frontend_api_url) return undefined;
+      const host = new URL(domain.frontend_api_url).host;
+      const prefix = secretKey.startsWith("sk_live_") ? "pk_live_" : "pk_test_";
+      return prefix + btoa(`${host}$`).replace(/=+$/, "");
+    } catch {
+      return undefined;
+    }
+  })();
+  const key = await derivedPublishableKey;
+  if (!key) {
+    derivedPublishableKey = undefined;
+    derivedFailedAt = Date.now();
+  }
+  return key;
+}
+
 export async function requireUser(request: Request): Promise<AuthContext | Response> {
   try {
     const secret = resolveSessionSecret(request, env.SESSION_SECRET);
@@ -37,11 +77,12 @@ export async function requireUser(request: Request): Promise<AuthContext | Respo
       return Response.json({ error: "Sign in required." }, { status: 401 });
     }
 
-    const publishableKey = readClerkPublishableKey();
-    const clerk = createClerkClient({
-      secretKey,
-      ...(publishableKey ? { publishableKey } : {}),
-    });
+    const publishableKey = await resolveClerkPublishableKey();
+    if (!publishableKey) {
+      // Clerk is not usable (bad secret or no key); treat as signed out instead of failing.
+      return Response.json({ error: "Sign in required." }, { status: 401 });
+    }
+    const clerk = createClerkClient({ secretKey, publishableKey });
 
     const requestState = await clerk.authenticateRequest(request, {
       authorizedParties: [new URL(request.url).origin],

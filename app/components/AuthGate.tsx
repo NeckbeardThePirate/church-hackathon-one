@@ -2,6 +2,7 @@
 
 import { ClerkLoading, RedirectToSignIn, Show } from "@clerk/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { useClerkKey } from "./ClerkAppProvider";
 import { SignInChoices } from "./SignInChoices";
 
 function AuthLoading() {
@@ -13,7 +14,7 @@ function AuthLoading() {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const { key: publishableKey, ready: clerkReady } = useClerkKey();
   const [session, setSession] = useState<"loading" | "in" | "out">("loading");
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  if (session === "loading") return <AuthLoading />;
+  if (session === "loading" || !clerkReady) return <AuthLoading />;
   if (session === "in") return <>{children}</>;
 
   if (!publishableKey) return <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-6 [scrollbar-gutter:stable]"><SignInChoices /></div>;

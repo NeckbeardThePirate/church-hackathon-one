@@ -1,10 +1,11 @@
 "use client";
 
 import { SignUp } from "@clerk/react";
+import { useClerkKey } from "../../components/ClerkAppProvider";
 import { SignInChoices } from "../../components/SignInChoices";
 
 export default function SignUpPage() {
-  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const { key: publishableKey } = useClerkKey();
   if (!publishableKey) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]">
