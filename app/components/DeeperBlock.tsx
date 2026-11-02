@@ -93,7 +93,7 @@ export function DeeperDock({
           <p className="border-b border-[var(--line)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">
             Go Deeper threads on this page
           </p>
-          <ul className="max-h-72 overflow-y-auto py-1">
+          <ul className="max-h-72 overflow-y-auto py-1 [scrollbar-gutter:stable]">
             {minimized.map((t) => {
               const { title, replies } = summary(t.deeper);
               return (

@@ -7,6 +7,7 @@ import { findBibleReferences } from "@/app/lib/bible/parse-reference";
 import {
   LESSON_BANDS,
   type ArticleResource,
+  type BookResource,
   type VideoResource,
   type Complexity,
   type LearnLesson,
@@ -20,7 +21,9 @@ import {
 } from "@/app/lib/learn/types";
 import { fetchPassageFromD1 } from "../bible-db";
 import { exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId, youtubeOembed } from "./exa";
+import { citeLibrary } from "./library-cite";
 import { list, llmJson, num, obj, str, strList, type LlmMeta, type LlmRole } from "./llm";
+import { openSourceQueryOrder, searchOpenLibrary, searchWikipedia } from "./open-sources";
 import type { LearnPlanDO } from "./plan-do";
 import { enqueue, enqueueMany, type LearnEnv, type LearnMessage } from "./queues";
 
@@ -41,7 +44,8 @@ async function llm<T>(
 ): Promise<T> {
   if (!(await ctx.stub.spend("llm", 1))) throw new BudgetExhausted("LLM call budget reached.");
   const meta: LlmMeta = { planId: ctx.msg.planId, stage: ctx.msg.stage, lessonId: ctx.msg.lessonId };
-  return llmJson(ctx.env, { role, meta, ...call });
+  const info = await ctx.stub.info().catch(() => null);
+  return llmJson(ctx.env, { role, meta, ...call, userId: info?.userId });
 }
 
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)}…` : text);
@@ -171,6 +175,57 @@ type ResearchScratch = { articles: Candidate[]; videos: Candidate[] };
 
 const ARTICLE_TEXT_CHARS = 3000;
 
+/** Wikipedia + Open Library. No API key. Videos stay empty without Exa or a YouTube key. */
+async function researchOpenSources(ctx: Ctx, lesson: LearnLesson, query: string): Promise<void> {
+  const lessonId = lesson.id;
+  const next = { planId: ctx.msg.planId, lessonId, round: ctx.msg.round };
+  let articles: Openish[] = [];
+  let books: BookResource[] = [];
+  try {
+    const queries = openSourceQueryOrder(query, lesson.title, lesson.searchHints);
+    let wiki: Awaited<ReturnType<typeof searchWikipedia>> = [];
+    for (const candidate of queries) {
+      wiki = await searchWikipedia(candidate, 3).catch(() => []);
+      if (wiki.length) break;
+    }
+    const catalog = await searchOpenLibrary(queries[0] || query, 2).catch(() => []);
+    articles = wiki.map((article) => ({
+      url: article.url,
+      title: article.title,
+      text: article.text,
+      siteName: article.siteName,
+    }));
+    books = catalog.map((book) => ({
+      url: book.url,
+      title: book.title,
+      authors: book.authors,
+      review: "Catalog record from Open Library. Ratings, when shown, come from that record.",
+      reviewBasis: "api" as const,
+      ...(book.year ? { year: book.year } : {}),
+      ...(book.averageRating != null ? { averageRating: book.averageRating } : {}),
+      ...(book.ratingsCount != null ? { ratingsCount: book.ratingsCount } : {}),
+    }));
+  } catch (error) {
+    console.warn("[learn] open-source research failed:", error instanceof Error ? error.message : error);
+  }
+
+  if (books.length) {
+    const fresh = await ctx.stub.getLesson(lessonId);
+    if (fresh) await ctx.stub.putLesson({ ...fresh, books });
+  }
+  await ctx.stub.putScratch(`research:${lessonId}`, { articles, videos: [] } satisfies ResearchScratch);
+  await ctx.stub.event(
+    "research",
+    `L${lesson.order}: ${articles.length} open articles, ${books.length} catalog books${
+      articles.length || books.length ? "" : " (search returned nothing)"
+    }`,
+    lessonId,
+  );
+  await enqueue(ctx.env, { ...next, stage: articles.length ? "review" : "teach" });
+}
+
+type Openish = { url: string; title: string; text: string; siteName?: string };
+
 export async function runResearch(ctx: Ctx): Promise<void> {
   const lessonId = requireLessonId(ctx);
   const lesson = await ctx.stub.getLesson(lessonId);
@@ -180,8 +235,7 @@ export async function runResearch(ctx: Ctx): Promise<void> {
   const next = { planId: ctx.msg.planId, lessonId, round: ctx.msg.round };
 
   if (!apiKey) {
-    await ctx.stub.event("research", `L${lesson.order}: Exa not configured, skipping videos and articles.`, lessonId);
-    await enqueue(ctx.env, { ...next, stage: "teach" });
+    await researchOpenSources(ctx, lesson, scope.title);
     return;
   }
 
@@ -460,6 +514,14 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
   const { readings, dropped } = scope.isFaithRelevant
     ? await verifyScripture(ctx.env, result.refs.slice(0, 3))
     : { readings: [], dropped: [] as string[] };
+  const library = scope.isFaithRelevant
+    ? await citeLibrary(
+        ctx.env,
+        `${lesson.title}. ${lesson.objectives.join(". ")}`,
+        readings.map((reading) => reading.reference),
+        info.options.perspective,
+      )
+    : [];
 
   const warnings = dropped.map((ref) => `Scripture reference dropped (did not resolve in BSB): ${ref}`);
   await ctx.stub.putLesson({
@@ -468,12 +530,15 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
     teaching: result.teaching,
     quiz: result.quiz,
     scripture: readings,
+    library,
     warnings,
   });
   await ctx.stub.event(
     "teach",
     `L${lesson.order} ${lesson.title}: ${result.teaching.length} blocks, ${result.quiz.length} quiz items${
-      scope.isFaithRelevant ? `, ${readings.length} readings${dropped.length ? ` (${dropped.length} dropped)` : ""}` : ""
+      scope.isFaithRelevant
+        ? `, ${readings.length} readings, ${library.length} cited sources${dropped.length ? ` (${dropped.length} dropped)` : ""}`
+        : ""
     }`,
     lessonId,
   );

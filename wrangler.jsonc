@@ -1,5 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  // Deploy source of truth is cloudflare.config.ts (vinext / cf). Do not `wrangler deploy` this stub.
   "name": "church-hackathon",
   "account_id": "ddd73c1c002a8083f222af44faadeb0f",
   "compatibility_date": "2026-10-30",

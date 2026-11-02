@@ -258,6 +258,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
         articles: [],
         books: [],
         scripture: [],
+        library: [],
         quiz: [],
         warnings: [],
       };
