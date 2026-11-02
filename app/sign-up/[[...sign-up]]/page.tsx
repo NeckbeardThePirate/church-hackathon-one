@@ -8,14 +8,16 @@ export default function SignUpPage() {
   const { key: publishableKey } = useClerkKey();
   if (!publishableKey) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]">
+      <div className="safe-area-x flex min-h-dvh items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]">
         <SignInChoices />
       </div>
     );
   }
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]">
-      <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />
+    <div className="safe-area-x flex min-h-dvh items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]">
+      <div className="w-full max-w-[min(100%,420px)]">
+        <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />
+      </div>
     </div>
   );
 }

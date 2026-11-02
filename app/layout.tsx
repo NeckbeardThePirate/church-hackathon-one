@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, Newsreader } from "next/font/google";
 import { ClerkAppProvider } from "./components/ClerkAppProvider";
 import "./globals.css";
@@ -15,15 +15,21 @@ const serif = Newsreader({
 });
 
 export const metadata: Metadata = {
-  title: "Notes — Church Hackathon",
-  description: "A Notion-like writing space on Cloudflare Workers",
+  title: "StudyBuddy",
+  description: "Discipleship study plans cited to Scripture, the confessions, and the church fathers.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   themeColor: "#191919",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`dark ${sans.variable} ${serif.variable}`}>
-      <body className="bg-[var(--canvas)] font-sans text-[var(--ink)] antialiased">
+      <body className="min-h-dvh bg-[var(--canvas)] font-sans text-[var(--ink)] antialiased">
         <ClerkAppProvider>{children}</ClerkAppProvider>
       </body>
     </html>

@@ -165,7 +165,7 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
 
   if (!planId) {
     return (
-      <section className="mx-auto flex w-full max-w-[640px] flex-col gap-8 px-6 pb-24 pt-16 sm:px-10">
+      <section className="mx-auto flex w-full max-w-[640px] flex-col gap-8 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-10 sm:pt-16">
         <header className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Learn · New plan</p>
           <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[var(--ink)]">What do you want to learn?</h1>
@@ -220,7 +220,7 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
 
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-2 text-sm font-medium text-[var(--ink)]">Scripture readings</legend>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {(
               [
                 ["auto", "When relevant"],
@@ -232,7 +232,7 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
                 key={value}
                 type="button"
                 onClick={() => setIncludeScripture(value)}
-                className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                className={`min-h-11 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
                   includeScripture === value
                     ? "border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] bg-[var(--sidebar-active)] text-[var(--ink)]"
                     : "border-[var(--line)] text-[var(--ink-muted)] hover:text-[var(--ink)]"
@@ -246,16 +246,16 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
 
         {error ? <p className="text-sm text-[#c0533f]">{error}</p> : null}
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <button
             type="button"
             disabled={starting || topic.trim().length < 3}
             onClick={start}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-11 rounded-lg bg-[var(--accent)] px-4 py-2.5 text-base font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
           >
             {starting ? "Starting…" : "Build my plan"}
           </button>
-          <button type="button" onClick={onSkip} className="text-sm text-[var(--ink-muted)] hover:text-[var(--ink)]">
+          <button type="button" onClick={onSkip} className="min-h-11 text-base text-[var(--ink-muted)] hover:text-[var(--ink)]">
             Skip and write notes instead
           </button>
         </div>
@@ -264,7 +264,7 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-6 pb-24 pt-16 sm:px-10">
+    <section className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-10 sm:pt-16">
       <header className="flex flex-col gap-1">
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Learn · Building plan</p>
         <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[var(--ink)]">

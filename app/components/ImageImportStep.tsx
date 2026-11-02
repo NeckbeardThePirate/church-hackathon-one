@@ -302,7 +302,7 @@ export function ImageImportStep({ projectId, kind, onComplete, onSkip }: ImageIm
 
   return (
     <section
-      className={`mx-auto flex w-full flex-col gap-8 px-6 pb-24 pt-12 sm:px-8 sm:pt-14 ${
+      className={`mx-auto flex w-full flex-col gap-8 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-8 sm:pt-14 ${
         showWorkspace ? "max-w-[1280px]" : "max-w-[720px]"
       }`}
     >
@@ -413,7 +413,7 @@ export function ImageImportStep({ projectId, kind, onComplete, onSkip }: ImageIm
             />
           </div>
 
-          <div className="flex min-h-[min(560px,calc(100vh-11rem))] min-w-0 flex-col gap-3">
+          <div className="flex min-h-[min(560px,calc(100dvh-11rem))] min-w-0 flex-col gap-3">
             <div>
               <p className="text-sm font-medium text-[var(--ink)]">
                 Combined structured note
@@ -425,7 +425,7 @@ export function ImageImportStep({ projectId, kind, onComplete, onSkip }: ImageIm
 
             {pipelineBusy && editorBlocks.length === 0 ? (
               <div
-                className="flex min-h-[min(480px,calc(100vh-16rem))] flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--canvas)] px-6 py-8 text-center"
+                className="flex min-h-[min(480px,calc(100dvh-16rem))] flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--canvas)] px-6 py-8 text-center"
                 aria-live="polite"
                 aria-busy="true"
               >
@@ -456,7 +456,7 @@ export function ImageImportStep({ projectId, kind, onComplete, onSkip }: ImageIm
                 ) : null}
                 <div
                   id="verified-text"
-                  className="min-h-[min(480px,calc(100vh-16rem))] w-full flex-1 overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--canvas)] px-6 py-5 [scrollbar-gutter:stable]"
+                  className="min-h-[min(480px,calc(100dvh-16rem))] w-full flex-1 overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--canvas)] px-6 py-5 [scrollbar-gutter:stable]"
                 >
                   <RichBlockEditor
                     blocks={editorBlocks.length ? editorBlocks : placeholderBlocks}

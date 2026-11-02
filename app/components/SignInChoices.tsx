@@ -51,7 +51,7 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className={`w-full ${compact ? "" : "max-w-md"} [scrollbar-gutter:stable]`}>
-      <div className="rounded-xl border border-[var(--line)] bg-[var(--sidebar)] p-6 text-[var(--ink)]">
+      <div className="safe-area-x rounded-xl border border-[var(--line)] bg-[var(--sidebar)] p-5 sm:p-6 text-[var(--ink)]">
         <h1 className="font-serif text-2xl tracking-[-0.02em]">StudyBuddy</h1>
         <p className="mt-2 text-sm leading-relaxed text-[var(--ink-muted)]">
           Turn a topic or your notes into a study plan cited to Scripture, the Reformed confessions, and the church fathers.
@@ -59,7 +59,7 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
         <div className="mt-5 flex flex-col gap-2">
           <a
             href="/api/auth/chatgpt/start"
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-center text-sm font-medium text-[#1c1a16]"
+            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--accent)] px-4 py-2.5 text-center text-base font-medium text-[#1c1a16]"
           >
             Continue with ChatGPT
           </a>
@@ -68,7 +68,7 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
               type="button"
               onClick={() => void continueLocally()}
               disabled={pending}
-              className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm text-[var(--ink)] hover:bg-[var(--sidebar-active)] disabled:opacity-50"
+              className="min-h-11 rounded-lg border border-[var(--line)] px-4 py-2.5 text-base text-[var(--ink)] hover:bg-[var(--sidebar-active)] disabled:opacity-50"
             >
               {pending ? "Signing in…" : "Continue on this computer"}
             </button>

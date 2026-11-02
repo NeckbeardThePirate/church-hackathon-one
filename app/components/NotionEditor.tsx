@@ -33,7 +33,7 @@ function SourceImagesRail({ images }: { images: SourceImage[] }) {
       className="hidden shrink-0 lg:block lg:w-[200px] xl:w-[220px]"
       aria-label="Source images"
     >
-      <div className="sticky top-[72px] flex max-h-[calc(100vh-6rem)] flex-col gap-2 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
+      <div className="sticky top-[72px] flex max-h-[calc(100dvh-6rem)] flex-col gap-2 overflow-y-auto pr-1 [scrollbar-gutter:stable]">
         <p className="px-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--ink-muted)]">
           Sources · {images.length}
         </p>
@@ -167,7 +167,7 @@ export function NotionEditor({
     <div
       ref={rootRef}
       onKeyDownCapture={handleEditorKeyDown}
-      className={`mx-auto flex w-full gap-8 px-6 pb-24 pt-16 sm:px-8 sm:pt-[72px] ${
+      className={`mx-auto flex w-full gap-8 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-8 sm:pt-[72px] sm:pb-24 ${
         hasImages ? "max-w-[1120px] lg:max-w-[980px] xl:max-w-[1040px]" : "max-w-[720px]"
       }`}
     >

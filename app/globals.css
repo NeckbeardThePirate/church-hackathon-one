@@ -21,6 +21,40 @@ body {
   color: var(--ink);
 }
 
+@supports (height: 100dvh) {
+  .min-h-screen-safe {
+    min-height: 100dvh;
+  }
+}
+
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-area-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+input,
+textarea,
+select {
+  font-size: 16px;
+  scroll-margin-bottom: 7rem;
+}
+
+.learn-article,
+.learn-article-body,
+.bible-callout-body,
+.editor-block {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .editable-surface {
   caret-color: var(--caret);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { UserButton } from "@clerk/react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
 import { defaultTitle, PROJECT_KIND_LABEL, type Project } from "../lib/projects";
 
@@ -11,7 +11,7 @@ type AppShellProps = {
   activeProjectId: string | null;
   onSelectProject: (id: string) => void;
   onNewProject: () => void;
-  /** Narrow rail while import / OCR is in progress */
+  /** Narrow rail while import / OCR is in progress (desktop only; mobile uses the drawer). */
   sidebarCompact?: boolean;
 };
 
@@ -33,7 +33,9 @@ export function AppShell({
   sidebarCompact = false,
 }: AppShellProps) {
   const { key: clerkKey } = useClerkKey();
-  // Top-level pages by recency, each followed by its sub-pages (indented).
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const compactDesktop = sidebarCompact;
+
   const ids = new Set(projects.map((p) => p.id));
   const byRecent = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
   const sorted: (Project & { depth: number })[] = [];
@@ -43,42 +45,124 @@ export function AppShell({
   };
   for (const page of byRecent.filter((p) => !p.parentId || !ids.has(p.parentId))) visit(page, 0);
 
+  const selectProject = useCallback(
+    (id: string) => {
+      onSelectProject(id);
+      setMobileNavOpen(false);
+    },
+    [onSelectProject],
+  );
+
+  const openNewProject = useCallback(() => {
+    onNewProject();
+    setMobileNavOpen(false);
+  }, [onNewProject]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileNavOpen]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileNavOpen]);
+
+  const sidebarInnerCompact = compactDesktop;
+
   return (
-    <div className="flex min-h-screen bg-[var(--canvas)] text-[var(--ink)]">
+    <div className="flex min-h-dvh bg-[var(--canvas)] text-[var(--ink)]">
+      <header className="safe-area-top safe-area-x fixed inset-x-0 top-0 z-50 flex h-12 items-center gap-2 border-b border-[var(--line)] bg-[var(--sidebar)] px-3 md:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileNavOpen(true)}
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-[var(--ink)] hover:bg-[var(--sidebar-active)]"
+          aria-label="Open projects menu"
+          aria-expanded={mobileNavOpen}
+        >
+          <span className="flex flex-col gap-1" aria-hidden>
+            <span className="block h-0.5 w-5 rounded-full bg-current" />
+            <span className="block h-0.5 w-5 rounded-full bg-current" />
+            <span className="block h-0.5 w-5 rounded-full bg-current" />
+          </span>
+        </button>
+        <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">Projects</p>
+        <button
+          type="button"
+          onClick={openNewProject}
+          className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] px-3 text-sm font-medium text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
+          aria-label="New project"
+        >
+          New
+        </button>
+      </header>
+
+      {mobileNavOpen ? (
+        <button
+          type="button"
+          className="fixed inset-0 z-[55] bg-black/55 md:hidden"
+          aria-label="Close projects menu"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      ) : null}
+
       <aside
-        className={`flex shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] py-4 transition-[width,padding] duration-300 ease-out ${
-          sidebarCompact ? "w-[56px] px-1.5" : "w-[240px] px-3"
+        className={`safe-area-top safe-area-bottom fixed inset-y-0 left-0 z-[60] flex w-[min(100vw-2.5rem,280px)] shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] py-4 transition-transform duration-300 ease-out max-md:pointer-events-none md:static md:z-auto md:w-[240px] md:translate-x-0 md:pointer-events-auto md:px-3 ${
+          mobileNavOpen ? "max-md:translate-x-0 max-md:pointer-events-auto px-3" : "-translate-x-full px-3 md:translate-x-0"
+        } ${
+          compactDesktop
+            ? "md:w-[56px] md:px-1.5"
+            : ""
         }`}
         aria-label="Projects"
       >
+        <div className="mb-2 flex items-center justify-between gap-2 px-2 md:hidden">
+          <p className="text-sm font-medium text-[var(--ink)]">Projects</p>
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            className="inline-flex size-11 items-center justify-center rounded-md text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
+            aria-label="Close projects menu"
+          >
+            ✕
+          </button>
+        </div>
         <div
-          className={`flex pb-3 ${sidebarCompact ? "flex-col items-center gap-2 px-0" : "items-center justify-between gap-2 px-2"}`}
+          className={`flex pb-3 ${sidebarInnerCompact ? "hidden flex-col items-center gap-2 px-0 md:flex" : "items-center justify-between gap-2 px-2"}`}
         >
-          {!sidebarCompact ? (
-            <div className="min-w-0">
+          {!sidebarInnerCompact ? (
+            <div className="hidden min-w-0 md:block">
               <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Workspace</p>
               <p className="mt-2 truncate text-sm font-medium text-[var(--ink)]">Projects</p>
             </div>
           ) : null}
           <button
             type="button"
-            onClick={onNewProject}
+            onClick={openNewProject}
             title="New project"
             aria-label="New project"
-            className={`shrink-0 rounded-md border border-[var(--line)] font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] ${
-              sidebarCompact ? "flex size-8 items-center justify-center p-0 text-lg leading-none" : "px-2 py-1 text-xs"
+            className={`hidden shrink-0 rounded-md border border-[var(--line)] font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] md:inline-flex ${
+              sidebarInnerCompact ? "size-11 items-center justify-center p-0 text-lg leading-none" : "min-h-11 px-3 py-2 text-xs"
             }`}
           >
-            {sidebarCompact ? "+" : "New"}
+            {sidebarInnerCompact ? "+" : "New"}
           </button>
         </div>
         <nav
           className={`flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable] ${
-            sidebarCompact ? "items-center gap-1.5 px-0" : "gap-0.5 px-1"
+            sidebarInnerCompact ? "hidden items-center gap-1.5 px-0 md:flex" : "gap-0.5 px-1"
           }`}
         >
           {sorted.length === 0 ? (
-            !sidebarCompact ? (
+            !sidebarInnerCompact ? (
               <p className="px-2 py-2 text-xs leading-relaxed text-[var(--ink-muted)]">
                 No projects yet. Choose Lesson, Study, or Learn to start one.
               </p>
@@ -91,18 +175,18 @@ export function AppShell({
                 <button
                   key={project.id}
                   type="button"
-                  onClick={() => onSelectProject(project.id)}
-                  style={sidebarCompact ? undefined : { paddingLeft: `${0.5 + project.depth * 0.9}rem` }}
-                  title={sidebarCompact ? label : undefined}
-                  aria-label={sidebarCompact ? label : undefined}
+                  onClick={() => selectProject(project.id)}
+                  style={sidebarInnerCompact ? undefined : { paddingLeft: `${0.5 + project.depth * 0.9}rem` }}
+                  title={sidebarInnerCompact ? label : undefined}
+                  aria-label={sidebarInnerCompact ? label : undefined}
                   className={`flex rounded-md text-left text-sm transition-colors ${
-                    sidebarCompact
-                      ? `size-9 shrink-0 items-center justify-center p-0 ${
+                    sidebarInnerCompact
+                      ? `hidden size-11 shrink-0 items-center justify-center p-0 md:flex ${
                           active
                             ? "bg-[var(--sidebar-active)] ring-1 ring-[color-mix(in_srgb,var(--accent)_25%,var(--line))]"
                             : "hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)]"
                         }`
-                      : `w-full items-start gap-2 py-1.5 pr-2 ${
+                      : `min-h-11 w-full items-start gap-2 py-2 pr-2 ${
                           active
                             ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
                             : "text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]"
@@ -112,10 +196,10 @@ export function AppShell({
                   <span
                     aria-hidden
                     className={`shrink-0 rounded-full ${kindDot(project.kind)} ${
-                      sidebarCompact ? "size-2.5" : "mt-1.5 size-2"
+                      sidebarInnerCompact ? "size-2.5" : "mt-1.5 size-2"
                     }`}
                   />
-                  {!sidebarCompact ? (
+                  {!sidebarInnerCompact ? (
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{defaultTitle(project)}</span>
                       <span className="block truncate text-xs text-[var(--ink-muted)]">
@@ -130,14 +214,14 @@ export function AppShell({
         </nav>
         <div
           className={`mt-auto flex items-center gap-3 border-t border-[var(--line)] pt-3 ${
-            sidebarCompact ? "justify-center px-0" : "px-2"
+            sidebarInnerCompact ? "hidden justify-center px-0 md:flex" : "px-2"
           }`}
         >
           {clerkKey ? (
             <UserButton
               appearance={{
                 elements: {
-                  avatarBox: sidebarCompact ? "size-8" : "size-9",
+                  avatarBox: sidebarInnerCompact ? "size-9" : "size-10",
                 },
               }}
             />
@@ -154,13 +238,16 @@ export function AppShell({
                 window.location.assign("/");
               });
             }}
-            className={`text-xs text-[var(--ink-muted)] hover:text-[var(--ink)] ${sidebarCompact ? "sr-only" : ""}`}
+            className={`min-h-11 text-xs text-[var(--ink-muted)] hover:text-[var(--ink)] ${sidebarInnerCompact ? "sr-only" : ""}`}
           >
             Sign out
           </button>
         </div>
       </aside>
-      <div className="relative min-w-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto">{children}</div>
+
+      <div className="relative min-w-0 flex-1 overflow-x-hidden pt-12 md:pt-0 [scrollbar-gutter:stable]">
+        <div className="h-full min-h-0 overflow-y-auto [scrollbar-gutter:stable]">{children}</div>
+      </div>
     </div>
   );
 }

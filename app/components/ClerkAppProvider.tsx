@@ -52,6 +52,11 @@ export function ClerkAppProvider({ children }: { children: ReactNode }) {
             colorInput: "#202020",
             colorPrimary: "#c9b896",
           },
+          elements: {
+            rootBox: "w-full max-w-[min(100vw-2rem,420px)]",
+            cardBox: "w-full shadow-none",
+            card: "w-full",
+          },
         }}
       >
         {children}

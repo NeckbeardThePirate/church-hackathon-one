@@ -7,7 +7,7 @@ import { SignInChoices } from "./SignInChoices";
 
 function AuthLoading() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] text-sm text-[var(--ink-muted)]">
+    <div className="flex min-h-dvh items-center justify-center bg-[var(--canvas)] text-base text-[var(--ink-muted)]">
       Loading…
     </div>
   );
@@ -34,7 +34,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (session === "loading" || !clerkReady) return <AuthLoading />;
   if (session === "in") return <>{children}</>;
 
-  if (!publishableKey) return <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-6 [scrollbar-gutter:stable]"><SignInChoices /></div>;
+  if (!publishableKey) return <div className="safe-area-x flex min-h-dvh items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]"><SignInChoices /></div>;
 
   return (
     <>
