@@ -167,7 +167,7 @@ export function LearnAgentFloat({ projectId, plan, location }: Props) {
 
   const panel = open ? (
     <div
-      className="learn-agent fixed bottom-20 right-5 z-40 flex w-[min(100vw-2.5rem,380px)] flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--accent)_30%,var(--line))] bg-[var(--sidebar)] shadow-[0_16px_48px_-16px_rgba(0,0,0,0.65)]"
+      className="learn-agent fixed bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] right-[max(1.25rem,env(safe-area-inset-right,0px))] z-40 flex w-[min(calc(100vw-2rem-env(safe-area-inset-left,0px)-env(safe-area-inset-right,0px)),380px)] flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--accent)_30%,var(--line))] bg-[var(--sidebar)] shadow-[0_16px_48px_-16px_rgba(0,0,0,0.65)]"
       role="dialog"
       aria-label="Course tutor"
     >
@@ -202,7 +202,7 @@ export function LearnAgentFloat({ projectId, plan, location }: Props) {
 
       <div
         ref={scrollRef}
-        className="min-h-[200px] max-h-[min(52vh,420px)] flex-1 overflow-y-auto px-3 py-2 [scrollbar-gutter:stable]"
+        className="min-h-[200px] max-h-[min(52dvh,420px)] flex-1 overflow-y-auto px-3 py-2 [scrollbar-gutter:stable]"
       >
         {messages.length === 0 ? (
           <p className="text-sm leading-relaxed text-[var(--ink-muted)]">
@@ -257,7 +257,7 @@ export function LearnAgentFloat({ projectId, plan, location }: Props) {
             }
           }}
           placeholder="Ask about this lesson…"
-          className="max-h-28 min-h-[36px] flex-1 resize-none rounded-xl border border-[var(--line)] bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[color-mix(in_srgb,var(--accent)_60%,var(--line))]"
+          className="max-h-28 min-h-11 flex-1 resize-none rounded-xl border border-[var(--line)] bg-[var(--canvas)] px-3 py-2.5 text-base text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[color-mix(in_srgb,var(--accent)_60%,var(--line))]"
         />
         {streaming ? (
           <button
@@ -267,7 +267,7 @@ export function LearnAgentFloat({ projectId, plan, location }: Props) {
               abortRef.current = null;
               setStreaming(false);
             }}
-            className="h-9 shrink-0 rounded-xl border border-[var(--line)] px-3 text-xs text-[var(--ink-muted)]"
+            className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--line)] px-3 text-sm text-[var(--ink-muted)]"
           >
             Stop
           </button>
@@ -275,7 +275,7 @@ export function LearnAgentFloat({ projectId, plan, location }: Props) {
           <button
             type="submit"
             disabled={!draft.trim()}
-            className="h-9 shrink-0 rounded-xl bg-[var(--accent)] px-3 text-xs font-semibold text-[#1b1a17] disabled:opacity-40"
+            className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-[#1b1a17] disabled:opacity-40"
           >
             Ask
           </button>
@@ -290,7 +290,7 @@ export function LearnAgentFloat({ projectId, plan, location }: Props) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="learn-agent fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] py-2 pl-3 pr-4 text-sm font-medium text-[var(--ink)] shadow-[0_8px_28px_-10px_rgba(0,0,0,0.55)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))]"
+        className="learn-agent fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] right-[max(1.25rem,env(safe-area-inset-right,0px))] z-40 inline-flex min-h-11 items-center gap-2 rounded-full border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] py-2 pl-3 pr-4 text-sm font-medium text-[var(--ink)] shadow-[0_8px_28px_-10px_rgba(0,0,0,0.55)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))]"
         aria-expanded={open}
         aria-controls={open ? "learn-agent-panel" : undefined}
       >

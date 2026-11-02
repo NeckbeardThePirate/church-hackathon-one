@@ -284,7 +284,7 @@ export function WorkspaceApp() {
 
   if (!hydrated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] text-sm text-[var(--ink-muted)]">
+      <div className="flex min-h-dvh items-center justify-center bg-[var(--canvas)] text-base text-[var(--ink-muted)]">
         Loading workspace…
       </div>
     );
@@ -292,7 +292,7 @@ export function WorkspaceApp() {
 
   if (loadError) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-[var(--canvas)] px-6 text-center">
+      <div className="safe-area-x flex min-h-dvh flex-col items-center justify-center gap-3 bg-[var(--canvas)] px-6 text-center">
         <p className="text-sm text-[var(--ink)]">{loadError}</p>
         <button
           type="button"
@@ -313,7 +313,7 @@ export function WorkspaceApp() {
       {syncError ? (
         <div
           role="status"
-          className="fixed inset-x-0 bottom-4 z-50 mx-auto w-fit max-w-md rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-4 py-2 text-sm text-[var(--ink)]"
+          className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-50 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-4 py-2.5 text-sm text-[var(--ink)] safe-area-x"
         >
           {syncError}
         </div>

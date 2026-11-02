@@ -87,7 +87,7 @@ export function DeeperDock({
   if (!mounted || minimized.length === 0) return null;
 
   return createPortal(
-    <div className="go-deeper fixed bottom-5 right-5 z-30 flex flex-col items-end gap-2">
+    <div className="go-deeper fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] right-[max(1.25rem,env(safe-area-inset-right,0px))] z-30 flex flex-col items-end gap-2">
       {open ? (
         <div className="w-72 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--sidebar)] shadow-[0_12px_40px_-12px_rgba(0,0,0,0.6)]">
           <p className="border-b border-[var(--line)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-muted)]">

@@ -8,7 +8,7 @@ type ProjectPickerProps = {
 
 export function ProjectPicker({ onSelect }: ProjectPickerProps) {
   return (
-    <section className="mx-auto flex w-full max-w-[640px] flex-col gap-10 px-6 pb-24 pt-16 sm:px-10 sm:pt-24">
+    <section className="mx-auto flex w-full max-w-[640px] flex-col gap-10 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-10 sm:pt-24">
       <header className="flex flex-col gap-2">
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">New project</p>
         <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-4xl">

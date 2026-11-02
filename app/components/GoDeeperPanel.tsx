@@ -574,7 +574,7 @@ function DeeperSidebar({
 
   return (
     <aside
-      className="go-deeper fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-[var(--line)] bg-[var(--sidebar)] shadow-[-12px_0_40px_-16px_rgba(0,0,0,0.6)] sm:w-[400px] xl:w-[440px]"
+      className="go-deeper safe-area-top safe-area-bottom fixed inset-y-0 right-0 z-40 flex w-full max-w-[100vw] flex-col border-l border-[var(--line)] bg-[var(--sidebar)] shadow-[-12px_0_40px_-16px_rgba(0,0,0,0.6)] sm:w-[400px] xl:w-[440px]"
       aria-label="Go deeper sources"
     >
       <header className="border-b border-[var(--line)] px-4 pb-0 pt-4">
@@ -586,7 +586,7 @@ function DeeperSidebar({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-1.5 py-0.5 text-sm text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-lg text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
             aria-label="Close sources"
           >
             ✕
@@ -598,7 +598,7 @@ function DeeperSidebar({
               key={id}
               type="button"
               onClick={() => onTab(id)}
-              className={`shrink-0 border-b-2 pb-2 font-medium transition-colors ${
+              className={`shrink-0 border-b-2 px-1 pb-2 pt-1 text-xs font-medium transition-colors min-h-11 ${
                 tab === id
                   ? "border-[var(--accent)] text-[var(--ink)]"
                   : "border-transparent text-[var(--ink-muted)] hover:text-[var(--ink)]"

@@ -147,7 +147,9 @@ function ScriptureCallout({ reading }: { reading: ScriptureReading }) {
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Berean Study Bible</p>
-        <ExternalLink href={gatewayUrl}>{reading.reference} (ESV on Bible Gateway)</ExternalLink>
+        <ExternalLink href={gatewayUrl}>
+          <span className="break-words">{reading.reference} (ESV on Bible Gateway)</span>
+        </ExternalLink>
       </div>
       <div
         className="bible-callout-body text-sm leading-relaxed text-[var(--ink)]"
@@ -822,7 +824,7 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
 
   const sidebar = (
     <aside className="hidden w-52 shrink-0 lg:block" aria-label="Course progress and outline">
-      <nav className="sticky top-[72px] max-h-[calc(100vh-6rem)] overflow-y-auto pr-1 [scrollbar-gutter:stable]">
+      <nav className="sticky top-[72px] max-h-[calc(100dvh-6rem)] overflow-y-auto pr-1 [scrollbar-gutter:stable]">
         <LearnProgressTrack compact {...progressStats} />
         <NavButton onClick={goOverview} active={location.screen === "overview"} className="mb-3 font-medium">
           Course home
@@ -859,7 +861,7 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-[1120px] gap-10 px-6 pb-24 pt-16 sm:px-8 sm:pt-[72px]">
+    <div className="mx-auto flex w-full max-w-[1120px] gap-10 px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-8 sm:pt-[72px] sm:pb-24">
       <div className="learn-article min-w-0 flex-1 [scrollbar-gutter:stable]">
         {location.screen !== "overview" ? (
           <button
@@ -876,7 +878,7 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
             <p className="mb-3 inline-flex rounded-md border border-[var(--line)] px-2 py-0.5 text-xs font-medium text-[var(--ink-muted)]">
               {PROJECT_KIND_LABEL.learn}
             </p>
-            <h1 className="text-[2.5rem] font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)]">{title}</h1>
+            <h1 className="text-3xl font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-[2.5rem]">{title}</h1>
             <p className="mt-3 text-sm leading-relaxed text-[var(--ink-muted)]">
               {plan.lessons.length} lesson{plan.lessons.length === 1 ? "" : "s"} · about {roundedMin} min · {plan.complexity}{" "}
               topic
