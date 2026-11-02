@@ -10,3 +10,4 @@ scripts/bsb-generated.sql
 .dev.vars
 .wrangler/
 *.tsbuildinfo
+wrangler.jsonc

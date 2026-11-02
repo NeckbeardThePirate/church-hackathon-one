@@ -28,7 +28,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "CLOUDFLARE_ACCOUNT_ID=ddd73c1c002a8083f222af44faadeb0f vite dev",
+    "dev": "vite dev",
     "build": "vite build",
     "start": "vite preview",
     "deploy": "vinext-cloudflare deploy",
