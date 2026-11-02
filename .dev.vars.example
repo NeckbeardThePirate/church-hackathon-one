@@ -1,6 +1,6 @@
 # Workers AI + remote R2/D1 in local dev use your Cloudflare account.
 #   CLOUDFLARE_API_TOKEN=...   # Workers Scripts, D1, R2, Vectorize, Workers AI, Queues
-#   CLOUDFLARE_ACCOUNT_ID=ddd73c1c002a8083f222af44faadeb0f
+#   CLOUDFLARE_ACCOUNT_ID=<YOUR_ACCOUNT_ID>   (or set in .env.local)
 #
 # Loopback only. Never set these in production.
 # DEV_AUTH=1

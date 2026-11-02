@@ -1,5 +1,12 @@
 import { bindings, defineConfig, defineWorker, exports, triggers } from "cf/config";
 
+// Account + D1 IDs live in .env.local (gitignored). See .env.local.example.
+try {
+  process.loadEnvFile(".env.local");
+} catch {
+  // No .env.local: rely on the shell environment.
+}
+
 const WORKER_NAME = "church-hackathon";
 
 /** Learn pipeline queues (docs/learn-plan.md §6). One per stage + DLQ. */
@@ -22,7 +29,7 @@ const learnConsumer = (name: string, maxConcurrency: number | null = null) =>
   triggers.queue({ name, deadLetterQueue: LEARN_DLQ, maxBatchSize: 5, maxBatchTimeout: 1, maxRetries: 3, maxConcurrency });
 
 export default defineConfig({
-  accountId: "ddd73c1c002a8083f222af44faadeb0f",
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   worker: defineWorker({
     name: WORKER_NAME,
     // Wraps vinext's fetch handler and adds queue() + LearnPlanDO.
@@ -66,12 +73,11 @@ export default defineConfig({
       MEDIA: bindings.r2({ name: "church-hackathon-media", dev: devBinding }),
       BIBLE: bindings.d1({
         name: "church-hackathon-bible",
-        id: "bb9958b5-2734-42bc-8552-10b3b8ab6c6d",
+        id: process.env.BIBLE_D1_DATABASE_ID,
         dev: devBinding,
       }),
       SCRIPTURE_VECTORS: bindings.vectorize({ name: "church-hackathon-scripture", dev: devBinding }),
       LIBRARY_VECTORS: bindings.vectorize({ name: "church-hackathon-library", dev: devBinding }),
-      CLOUDFLARE_ACCOUNT_ID: bindings.text("ddd73c1c002a8083f222af44faadeb0f"),
       LEARN_PLAN: bindings.durableObject({ worker: WORKER_NAME, exportName: "LearnPlanDO" }),
       USER_WORKSPACE: bindings.durableObject({ worker: WORKER_NAME, exportName: "UserWorkspaceDO" }),
       LEARN_Q_INTAKE: bindings.queue({ name: LEARN_QUEUES.LEARN_Q_INTAKE }),

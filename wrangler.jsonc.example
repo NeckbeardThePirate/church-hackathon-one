@@ -2,13 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   // Deploy source of truth is cloudflare.config.ts (vinext / cf). Do not `wrangler deploy` this stub.
   "name": "church-hackathon",
-  "account_id": "ddd73c1c002a8083f222af44faadeb0f",
+  "account_id": "<YOUR_ACCOUNT_ID>",
   "compatibility_date": "2026-10-30",
   "d1_databases": [
     {
       "binding": "BIBLE",
       "database_name": "church-hackathon-bible",
-      "database_id": "bb9958b5-2734-42bc-8552-10b3b8ab6c6d"
+      "database_id": "<YOUR_D1_DATABASE_ID>"
     }
   ],
   "vectorize": [
