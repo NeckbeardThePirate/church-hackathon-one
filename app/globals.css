@@ -48,27 +48,9 @@ select {
 }
 
 .learn-article,
-.learn-article-body,
-.bible-callout-body,
-.editor-block {
+.learn-article-body {
   overflow-wrap: anywhere;
   word-break: break-word;
-}
-
-.editable-surface {
-  caret-color: var(--caret);
-}
-
-.editable-surface::selection,
-.editable-surface *::selection {
-  background-color: var(--selection-bg);
-  color: var(--selection-fg);
-}
-
-.editable-surface::-moz-selection,
-.editable-surface *::-moz-selection {
-  background-color: var(--selection-bg);
-  color: var(--selection-fg);
 }
 
 ::selection {
@@ -81,104 +63,8 @@ select {
   color: var(--selection-fg);
 }
 
-.editor-block {
-  -webkit-user-select: text;
-  user-select: text;
-  cursor: text;
-}
-
-/* While Auto Format is running, use the system wait/spinner cursor across the note. */
-.editor-auto-formatting,
-.editor-auto-formatting * {
-  cursor: wait !important;
-}
-
-.editor-block:focus {
-  outline: none;
-}
-
-.editor-block:empty:not(:focus)::before,
-.editor-block.is-empty:not(:focus)::before {
-  pointer-events: none;
-  color: var(--ink-muted);
-  content: attr(data-placeholder);
-}
-
-.editor-block:focus:empty::before,
-.editor-block:focus.is-empty::before {
-  content: none;
-}
-
-.editor-block a,
-.editor-block .scripture-ref {
-  color: color-mix(in srgb, var(--accent) 80%, var(--ink));
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.editor-block strong,
-.editor-block b {
-  font-weight: 650;
-}
-
-.editor-block em,
-.editor-block i {
-  font-style: italic;
-}
-
-.editor-block u {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.editor-row + .editor-row {
-  margin-top: 0.125rem;
-}
-
-.format-toolbar,
-.slash-menu {
-  animation: editor-pop 120ms ease-out;
-}
-
-@keyframes editor-pop {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-a.scripture-ref {
-  color: color-mix(in srgb, var(--accent) 88%, var(--ink));
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-a.scripture-ref:hover {
-  color: var(--ink);
-}
-
-.bible-callout-body sup {
-  margin-right: 0.35rem;
-  font-size: 0.68rem;
-  font-weight: 600;
-  color: var(--ink-muted);
-}
-
-.bible-callout-body p {
-  margin: 0 0 0.65rem;
-}
-
-.bible-callout-body p:last-child {
-  margin-bottom: 0;
 }
 
 .learn-article a {
