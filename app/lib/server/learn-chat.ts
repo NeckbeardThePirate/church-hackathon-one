@@ -1,4 +1,4 @@
-import { REFINE_MODEL } from "./refine-ocr";
+import { LEARN_TEXT_MODEL } from "./learn/llm";
 import type { LearnChatContext, LearnChatInput, LearnChatMessage } from "../learn/agent-context";
 
 const clip = (text: string | undefined, n: number) => {
@@ -132,7 +132,7 @@ export async function streamLearnChat(ai: Ai, input: LearnChatInput): Promise<Re
     ...history,
   ];
 
-  const upstream = (await ai.run(REFINE_MODEL, {
+  const upstream = (await ai.run(LEARN_TEXT_MODEL, {
     messages,
     stream: true,
     reasoning_effort: "low",

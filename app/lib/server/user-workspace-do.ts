@@ -4,9 +4,10 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import type { ChatGptIdentity } from "./chatgpt-auth";
-import type { Project, ProjectKind } from "@/app/lib/projects";
+import type { Project, StoredProjectKind } from "@/app/lib/projects";
 
-const KINDS = new Set<ProjectKind>(["lesson", "study", "learn"]);
+/** Lesson/study stay valid so projects saved by earlier versions keep loading and saving. */
+const KINDS = new Set<StoredProjectKind>(["lesson", "study", "learn"]);
 
 type ProjectRow = {
   id: string;
@@ -21,7 +22,7 @@ function isProject(value: unknown): value is Project {
     project.id.length > 0 &&
     project.id.length <= 80 &&
     typeof project.kind === "string" &&
-    KINDS.has(project.kind as ProjectKind) &&
+    KINDS.has(project.kind as StoredProjectKind) &&
     typeof project.title === "string" &&
     Array.isArray(project.blocks) &&
     typeof project.updatedAt === "number" &&

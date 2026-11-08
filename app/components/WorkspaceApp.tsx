@@ -1,33 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useEditorHistory, type BlocksChangeMeta } from "../hooks/useEditorHistory";
-import {
-  createProject,
-  createSubpage,
-  defaultTitle,
-  type BlockContent,
-  type Project,
-  type ProjectKind,
-  type SourceImage,
-} from "../lib/projects";
+import { createProject, isLegacyProject, type Project } from "../lib/projects";
 import { deleteRemoteProject, loadUserWorkspace, putProject } from "../lib/workspace-sync";
-import { plainTextToBlocks } from "../lib/text-blocks";
 import { AppShell } from "./AppShell";
-import { planToBlocks } from "../lib/learn/plan-to-blocks";
 import type { LearnPlan } from "../lib/learn/types";
 import type { LearnPlanProgress } from "../lib/learn/plan-progress";
-import { ImageImportStep } from "./ImageImportStep";
+import { ArchivedProjectView } from "./ArchivedProjectView";
 import { LearnIntakeStep } from "./LearnIntakeStep";
 import { LearnPlanView } from "./LearnPlanView";
-import { NotionEditor } from "./NotionEditor";
-import { ProjectPicker } from "./ProjectPicker";
 
-type WorkspaceView = "picker" | "import" | "editor";
+/** "start" is the new-path screen. "building" follows a started (or resumed) plan. */
+type WorkspaceView = "start" | "building" | "path";
 
 function viewForProject(project: Project): WorkspaceView {
-  if (!project.importComplete) return "import";
-  return "editor";
+  if (isLegacyProject(project)) return "path";
+  return project.importComplete ? "path" : "building";
 }
 
 export function WorkspaceApp() {
@@ -37,7 +25,8 @@ export function WorkspaceApp() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [view, setView] = useState<WorkspaceView>("picker");
+  const [view, setView] = useState<WorkspaceView>("start");
+  const [draft, setDraft] = useState<Project>(() => createProject());
   const persistedRef = useRef<Map<string, string>>(new Map());
   const writeGenRef = useRef<Map<string, number>>(new Map());
   const syncReadyRef = useRef(false);
@@ -112,20 +101,6 @@ export function WorkspaceApp() {
   const activeProjectRef = useRef(activeProject);
   activeProjectRef.current = activeProject;
 
-  const editorHistory = useEditorHistory();
-  const {
-    reset: resetEditorHistory,
-    setSnapshot: setEditorSnapshot,
-    flush: flushEditorHistory,
-    undo: undoEditorHistory,
-    redo: redoEditorHistory,
-    setOnPresentChange,
-    canUndo,
-    canRedo,
-    revision: historyRevision,
-  } = editorHistory;
-  const lastHistorySessionRef = useRef<string | null>(null);
-
   const openProject = useCallback(
     (projectId: string) => {
       const project = projects.find((item) => item.id === projectId);
@@ -135,17 +110,24 @@ export function WorkspaceApp() {
     [projects],
   );
 
-  const showPicker = useCallback(() => {
+  const showStart = useCallback(() => {
+    setDraft(createProject());
     setActiveProjectId(null);
-    setView("picker");
+    setView("start");
   }, []);
 
-  const handlePickKind = useCallback((kind: ProjectKind) => {
-    const project = createProject(kind);
-    setProjects((prev) => [project, ...prev]);
-    setActiveProjectId(project.id);
-    setView("import");
-  }, []);
+  const startedPlan = useCallback(
+    (planId: string) => {
+      setProjects((prev) =>
+        prev.some((p) => p.id === draft.id)
+          ? prev.map((p) => (p.id === draft.id ? { ...p, learnPlanId: planId, updatedAt: Date.now() } : p))
+          : [{ ...draft, learnPlanId: planId, updatedAt: Date.now() }, ...prev],
+      );
+      setActiveProjectId(draft.id);
+      setView("building");
+    },
+    [draft],
+  );
 
   const updateProject = useCallback((projectId: string, patch: Partial<Project>) => {
     setProjects((prev) =>
@@ -164,48 +146,6 @@ export function WorkspaceApp() {
     [updateProject],
   );
 
-  useEffect(() => {
-    setOnPresentChange((snapshot) => {
-      if (!activeProjectId) return;
-      updateProject(activeProjectId, { title: snapshot.title, blocks: snapshot.blocks });
-    });
-  }, [activeProjectId, updateProject, setOnPresentChange]);
-
-  useEffect(() => {
-    if (view !== "editor" || !activeProjectId) {
-      lastHistorySessionRef.current = null;
-      return;
-    }
-    const sessionKey = `${activeProjectId}:${view}`;
-    if (lastHistorySessionRef.current === sessionKey) return;
-    lastHistorySessionRef.current = sessionKey;
-    const project = activeProjectRef.current;
-    if (!project || project.id !== activeProjectId) return;
-    resetEditorHistory({ title: project.title, blocks: project.blocks });
-  }, [activeProjectId, view, resetEditorHistory]);
-
-  const completeImport = useCallback(
-    (payload: {
-      ocrText: string;
-      rawOcrText?: string;
-      sourceImages: SourceImage[];
-      blocks: BlockContent[];
-      suggestedTitle?: string;
-    }) => {
-      if (!activeProjectId) return;
-      updateProject(activeProjectId, {
-        sourceImages: payload.sourceImages,
-        sourceImage: payload.sourceImages[0],
-        ocrText: payload.rawOcrText ?? payload.ocrText,
-        ...(payload.suggestedTitle?.trim() ? { title: payload.suggestedTitle.trim() } : {}),
-        blocks: payload.blocks.length ? payload.blocks : plainTextToBlocks(payload.ocrText),
-        importComplete: true,
-      });
-      setView("editor");
-    },
-    [activeProjectId, updateProject],
-  );
-
   const completeLearnPlan = useCallback(
     (plan: LearnPlan) => {
       if (!activeProjectId) return;
@@ -214,73 +154,18 @@ export function WorkspaceApp() {
         learnPlan: plan,
         learnPlanId: undefined,
         ...(project && !project.title.trim() ? { title: plan.title } : {}),
-        blocks: planToBlocks(plan),
         importComplete: true,
       });
-      setView("editor");
+      setView("path");
     },
     [activeProjectId, updateProject],
   );
 
-  const skipImport = useCallback(() => {
+  const rebuildPath = useCallback(() => {
     if (!activeProjectId) return;
-    updateProject(activeProjectId, { importComplete: true });
-    setView("editor");
+    updateProject(activeProjectId, { importComplete: false, learnPlanId: undefined });
+    setView("building");
   }, [activeProjectId, updateProject]);
-
-  const handleEditorTitleChange = useCallback(
-    (title: string) => {
-      const project = activeProjectRef.current;
-      if (!project) return;
-      setEditorSnapshot({ title, blocks: project.blocks }, "grouped");
-    },
-    [setEditorSnapshot],
-  );
-
-  const handleEditorBlocksChange = useCallback(
-    (blocks: BlockContent[], meta?: BlocksChangeMeta) => {
-      const project = activeProjectRef.current;
-      if (!project) return;
-      setEditorSnapshot(
-        { title: project.title, blocks },
-        meta?.history ?? "immediate",
-      );
-    },
-    [setEditorSnapshot],
-  );
-
-  const openPage = useCallback(
-    (pageId: string) => {
-      flushEditorHistory();
-      setActiveProjectId(pageId);
-      setView("editor");
-    },
-    [flushEditorHistory],
-  );
-
-  const handleCreateSubpage = useCallback((title: string, blocks: BlockContent[]): string | null => {
-    const parent = activeProjectRef.current;
-    if (!parent) return null;
-    const page = createSubpage(parent, title, blocks);
-    setProjects((prev) => [page, ...prev]);
-    // Navigate after the parent's link block has been written.
-    window.setTimeout(() => {
-      flushEditorHistory();
-      setActiveProjectId(page.id);
-      setView("editor");
-    }, 50);
-    return page.id;
-  }, [flushEditorHistory]);
-
-  const resolvePageTitle = useCallback(
-    (pageId: string) => {
-      const page = projects.find((p) => p.id === pageId);
-      return page ? defaultTitle(page) : null;
-    },
-    [projects],
-  );
-
-  const parentProject = activeProject?.parentId ? projects.find((p) => p.id === activeProject.parentId) : undefined;
 
   if (!hydrated) {
     return (
@@ -319,61 +204,38 @@ export function WorkspaceApp() {
         </div>
       ) : null}
       <AppShell
-      projects={projects}
-      activeProjectId={activeProjectId}
-      onSelectProject={openProject}
-      onNewProject={showPicker}
-      sidebarCompact={view === "import"}
-    >
-      {view === "picker" || !activeProject ? (
-        <ProjectPicker onSelect={handlePickKind} />
-      ) : view === "import" && activeProject.kind === "learn" ? (
-        <LearnIntakeStep
-          key={activeProject.id}
-          learnPlanId={activeProject.learnPlanId}
-          onStarted={(planId) => updateProject(activeProject.id, { learnPlanId: planId })}
-          onComplete={completeLearnPlan}
-          onSkip={skipImport}
-        />
-      ) : view === "import" ? (
-        <ImageImportStep
-          key={activeProject.id}
-          projectId={activeProject.id}
-          kind={activeProject.kind}
-          onComplete={completeImport}
-          onSkip={skipImport}
-        />
-      ) : activeProject.kind === "learn" && activeProject.learnPlan ? (
-        <LearnPlanView
-          key={activeProject.id}
-          projectId={activeProject.id}
-          plan={activeProject.learnPlan}
-          displayTitle={activeProject.title}
-          savedProgress={activeProject.learnProgress}
-          onSaveProgress={saveLearnProgress}
-        />
-      ) : (
-        <NotionEditor
-          key={activeProject.id}
-          kind={activeProject.kind}
-          title={activeProject.title}
-          blocks={activeProject.blocks}
-          sourceImage={activeProject.sourceImage}
-          sourceImages={activeProject.sourceImages ?? (activeProject.sourceImage ? [activeProject.sourceImage] : undefined)}
-          onTitleChange={handleEditorTitleChange}
-          onBlocksChange={handleEditorBlocksChange}
-          onHistoryFlush={flushEditorHistory}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onUndo={undoEditorHistory}
-          onRedo={redoEditorHistory}
-          historyRevision={historyRevision}
-          parent={parentProject ? { id: parentProject.id, title: defaultTitle(parentProject) } : undefined}
-          onCreateSubpage={handleCreateSubpage}
-          onOpenPage={openPage}
-          resolvePageTitle={resolvePageTitle}
-        />
-      )}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={openProject}
+        onNewProject={showStart}
+        sidebarCompact={view === "building"}
+      >
+        {view === "start" || !activeProject ? (
+          <LearnIntakeStep key={draft.id} projectId={draft.id} onStarted={startedPlan} onComplete={completeLearnPlan} />
+        ) : view === "building" ? (
+          <LearnIntakeStep
+            key={activeProject.id}
+            projectId={activeProject.id}
+            learnPlanId={activeProject.learnPlanId}
+            onStarted={(planId) => updateProject(activeProject.id, { learnPlanId: planId })}
+            onComplete={completeLearnPlan}
+          />
+        ) : !isLegacyProject(activeProject) && activeProject.learnPlan ? (
+          <LearnPlanView
+            key={activeProject.id}
+            projectId={activeProject.id}
+            plan={activeProject.learnPlan}
+            displayTitle={activeProject.title}
+            savedProgress={activeProject.learnProgress}
+            onSaveProgress={saveLearnProgress}
+          />
+        ) : (
+          <ArchivedProjectView
+            key={activeProject.id}
+            project={activeProject}
+            onBuildPath={isLegacyProject(activeProject) ? undefined : rebuildPath}
+          />
+        )}
       </AppShell>
     </>
   );

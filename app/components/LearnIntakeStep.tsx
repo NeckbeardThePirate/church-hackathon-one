@@ -2,24 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  TRADITIONS,
-  isPerspective,
   type LearnPlan,
   type LearnStage,
-  type Perspective,
   type Heartbeat,
   type PlanSnapshot,
   type ProgressEvent,
 } from "../lib/learn/types";
 
 import { StillWorking } from "./StillWorking";
-import { fetchLearnPerspective, saveLearnPerspective } from "../lib/workspace-sync";
+import { saveLearnPerspective } from "../lib/workspace-sync";
+import { LearnStartForm, type StartPayload } from "./LearnStartForm";
 
 type Props = {
+  projectId: string;
   learnPlanId?: string;
   onStarted: (planId: string) => void;
   onComplete: (plan: LearnPlan) => void;
-  onSkip: () => void;
 };
 
 const STEPS: { stage: LearnStage[]; label: string }[] = [
@@ -36,21 +34,7 @@ function stepIndex(stage: LearnStage | undefined): number {
   return i === -1 ? 0 : i;
 }
 
-async function loadDefaultPerspective(): Promise<Perspective> {
-  try {
-    const saved = await fetchLearnPerspective();
-    return isPerspective(saved) ? saved : "neutral";
-  } catch {
-    return "neutral";
-  }
-}
-
-export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: Props) {
-  const [topic, setTopic] = useState("");
-  const [notes, setNotes] = useState("");
-  const [perspective, setPerspective] = useState<Perspective>("neutral");
-  const [makeDefault, setMakeDefault] = useState(false);
-  const [includeScripture, setIncludeScripture] = useState<"auto" | "yes" | "no">("auto");
+export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete }: Props) {
   const [planId, setPlanId] = useState<string | undefined>(learnPlanId);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [snapshot, setSnapshot] = useState<PlanSnapshot | null>(null);
@@ -60,10 +44,6 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
   const [heartbeat, setHeartbeat] = useState<Heartbeat | null>(null);
   const [heartbeatReceivedAt, setHeartbeatReceivedAt] = useState<number | null>(null);
   const completedRef = useRef(false);
-
-  useEffect(() => {
-    void loadDefaultPerspective().then(setPerspective);
-  }, []);
 
   const refresh = useCallback(async (id: string) => {
     const res = await fetch(`/api/learn/plans/${id}`, { credentials: "same-origin" });
@@ -80,7 +60,7 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
         completedRef.current = true;
         onComplete(snap.plan);
       } else if (snap.status === "failed") {
-        setError(snap.error ?? "The plan could not be built.");
+        setError(snap.error ?? "The path could not be built.");
       }
     },
     [onComplete],
@@ -113,7 +93,7 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
       void refresh(planId).then((snap) => {
         if (!snap) {
           source.close();
-          setError("Lost connection to the plan. Reload to try again.");
+          setError("Lost connection to the path. Reload to try again.");
         } else if (snap.status === "complete" || snap.status === "partial" || snap.status === "failed") {
           source.close();
           finish(snap);
@@ -131,29 +111,32 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
     feedRef.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [events.length]);
 
-  const start = useCallback(async () => {
-    setError(null);
-    setStarting(true);
-    try {
-      if (makeDefault) await saveLearnPerspective(perspective);
-      const res = await fetch("/api/learn/plans", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ topic, notes, options: { perspective, includeScripture } }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { planId?: string; error?: string };
-      if (!res.ok || !body.planId) throw new Error(body.error ?? `Could not start (${res.status}).`);
-      setEvents([]);
-      setSnapshot(null);
-      setPlanId(body.planId);
-      onStarted(body.planId);
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not start the plan.");
-    } finally {
-      setStarting(false);
-    }
-  }, [topic, notes, perspective, includeScripture, makeDefault, onStarted]);
+  const start = useCallback(
+    async ({ topic, notes, perspective, includeScripture, makeDefault }: StartPayload) => {
+      setError(null);
+      setStarting(true);
+      try {
+        if (makeDefault) await saveLearnPerspective(perspective);
+        const res = await fetch("/api/learn/plans", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topic, notes, options: { perspective, includeScripture } }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { planId?: string; error?: string };
+        if (!res.ok || !body.planId) throw new Error(body.error ?? `Could not start (${res.status}).`);
+        setEvents([]);
+        setSnapshot(null);
+        setPlanId(body.planId);
+        onStarted(body.planId);
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : "Could not start the path.");
+      } finally {
+        setStarting(false);
+      }
+    },
+    [onStarted],
+  );
 
   const currentStage = events.at(-1)?.stage ?? snapshot?.stage;
   const active = stepIndex(currentStage);
@@ -164,111 +147,15 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
   const feed = useMemo(() => events.filter((e) => e.message), [events]);
 
   if (!planId) {
-    return (
-      <section className="mx-auto flex w-full max-w-[640px] flex-col gap-8 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-10 sm:pt-16">
-        <header className="flex flex-col gap-2">
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Learn · New plan</p>
-          <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[var(--ink)]">What do you want to learn?</h1>
-          <p className="max-w-md text-base leading-relaxed text-[var(--ink-muted)]">
-            We build a step-by-step plan with lessons, readings, and quizzes. You can watch it come together.
-          </p>
-        </header>
-
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-[var(--ink)]">Topic</span>
-          <input
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            maxLength={500}
-            placeholder="e.g. The book of Romans, compound interest, intro to Greek"
-            className="rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-2 text-[var(--ink)] outline-none focus:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))]"
-          />
-        </label>
-
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-[var(--ink)]">
-            Notes <span className="font-normal text-[var(--ink-muted)]">(optional: goals, what you already know)</span>
-          </span>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={4}
-            maxLength={20000}
-            className="rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-2 text-sm text-[var(--ink)] outline-none [scrollbar-gutter:stable] focus:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))]"
-          />
-        </label>
-
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-2 text-sm font-medium text-[var(--ink)]">Perspective on faith topics</legend>
-          <select
-            value={perspective}
-            onChange={(e) => setPerspective(isPerspective(e.target.value) ? e.target.value : "neutral")}
-            className="rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-2 text-sm text-[var(--ink)]"
-          >
-            <option value="neutral">Neutral: present each tradition's view, take no side</option>
-            {TRADITIONS.map((t) => (
-              <option key={t} value={t}>
-                {t}: teach from this tradition, other views labeled
-              </option>
-            ))}
-          </select>
-          <label className="flex items-center gap-2 text-xs text-[var(--ink-muted)]">
-            <input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} />
-            Use this as my default for new plans
-          </label>
-        </fieldset>
-
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-2 text-sm font-medium text-[var(--ink)]">Scripture readings</legend>
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ["auto", "When relevant"],
-                ["yes", "Always"],
-                ["no", "Never"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setIncludeScripture(value)}
-                className={`min-h-11 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                  includeScripture === value
-                    ? "border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] bg-[var(--sidebar-active)] text-[var(--ink)]"
-                    : "border-[var(--line)] text-[var(--ink-muted)] hover:text-[var(--ink)]"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        {error ? <p className="text-sm text-[#c0533f]">{error}</p> : null}
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            disabled={starting || topic.trim().length < 3}
-            onClick={start}
-            className="min-h-11 rounded-lg bg-[var(--accent)] px-4 py-2.5 text-base font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {starting ? "Starting…" : "Build my plan"}
-          </button>
-          <button type="button" onClick={onSkip} className="min-h-11 text-base text-[var(--ink-muted)] hover:text-[var(--ink)]">
-            Skip and write notes instead
-          </button>
-        </div>
-      </section>
-    );
+    return <LearnStartForm projectId={projectId} starting={starting} error={error} onStart={(payload) => void start(payload)} />;
   }
 
   return (
     <section className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-10 sm:pt-16">
       <header className="flex flex-col gap-1">
-        <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Learn · Building plan</p>
+        <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Learn path · Building</p>
         <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[var(--ink)]">
-          {failed ? "The plan stopped" : "Putting your plan together"}
+          {failed ? "The path stopped" : "Building your path"}
         </h1>
       </header>
 
@@ -331,12 +218,9 @@ export function LearnIntakeStep({ learnPlanId, onStarted, onComplete, onSkip }: 
                 setError(null);
                 setEvents([]);
               }}
-              className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--ink)]"
+              className="rounded-lg border border-[var(--line)] min-h-11 px-4 py-2 text-sm text-[var(--ink)]"
             >
               Start over
-            </button>
-            <button type="button" onClick={onSkip} className="text-sm text-[var(--ink-muted)] hover:text-[var(--ink)]">
-              Write notes instead
             </button>
           </div>
         </div>

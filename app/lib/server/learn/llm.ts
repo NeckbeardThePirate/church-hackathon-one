@@ -10,7 +10,8 @@
  * through the gateway's Anthropic provider; anything else is a Workers AI model id.
  */
 import { parseWorkersAiText } from "../ocr";
-import { REFINE_MODEL } from "../refine-ocr";
+/** Default Workers AI text model for Learn stages and the tutor chat. */
+export const LEARN_TEXT_MODEL = "@cf/zai-org/glm-5.3-flash";
 import { extractJson } from "./json-text";
 import { mockModelText } from "./mock-llm";
 
@@ -49,7 +50,7 @@ const MAX_ATTEMPTS = 3;
 
 function modelFor(env: LlmEnv, role: LlmRole): string {
   const configured = role === "planner" ? env.LEARN_MODEL_PLANNER : env.LEARN_MODEL_WORKER;
-  return configured?.trim() || REFINE_MODEL;
+  return configured?.trim() || LEARN_TEXT_MODEL;
 }
 
 function gatewayOptions(env: LlmEnv, meta: LlmMeta, attempt: number): GatewayOptions | undefined {

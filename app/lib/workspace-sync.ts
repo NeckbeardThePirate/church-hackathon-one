@@ -1,12 +1,10 @@
 import {
   clearLocalProjects,
   readLocalProjects,
-  seedProjects,
   type Project,
 } from "./projects";
 
 const PERSPECTIVE_KEY = "learn-perspective";
-const INIT_KEY = "workspace-initialized";
 
 async function readError(response: Response): Promise<string> {
   const raw = await response.text();
@@ -62,9 +60,9 @@ async function savePref(key: string, value: string): Promise<void> {
 }
 
 /**
- * Load the signed-in user's notes from their Durable Object.
+ * Load the signed-in user's learning paths from their Durable Object.
  * Leftover local notes are uploaded once (including a partial earlier upload), then the local copy is dropped.
- * A brand-new user gets two starter notes. An empty workspace after that stays empty.
+ * Saved lesson/study projects from earlier versions load unchanged (they open read-only).
  */
 export async function loadUserWorkspace(): Promise<Project[]> {
   const remote = await fetchWorkspace();
@@ -80,18 +78,10 @@ export async function loadUserWorkspace(): Promise<Project[]> {
   }
 
   if (merged.length === 0) {
-    if ((await fetchPref(INIT_KEY)) !== "1") {
-      const seeded = seedProjects();
-      for (const project of seeded) await putProject(project);
-      await savePref(INIT_KEY, "1");
-      clearLocalProjects();
-      return seeded;
-    }
     clearLocalProjects();
     return [];
   }
 
-  if ((await fetchPref(INIT_KEY)) !== "1") await savePref(INIT_KEY, "1");
   clearLocalProjects();
   merged.sort((a, b) => b.updatedAt - a.updatedAt);
   return merged;

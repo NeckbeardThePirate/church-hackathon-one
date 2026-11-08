@@ -1,40 +1,29 @@
 import { normalizeBlockType, type BlockType } from "./block-types";
 import type { LearnPlanProgress } from "./learn/plan-progress";
 import type { LearnPlan } from "./learn/types";
-import type { GoDeeperResult } from "./server/go-deeper";
 
-export type DeeperChatMessage = { role: "user" | "assistant"; content: string };
+export type ProjectKind = "learn";
 
-/** Persisted state of a Go Deeper thread (lives in a `kind: "deeper"` block). */
-export type DeeperState = {
-  sourceBlockId: string;
-  text: string;
-  before?: string;
-  after?: string;
-  collapsed?: boolean;
-  data?: GoDeeperResult;
-  messages?: DeeperChatMessage[];
-};
+/**
+ * Kinds from earlier versions of the app. They still load and display (read-only)
+ * so saved data is never lost, but no new project can be created with them.
+ */
+export type LegacyProjectKind = "lesson" | "study";
 
-export type ProjectKind = "lesson" | "study" | "learn";
+export type StoredProjectKind = ProjectKind | LegacyProjectKind;
 
 export type BlockContent = {
   id: string;
   type: BlockType;
   html: string;
+  /** Only set on blocks saved by earlier versions; kept so they round-trip untouched. */
   kind?: "text" | "bible-callout" | "deeper" | "page-link";
   bibleReference?: string;
   bibleGatewayUrl?: string;
-  /** kind "deeper": the Go Deeper thread. */
-  deeper?: DeeperState;
-  /** kind "page-link": id of the linked (sub)page. */
+  /** Legacy payloads, preserved verbatim and never interpreted. */
+  deeper?: unknown;
   pageId?: string;
 };
-
-/** Blocks that are not contentEditable text (callouts, deeper threads, page links). */
-export function isNonTextBlock(block: BlockContent): boolean {
-  return block.kind === "bible-callout" || block.kind === "deeper" || block.kind === "page-link";
-}
 
 export type { BlockType };
 
@@ -46,7 +35,7 @@ export type SourceImage = {
 
 export type Project = {
   id: string;
-  kind: ProjectKind;
+  kind: StoredProjectKind;
   title: string;
   blocks: BlockContent[];
   updatedAt: number;
@@ -65,33 +54,16 @@ export type Project = {
   learnProgress?: LearnPlanProgress;
 };
 
-export const PROJECT_KIND_OPTIONS: {
-  kind: ProjectKind;
-  label: string;
-  description: string;
-}[] = [
-  {
-    kind: "lesson",
-    label: "Lesson",
-    description: "Plan teaching notes, outlines, and discussion prompts.",
-  },
-  {
-    kind: "study",
-    label: "Study",
-    description: "Dig into passages, cross-references, and reflections.",
-  },
-  {
-    kind: "learn",
-    label: "Learn",
-    description: "Build a step-by-step learning plan with lessons, readings, and quizzes.",
-  },
-];
-
-export const PROJECT_KIND_LABEL: Record<ProjectKind, string> = {
-  lesson: "Lesson",
-  study: "Study",
-  learn: "Learn",
+export const PROJECT_KIND_LABEL: Record<StoredProjectKind, string> = {
+  learn: "Learn path",
+  lesson: "Lesson (archived)",
+  study: "Study (archived)",
 };
+
+/** True for projects saved by earlier versions (lesson/study). These open read-only. */
+export function isLegacyProject(project: Pick<Project, "kind">): boolean {
+  return project.kind !== "learn";
+}
 
 const STORAGE_KEY = "church-hackathon-projects";
 
@@ -104,46 +76,18 @@ export function createBlock(type: BlockType = "paragraph", html = ""): BlockCont
 }
 
 function normalizeBlock(block: Partial<BlockContent> & { id?: string; html?: string }): BlockContent {
-  const normalized: BlockContent = {
+  return {
+    ...block,
     id: block.id && typeof block.id === "string" ? block.id : crypto.randomUUID(),
     type: normalizeBlockType(block.type),
     html: typeof block.html === "string" ? block.html : "",
   };
-
-  if (block.kind === "bible-callout") {
-    normalized.kind = "bible-callout";
-  } else if (block.kind === "text") {
-    normalized.kind = "text";
-  } else if (block.kind === "deeper" && block.deeper && typeof block.deeper.text === "string") {
-    normalized.kind = "deeper";
-    normalized.deeper = block.deeper;
-  } else if (block.kind === "page-link" && typeof block.pageId === "string") {
-    normalized.kind = "page-link";
-    normalized.pageId = block.pageId;
-  }
-
-  if (typeof block.bibleReference === "string") normalized.bibleReference = block.bibleReference;
-  if (typeof block.bibleGatewayUrl === "string") normalized.bibleGatewayUrl = block.bibleGatewayUrl;
-
-  return normalized;
 }
 
-export function createSubpage(parent: Project, title: string, blocks: BlockContent[]): Project {
+export function createProject(): Project {
   return {
     id: crypto.randomUUID(),
-    kind: parent.kind,
-    title,
-    blocks: blocks.length ? blocks : [newBlock()],
-    updatedAt: Date.now(),
-    importComplete: true,
-    parentId: parent.id,
-  };
-}
-
-export function createProject(kind: ProjectKind): Project {
-  return {
-    id: crypto.randomUUID(),
-    kind,
+    kind: "learn",
     title: "",
     blocks: [newBlock()],
     updatedAt: Date.now(),
@@ -153,29 +97,7 @@ export function createProject(kind: ProjectKind): Project {
 
 export function defaultTitle(project: Project): string {
   if (project.title.trim()) return project.title.trim();
-  return `Untitled ${PROJECT_KIND_LABEL[project.kind]}`;
-}
-
-export function seedProjects(): Project[] {
-  const now = Date.now();
-  return [
-    {
-      id: "seed-lesson-1",
-      kind: "lesson",
-      title: "Faith & Works",
-      blocks: [{ id: crypto.randomUUID(), type: "paragraph", html: "Opening question for the group…" }],
-      updatedAt: now - 1000 * 60 * 60 * 24,
-      importComplete: true,
-    },
-    {
-      id: "seed-study-1",
-      kind: "study",
-      title: "James 2",
-      blocks: [{ id: crypto.randomUUID(), type: "paragraph", html: "" }],
-      updatedAt: now - 1000 * 60 * 60 * 12,
-      importComplete: true,
-    },
-  ];
+  return "Untitled path";
 }
 
 function hydrateProject(project: Project): Project {
@@ -204,19 +126,4 @@ export function readLocalProjects(): Project[] {
 export function clearLocalProjects(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(STORAGE_KEY);
-}
-
-export function loadProjects(): Project[] {
-  const stored = readLocalProjects();
-  if (stored.length > 0) return stored;
-  const seeded = seedProjects();
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-  }
-  return seeded;
-}
-
-export function saveProjects(projects: Project[]): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
 }
