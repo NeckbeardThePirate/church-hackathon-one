@@ -225,9 +225,12 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
           <span aria-hidden className="text-[var(--ink-muted)] transition-transform group-open:rotate-90">›</span>
         </summary>
         <div className="flex flex-col gap-5 border-t border-[var(--line)] px-4 py-4">
-          <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-[var(--ink)]">Perspective on faith topics</span>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="start-perspective" className="text-sm font-medium text-[var(--ink)]">
+              Perspective on faith topics
+            </label>
             <select
+              id="start-perspective"
               value={perspective}
               onChange={(e) => setPerspective(isPerspective(e.target.value) ? e.target.value : "neutral")}
               className="min-h-11 rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 text-base text-[var(--ink)]"
@@ -243,7 +246,7 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
               <input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} className="size-4" />
               Make this my default
             </label>
-          </label>
+          </div>
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-2 text-sm font-medium text-[var(--ink)]">Scripture readings</legend>
             <div className="grid grid-cols-3 gap-2">

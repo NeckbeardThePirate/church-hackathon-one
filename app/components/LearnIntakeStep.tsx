@@ -16,7 +16,7 @@ import { LearnStartForm, type StartPayload } from "./LearnStartForm";
 type Props = {
   projectId: string;
   learnPlanId?: string;
-  onStarted: (planId: string) => void;
+  onStarted: (planId: string, topic: string) => void;
   onComplete: (plan: LearnPlan) => void;
 };
 
@@ -128,7 +128,7 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete 
         setEvents([]);
         setSnapshot(null);
         setPlanId(body.planId);
-        onStarted(body.planId);
+        onStarted(body.planId, topic);
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "Could not start the path.");
       } finally {

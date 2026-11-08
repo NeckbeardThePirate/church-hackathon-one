@@ -117,11 +117,12 @@ export function WorkspaceApp() {
   }, []);
 
   const startedPlan = useCallback(
-    (planId: string) => {
+    (planId: string, topic: string) => {
+      const title = topic.trim().slice(0, 120);
       setProjects((prev) =>
         prev.some((p) => p.id === draft.id)
-          ? prev.map((p) => (p.id === draft.id ? { ...p, learnPlanId: planId, updatedAt: Date.now() } : p))
-          : [{ ...draft, learnPlanId: planId, updatedAt: Date.now() }, ...prev],
+          ? prev.map((p) => (p.id === draft.id ? { ...p, title, learnPlanId: planId, updatedAt: Date.now() } : p))
+          : [{ ...draft, title, learnPlanId: planId, updatedAt: Date.now() }, ...prev],
       );
       setActiveProjectId(draft.id);
       setView("building");
@@ -149,11 +150,10 @@ export function WorkspaceApp() {
   const completeLearnPlan = useCallback(
     (plan: LearnPlan) => {
       if (!activeProjectId) return;
-      const project = activeProjectRef.current;
       updateProject(activeProjectId, {
         learnPlan: plan,
         learnPlanId: undefined,
-        ...(project && !project.title.trim() ? { title: plan.title } : {}),
+        ...(plan.title?.trim() ? { title: plan.title } : {}),
         importComplete: true,
       });
       setView("path");
@@ -217,7 +217,12 @@ export function WorkspaceApp() {
             key={activeProject.id}
             projectId={activeProject.id}
             learnPlanId={activeProject.learnPlanId}
-            onStarted={(planId) => updateProject(activeProject.id, { learnPlanId: planId })}
+            onStarted={(planId, topic) =>
+              updateProject(activeProject.id, {
+                learnPlanId: planId,
+                ...(activeProject.title.trim() ? {} : { title: topic.trim().slice(0, 120) }),
+              })
+            }
             onComplete={completeLearnPlan}
           />
         ) : !isLegacyProject(activeProject) && activeProject.learnPlan ? (
