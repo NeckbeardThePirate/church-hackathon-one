@@ -78,6 +78,8 @@ export type BookResource = ResourceBase & {
   ratingsCount?: number;
   year?: number;
 };
+/** A passage the learner chose, resolved from the Bible database. */
+export type SourcePassage = { reference: string; text: string };
 export type ScriptureReading = { reference: string; text: string; note: string };
 
 /** Passage text retrieved from D1. The model does not write `text`. */

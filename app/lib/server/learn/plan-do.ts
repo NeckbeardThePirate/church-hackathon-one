@@ -16,7 +16,9 @@ import type {
   PlanStatus,
   ProgressEvent,
   ScopeResult,
+  SourcePassage,
 } from "@/app/lib/learn/types";
+import type { PassageRef } from "@/app/lib/bible/parse-reference";
 import type { LearnEnv, LearnMessage } from "./queues";
 
 export const BUDGET = {
@@ -36,6 +38,8 @@ type Meta = {
   userId: string;
   topic: string;
   notes: string;
+  /** Passages the learner chose. Absent on plans started before combined intake. */
+  passages?: PassageRef[];
   options: LearnOptions;
   status: PlanStatus;
   stage: LearnStage;
@@ -48,7 +52,7 @@ type Meta = {
   deadlineHit?: boolean;
 };
 
-type InitInput = { planId: string; userId: string; topic: string; notes: string; options: LearnOptions };
+type InitInput = { planId: string; userId: string; topic: string; notes: string; passages?: PassageRef[]; options: LearnOptions };
 
 const encoder = new TextEncoder();
 
@@ -98,6 +102,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     userId: string;
     topic: string;
     notes: string;
+    passages: PassageRef[];
     options: LearnOptions;
     status: PlanStatus;
     round: number;
@@ -109,6 +114,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       userId: m.userId,
       topic: m.topic,
       notes: m.notes,
+      passages: m.passages ?? [],
       options: m.options,
       status: m.status,
       round: m.round,
@@ -238,6 +244,15 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   }
 
   /* ---------------- plan data ---------------- */
+
+  /** Learner passages resolved against the Bible database (text is never model-written). */
+  async setSourcePassages(passages: SourcePassage[]): Promise<void> {
+    await this.ctx.storage.put("sourcePassages", passages);
+  }
+
+  async getSourcePassages(): Promise<SourcePassage[]> {
+    return (await this.ctx.storage.get<SourcePassage[]>("sourcePassages")) ?? [];
+  }
 
   async setScope(scope: ScopeResult): Promise<void> {
     await this.ctx.storage.put("scope", scope);

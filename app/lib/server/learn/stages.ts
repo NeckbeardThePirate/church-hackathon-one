@@ -3,6 +3,7 @@
  * M1 scope: intake → scope → plan → [teach → check] per lesson → critic → assemble.
  * Scripture readings are proposed by the model as references only; text comes from D1.
  */
+import { learnerContext, passagesForLesson } from "@/app/lib/learn/intake";
 import { findBibleReferences } from "@/app/lib/bible/parse-reference";
 import {
   LESSON_BANDS,
@@ -17,6 +18,7 @@ import {
   type QuizItem,
   type ScopeResult,
   type ScriptureReading,
+  type SourcePassage,
   type TeachBlock,
 } from "@/app/lib/learn/types";
 import { fetchPassageFromD1 } from "../bible-db";
@@ -55,7 +57,26 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, M
 
 export async function runIntake(ctx: Ctx): Promise<void> {
   const info = await ctx.stub.info();
-  await ctx.stub.event("intake", `Topic received (${info.notes ? "with notes" : "no notes"}).`);
+  // Learner passages: text comes from the Bible database only. Unresolved ones are reported, not guessed.
+  const found: SourcePassage[] = [];
+  const missing: string[] = [];
+  for (const ref of info.passages) {
+    const passage = ctx.env.BIBLE
+      ? await fetchPassageFromD1(ctx.env.BIBLE, ref.slug, ref.chapter, ref.verseStart, ref.verseEnd).catch(() => null)
+      : null;
+    if (!passage) missing.push(ref.label);
+    else if (!found.some((p) => p.reference === passage.reference)) {
+      found.push({ reference: passage.reference, text: passage.verses.map((v) => v.text).join(" ") });
+    }
+  }
+  await ctx.stub.setSourcePassages(found);
+
+  const sources = [
+    info.notes ? "notes" : "",
+    found.length ? `${found.length} passage${found.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  await ctx.stub.event("intake", `Topic received${sources.length ? ` with ${sources.join(" and ")}` : ""}.`);
+  if (missing.length) await ctx.stub.event("intake", `Passage not found in the Bible text: ${missing.join(", ")}`);
   await enqueue(ctx.env, { planId: ctx.msg.planId, stage: "scope", round: 0 });
 }
 
@@ -71,13 +92,15 @@ Return JSON:
  "prerequisites":["what the learner should already know"],"coreConcepts":["..."],
  "objectives":["3-6 course outcomes, each starting with a verb"],
  "isFaithRelevant":boolean}
-isFaithRelevant is true when the topic involves the Bible, Christian theology, church history, or Christian practice.`;
+isFaithRelevant is true when the topic involves the Bible, Christian theology, church history, or Christian practice.
+The learner may give a topic, notes, Bible passages, and text read from photos together. Treat all of them as one body of material and design one course that covers it.`;
 
 export async function runScope(ctx: Ctx): Promise<void> {
   const info = await ctx.stub.info();
+  const passages = await ctx.stub.getSourcePassages();
   const scope = await llm(ctx, "planner", {
     system: SCOPE_SYSTEM,
-    user: `Topic: ${info.topic}\n${info.notes ? `Learner notes:\n"""\n${clip(info.notes, 6000)}\n"""` : ""}`,
+    user: `Topic: ${info.topic}\n${learnerContext(info.notes, passages, { notes: 6000, passageChars: 3000 })}`,
     validate: (value): ScopeResult => {
       const o = obj(value);
       const complexity = o.complexity as Complexity;
@@ -96,7 +119,7 @@ export async function runScope(ctx: Ctx): Promise<void> {
     },
   });
 
-  if (info.options.includeScripture === "yes") scope.isFaithRelevant = true;
+  if (info.options.includeScripture === "yes" || passages.length) scope.isFaithRelevant = true;
   if (info.options.includeScripture === "no") scope.isFaithRelevant = false;
 
   await ctx.stub.setScope(scope);
@@ -113,6 +136,7 @@ export async function runScope(ctx: Ctx): Promise<void> {
 
 export async function runPlan(ctx: Ctx): Promise<void> {
   const info = await ctx.stub.info();
+  const passages = await ctx.stub.getSourcePassages();
   const scope = await requireScope(ctx);
   const band = LESSON_BANDS[scope.complexity];
   const n = scope.lessonCount;
@@ -128,7 +152,7 @@ Topic: ${info.topic}
 Prerequisites: ${scope.prerequisites.join("; ") || "none"}
 Core concepts: ${scope.coreConcepts.join("; ")}
 Course objectives:\n${scope.objectives.map((o, i) => `${i + 1}. ${o}`).join("\n")}
-${info.notes ? `Learner notes:\n"""\n${clip(info.notes, 4000)}\n"""` : ""}`,
+${learnerContext(info.notes, passages, { notes: 4000, passageChars: 2000 })}`,
     validate: (value): LessonOutline[] => {
       const raw = list(obj(value).lessons, "lessons", { min: n });
       return raw.slice(0, n).map((item, index) => {
@@ -449,6 +473,7 @@ export async function runTeach(ctx: Ctx): Promise<void> {
   if (!lesson) throw new Error(`Lesson ${lessonId} not found.`);
   const band = LESSON_BANDS[scope.complexity];
   const repair = await ctx.stub.repairNote(lessonId);
+  const passages = await ctx.stub.getSourcePassages();
 
   const result = await llm(ctx, "worker", {
     maxTokens: 6000,
@@ -481,7 +506,7 @@ ${
       ].join("\n")}`
     : ""
 }
-${info.notes ? `Learner notes:\n"""\n${clip(info.notes, 3000)}\n"""` : ""}
+${learnerContext(info.notes, passages, { notes: 3000, passageChars: 2000 })}
 ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
     validate: (value) => {
       const o = obj(value);
@@ -511,9 +536,16 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
     },
   });
 
-  const { readings, dropped } = scope.isFaithRelevant
+  const verified = scope.isFaithRelevant
     ? await verifyScripture(ctx.env, result.refs.slice(0, 3))
-    : { readings: [], dropped: [] as string[] };
+    : { readings: [] as ScriptureReading[], dropped: [] as string[] };
+  const { dropped } = verified;
+  // Every passage the learner chose lands in a lesson (spread across lessons); text is from the Bible database.
+  const own = info.options.includeScripture === "no" ? [] : passagesForLesson(passages, lesson.order, lessons.length);
+  const readings = [
+    ...own.filter((p) => !verified.readings.some((r) => r.reference === p.reference)).map((p) => ({ ...p, note: "A passage you chose." })),
+    ...verified.readings,
+  ];
   const library = scope.isFaithRelevant
     ? await citeLibrary(
         ctx.env,

@@ -51,11 +51,3 @@ export async function runOcrForKey(projectId: string, key: string): Promise<OcrR
     body: JSON.stringify({ key }),
   });
 }
-
-export function mergeStructuredText(existing: string, chunk: string, fileName: string): string {
-  const trimmed = chunk.trim();
-  if (!trimmed) return existing;
-  const header = fileName ? `[${fileName}]` : "";
-  const block = header ? `${header}\n${trimmed}` : trimmed;
-  return existing.trim() ? `${existing.trim()}\n\n---\n\n${block}` : block;
-}

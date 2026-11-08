@@ -112,7 +112,7 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete 
   }, [events.length]);
 
   const start = useCallback(
-    async ({ topic, notes, perspective, includeScripture, makeDefault }: StartPayload) => {
+    async ({ topic, notes, passages, photos, perspective, includeScripture, makeDefault }: StartPayload) => {
       setError(null);
       setStarting(true);
       try {
@@ -121,14 +121,14 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete 
           method: "POST",
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ topic, notes, options: { perspective, includeScripture } }),
+          body: JSON.stringify({ topic, notes, passages, photos, options: { perspective, includeScripture } }),
         });
-        const body = (await res.json().catch(() => ({}))) as { planId?: string; error?: string };
+        const body = (await res.json().catch(() => ({}))) as { planId?: string; topic?: string; error?: string };
         if (!res.ok || !body.planId) throw new Error(body.error ?? `Could not start (${res.status}).`);
         setEvents([]);
         setSnapshot(null);
         setPlanId(body.planId);
-        onStarted(body.planId, topic);
+        onStarted(body.planId, body.topic ?? topic);
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "Could not start the path.");
       } finally {
