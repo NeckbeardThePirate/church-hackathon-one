@@ -54,7 +54,7 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
       <div className="safe-area-x rounded-xl border border-[var(--line)] bg-[var(--sidebar)] p-5 sm:p-6 text-[var(--ink)]">
         <h1 className="font-serif text-2xl tracking-[-0.02em]">StudyBuddy</h1>
         <p className="mt-2 text-sm leading-relaxed text-[var(--ink-muted)]">
-          Turn a topic or your notes into a study plan cited to Scripture, the Reformed confessions, and the church fathers.
+          Learn paths cited to Scripture, the confessions, and the church fathers.
         </p>
         <div className="mt-5 flex flex-col gap-2">
           <a
@@ -76,7 +76,7 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
         </div>
         {error ? <p className="mt-4 text-sm text-[#c0533f]">{error}</p> : null}
         <p className="mt-4 text-xs leading-relaxed text-[var(--ink-muted)]">
-          Study plans run on Workers AI. If you grant ChatGPT plan usage, it is stored for your account and used only when Workers AI fails and a fallback model is configured.
+          Learn paths run on Workers AI. If you grant ChatGPT plan usage, it is stored for your account and used only when Workers AI fails and a fallback model is configured.
         </p>
       </div>
     </div>

@@ -16,7 +16,7 @@ const serif = Newsreader({
 
 export const metadata: Metadata = {
   title: "StudyBuddy",
-  description: "Discipleship study plans cited to Scripture, the confessions, and the church fathers.",
+  description: "Learn paths built from a topic, notes, a passage, or a photo, cited to Scripture, the confessions, and the church fathers.",
 };
 
 export const viewport: Viewport = {

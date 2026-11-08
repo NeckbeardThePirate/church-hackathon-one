@@ -1,6 +1,8 @@
 # StudyBuddy
 
-StudyBuddy turns a topic or your notes into an ongoing study plan cited to Scripture (Berean Study Bible), the Reformed confessions, and the church fathers, then walks you through the lessons and quiz.
+StudyBuddy is a Learn Path app. Start from a topic, notes, a Bible passage, or a photo of a page, and it builds a step-by-step path of lessons, readings, and quizzes cited to Scripture (Berean Study Bible), the Reformed confessions, and the church fathers. Then you work through it with a tutor chat alongside.
+
+The start screen is the app. Paths you build are listed in the sidebar. Lesson and Study notes saved by earlier versions are not deleted: they stay in the workspace and open read-only under “Archived”.
 
 It is a [vinext](https://github.com/cloudflare/vinext) app deployed as one Cloudflare Worker named `church-hackathon`. Bindings and queues live in `cloudflare.config.ts`. That file is the deploy source of truth. `wrangler.jsonc` only names the Worker so older tooling can find the account.
 
@@ -21,6 +23,6 @@ Clerk sign-in is offered alongside ChatGPT when `CLERK_SECRET_KEY` is set. The p
 
 `DEV_AUTH=1` enables a loopback-only “Continue on this computer” button. It is refused on every other host. Leave it unset in production.
 
-Study plans call Workers AI (through the `study-buddy` AI Gateway when that gateway accepts the call). A stored ChatGPT plan token is used only if Workers AI fails and `LEARN_CHATGPT_MODEL` is set.
+Learn paths call Workers AI (through the `study-buddy` AI Gateway when that gateway accepts the call). A stored ChatGPT plan token is used only if Workers AI fails and `LEARN_CHATGPT_MODEL` is set.
 
 Copy `.dev.vars.example` to `.dev.vars` and `.env.local.example` to `.env.local`. Never commit those files.

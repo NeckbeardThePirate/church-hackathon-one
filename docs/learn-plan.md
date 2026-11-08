@@ -1,6 +1,6 @@
 # Learn Pipeline — Implementation Plan
 
-Status: draft · Scope: the `learn` project kind · No code changes in this doc.
+Status: draft · Scope: the Learn Path pipeline, which is now the only project kind (`lesson`/`study` records from earlier versions open read-only) · No code changes in this doc.
 
 ## 1. Goal
 
@@ -11,7 +11,7 @@ A user gives the Learn project a topic as **text**, **images**, or both. An agen
 - Course level: book list, final assessment, prerequisite map.
 - Reviews on every resource, with the basis for each review stated.
 
-Output lands in the existing editor as normal blocks, plus a structured `learnPlan` on the project.
+Output is a structured `learnPlan` on the project, shown in the Learn plan view.
 
 **Non-goals (v1)**
 - Live web browsing by the model. Tools fetch; the model only selects and writes.
