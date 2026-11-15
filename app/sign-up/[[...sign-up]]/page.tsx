@@ -1,6 +1,7 @@
 "use client";
 
 import { SignUp } from "@clerk/react";
+import { AuthChrome } from "../../components/AuthChrome";
 import { useClerkKey } from "../../components/ClerkAppProvider";
 import { SignInChoices } from "../../components/SignInChoices";
 
@@ -8,16 +9,14 @@ export default function SignUpPage() {
   const { key: publishableKey } = useClerkKey();
   if (!publishableKey) {
     return (
-      <div className="safe-area-x flex min-h-dvh items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]">
+      <AuthChrome>
         <SignInChoices />
-      </div>
+      </AuthChrome>
     );
   }
   return (
-    <div className="safe-area-x flex min-h-dvh items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]">
-      <div className="w-full max-w-[min(100%,420px)]">
-        <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />
-      </div>
-    </div>
+    <AuthChrome>
+      <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />
+    </AuthChrome>
   );
 }
