@@ -25,8 +25,15 @@ const LEARN_DLQ = "learn-dlq";
 /** Remote bindings need CLOUDFLARE_API_TOKEN. Without it, `vite dev` uses local simulations. */
 const useRemote = Boolean(process.env.CLOUDFLARE_API_TOKEN);
 const devBinding = { remote: useRemote };
-const learnConsumer = (name: string, maxConcurrency: number | null = null) =>
-  triggers.queue({ name, deadLetterQueue: LEARN_DLQ, maxBatchSize: 5, maxBatchTimeout: 1, maxRetries: 3, maxConcurrency });
+const learnConsumer = (name: string, maxConcurrency?: number) =>
+  triggers.queue({
+    name,
+    deadLetterQueue: LEARN_DLQ,
+    maxBatchSize: 5,
+    maxBatchTimeout: 1,
+    maxRetries: 3,
+    ...(typeof maxConcurrency === "number" ? { maxConcurrency } : {}),
+  });
 
 export default defineConfig({
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
