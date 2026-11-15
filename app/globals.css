@@ -1,3 +1,4 @@
+@layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 
 :root {
@@ -65,6 +66,24 @@ select {
 
 kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Clerk's development-mode chrome has no stable appearance key. Keep the notice, drop the orange stripe. */
+[data-clerk-dev-mode-overlay] {
+  display: none;
+}
+
+[data-clerk-dev-mode-notice] {
+  color: var(--ink-muted) !important;
+  font-size: 0.75rem;
+}
+
+.cl-scrollBox,
+.cl-pageScrollBox,
+.cl-userButtonPopoverCard,
+.cl-modalContent,
+.cl-drawerBody {
+  scrollbar-gutter: stable;
 }
 
 .learn-article a {

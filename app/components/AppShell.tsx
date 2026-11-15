@@ -201,7 +201,11 @@ export function AppShell({
             <UserButton
               appearance={{
                 elements: {
-                  avatarBox: sidebarInnerCompact ? "size-9" : "size-10",
+                  avatarBox: { width: sidebarInnerCompact ? "2.25rem" : "2.5rem", height: sidebarInnerCompact ? "2.25rem" : "2.5rem" },
+                  userButtonAvatarBox: {
+                    width: sidebarInnerCompact ? "2.25rem" : "2.5rem",
+                    height: sidebarInnerCompact ? "2.25rem" : "2.5rem",
+                  },
                 },
               }}
             />

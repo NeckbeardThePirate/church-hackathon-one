@@ -1,8 +1,8 @@
 "use client";
 
 import { ClerkProvider } from "@clerk/react";
-import { dark } from "@clerk/themes";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { studyBuddyClerkAppearance } from "./clerk-appearance";
 
 /** Build-time key if set, otherwise the Worker serves it from /api/auth/providers. */
 const ClerkKeyContext = createContext<{ key: string | null; ready: boolean }>({ key: null, ready: false });
@@ -45,19 +45,7 @@ export function ClerkAppProvider({ children }: { children: ReactNode }) {
         signInFallbackRedirectUrl="/"
         signUpFallbackRedirectUrl="/"
         afterSignOutUrl="/"
-        appearance={{
-          theme: dark,
-          variables: {
-            colorBackground: "#191919",
-            colorInput: "#202020",
-            colorPrimary: "#c9b896",
-          },
-          elements: {
-            rootBox: "w-full max-w-[min(100vw-2rem,420px)]",
-            cardBox: "w-full shadow-none",
-            card: "w-full",
-          },
-        }}
+        appearance={studyBuddyClerkAppearance}
       >
         {children}
       </ClerkProvider>
