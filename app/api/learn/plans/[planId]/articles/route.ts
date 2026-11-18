@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { ownedPlan } from "@/app/lib/server/learn/api";
 import { loadArticleText } from "@/app/lib/server/learn/article-fetch";
+import { exaAuthFrom } from "@/app/lib/server/learn/exa";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function POST(request: Request, context: { params: Promise<{ planId
         get: (key) => owned.stub.getScratch(key),
         put: (key, value) => owned.stub.putScratch(key, value),
       },
-      env.EXA_API_KEY,
+      exaAuthFrom(env),
       article,
     );
     if (!text) {

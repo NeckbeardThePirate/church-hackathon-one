@@ -17,12 +17,12 @@ It is a [vinext](https://github.com/cloudflare/vinext) app deployed as one Cloud
 
 ## Auth
 
-Sign in with ChatGPT (OpenID Connect + PKCE) is the path that does not need another vendor. On a public host it needs `OPENAI_CLIENT_ID` from an OpenAI OAuth client you register. On `http://127.0.0.1` the open-source dynamic client can register without a secret.
+Sign in with ChatGPT (OpenID Connect + PKCE) is the path that does not need another vendor. `OPENAI_CLIENT_ID` and `OPENAI_CLIENT_SECRET` are optional at deploy. On a public host, sign-in needs `OPENAI_CLIENT_ID` from an OpenAI OAuth client you register; without it the start route redirects with a clear error. On `http://127.0.0.1` the open-source dynamic client can register without a secret. A public PKCE client leaves `OPENAI_CLIENT_SECRET` unset. A confidential client that is missing the secret fails sign-in with an error that names it.
 
-Clerk sign-in is offered alongside ChatGPT when `CLERK_SECRET_KEY` is set. The publishable key comes from `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_PUBLISHABLE_KEY` if set, otherwise the Worker derives it from the secret key and serves it at `/api/auth/providers`.
+Clerk sign-in is offered alongside ChatGPT when `CLERK_SECRET_KEY` is set. The publishable key comes from `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_PUBLISHABLE_KEY` if set, otherwise the Worker derives it from the secret key and serves it at `/api/auth/providers`. The publishable key is public, but this repo does not contain a real `pk_test_` / `pk_live_` value, so `CLERK_PUBLISHABLE_KEY` stays a required secret.
 
 `DEV_AUTH=1` enables a loopback-only “Continue on this computer” button. It is refused on every other host. Leave it unset in production.
 
-Learn paths call Workers AI (through the `study-buddy` AI Gateway when that gateway accepts the call). A stored ChatGPT plan token is used only if Workers AI fails and `LEARN_CHATGPT_MODEL` is set.
+Learn paths call Workers AI (through the `study-buddy` AI Gateway when that gateway accepts the call). A stored ChatGPT plan token is used only if Workers AI fails. The fallback model is the plain var `LEARN_CHATGPT_MODEL` (`gpt-6-luna`). Exa search and page text go through that same gateway's custom provider `exa`, authenticated with `AI_GATEWAY_TOKEN`. `EXA_API_KEY` is optional and is not sent when unset.
 
 Copy `.dev.vars.example` to `.dev.vars` and `.env.local.example` to `.env.local`. Never commit those files.

@@ -300,8 +300,7 @@ Auth: required before deploy (§9). Plans are keyed by `planId` (UUID), validate
 **Secrets**
 - New: `EXA_API_KEY`, `YOUTUBE_API_KEY`, optional `GOOGLE_BOOKS_API_KEY`, AI Gateway ID (and token if the gateway requires one).
 - Set via `wrangler secret put` in production. Add placeholders to `.dev.vars.example`. Never commit values.
-- **Exa (M3, current):** `EXA_API_KEY` only. Search and `/contents` call `api.exa.ai` directly (`app/lib/server/learn/exa.ts`). AI Gateway covers Learn **model** calls only.
-- **Exa (later):** Web Search API through the same gateway (`provider: exa`, optional BYOK) for observability/unified billing on search; keep direct `/contents` for verify until CF exposes domain filters and Exa-style per-URL statuses.
+- **Exa (current):** Search and `/contents` go through the AI Gateway custom provider `exa` (`custom-exa` on the gateway URL, base URL `https://api.exa.ai`). Requests send `cf-aig-authorization: Bearer AI_GATEWAY_TOKEN`. `EXA_API_KEY` is optional and is sent as `x-api-key` only when set; otherwise the gateway's stored Exa key is used. Without a gateway token and without `EXA_API_KEY`, research skips Exa and the plan still builds.
 
 **Cost controls**
 - YouTube quota: cache `search.list` results per query for 7 days (KV or D1). Expect a few hundred plan-starts per day at most on the default quota; request a quota increase if usage grows.
@@ -348,7 +347,7 @@ M1 and M2 can overlap with M0 results. M3 depends on the video discovery decisio
 - **M0(b) passed.** SSE from the DO streams through the vinext route.
 - **M1 done** (text only). Intake → scope → plan → teach+quiz → check → critic (repair loop) → assemble, with live progress in the UI. Scripture readings (M2 item) are included: refs verified in D1, text never model-generated. Perspective modes (neutral / tradition) work.
 - **Test runs (local dev, Workers AI glm, no gateway):** "How to pray the Psalms" (moderate, 4 lessons, 2 repair rounds, 266 s); "How to tie a bowline knot" (simple, 2 lessons, no scripture, 109 s); "Infant baptism", Reformed (moderate, 4 lessons, 271 s). All quiz items confirmed by Lesson Check after regen.
-- **M3 built, untested against Exa** (no key available at build time). New per-lesson queues `learn-research` (Exa search for articles + YouTube-domain search for videos; verify via Exa `/contents` statuses and YouTube oEmbed) and `learn-review` (model selects from verified candidates by id; reviews grounded in fetched text; videos labeled "reviewed from description"). Videos use oEmbed instead of the YouTube Data API: no key, no quota (D8). All 10 queues created in the Cloudflare account. Without `EXA_API_KEY`, research is skipped and the plan still builds.
+- **M3 built, untested against Exa** (no key available at build time). New per-lesson queues `learn-research` (Exa search for articles + YouTube-domain search for videos; verify via Exa `/contents` statuses and YouTube oEmbed) and `learn-review` (model selects from verified candidates by id; reviews grounded in fetched text; videos labeled "reviewed from description"). Videos use oEmbed instead of the YouTube Data API: no key, no quota (D8). All 10 queues created in the Cloudflare account. Exa is called through AI Gateway without `EXA_API_KEY`. Without a gateway token and without that key, research is skipped and the plan still builds.
 - **Not done:** M0(c) planner reliability on all 12 golden topics; M0(d)/(e) Exa and YouTube spikes; M2 books + library; M3 Exa articles/videos + reviews; M4 images; M5 rate limits + eval script. Queue names, idempotency, and budgets are in place for the remaining stages.
 
 ## 12. Files likely touched

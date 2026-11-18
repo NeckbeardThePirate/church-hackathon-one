@@ -33,6 +33,12 @@ function textFromResponse(body: unknown): string {
   return parts.join("").trim();
 }
 
+function openAiClientSecret(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "OPENAI_CLIENT_SECRET") return undefined;
+  return trimmed;
+}
+
 async function refresh(stored: Stored, clientSecret?: string): Promise<Stored> {
   if (!stored.refreshToken) throw new Error("ChatGPT session cannot be refreshed.");
   const body = new URLSearchParams({
@@ -76,9 +82,18 @@ export async function chatGptText(
   let stored = (await stub.getOauth()) as ChatGptIdentity | null;
   if (!stored?.compute || !stored.accessToken) return null;
   if (stored.expiresAt < Date.now() + 60_000) {
-    const next = await refresh(stored, env.OPENAI_CLIENT_SECRET);
-    await stub.setOauth(next);
-    stored = next;
+    const secret = openAiClientSecret(env.OPENAI_CLIENT_SECRET);
+    try {
+      const next = await refresh(stored, secret);
+      await stub.setOauth(next);
+      stored = next;
+    } catch (error) {
+      if (secret) throw error;
+      console.warn(
+        "[learn] ChatGPT plan fallback skipped: token refresh failed and OPENAI_CLIENT_SECRET is unset. A public PKCE client can refresh without it; a confidential client needs the secret.",
+      );
+      return null;
+    }
   }
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",

@@ -9,6 +9,8 @@ const ERRORS: Record<string, string> = {
   chatgpt_state: "That sign-in attempt expired. Try again.",
   chatgpt_client: "ChatGPT did not return a client id for this registration.",
   chatgpt_failed: "ChatGPT sign-in did not finish. Try again.",
+  chatgpt_client_secret:
+    "ChatGPT rejected this sign-in and OPENAI_CLIENT_SECRET is not set. A public PKCE client does not need it. A confidential OpenAI client does.",
   session_secret: "Set SESSION_SECRET before signing in on a public host.",
 };
 

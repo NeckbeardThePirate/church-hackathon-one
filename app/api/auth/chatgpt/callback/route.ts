@@ -49,7 +49,7 @@ export async function GET(request: Request): Promise<Response> {
       code,
       verifier: pending.verifier,
       redirectUri: pending.redirectUri,
-      clientSecret: env.OPENAI_CLIENT_SECRET,
+      clientSecret: openAiClientSecret(env.OPENAI_CLIENT_SECRET),
     });
     if (!token.id_token) return redirectError(request, "chatgpt_failed");
     const profile = await verifyIdToken(token.id_token, { nonce: pending.nonce, clientId });
@@ -75,7 +75,18 @@ export async function GET(request: Request): Promise<Response> {
     );
     return new Response(response.body, { status: response.status, headers });
   } catch (error) {
-    console.error("[auth] ChatGPT callback failed:", error instanceof Error ? error.message : error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[auth] ChatGPT callback failed:", message);
+    if (!openAiClientSecret(env.OPENAI_CLIENT_SECRET) && /token exchange failed/.test(message)) {
+      return redirectError(request, "chatgpt_client_secret");
+    }
     return redirectError(request, "chatgpt_failed");
   }
+}
+
+/** Unset, blank, and the binding-name placeholder all mean "no client secret". */
+function openAiClientSecret(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "OPENAI_CLIENT_SECRET") return undefined;
+  return trimmed;
 }

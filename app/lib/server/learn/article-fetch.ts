@@ -1,5 +1,5 @@
 import { ARTICLE_TEXT_MAX, type FetchedArticle } from "@/app/lib/learn/article";
-import { exaContents } from "./exa";
+import { exaContents, exaReady, type ExaAuth } from "./exa";
 import { htmlToArticleText, publicArticleUrl } from "./readable-html";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -78,13 +78,14 @@ async function fetchPublicHtml(start: string): Promise<string | null> {
 }
 
 /**
- * Article body for the reading window. Uses a plan-DO cache, then Exa /contents,
+ * Article body for the reading window. Uses a plan-DO cache, then Exa /contents
+ * (through AI Gateway, or directly when only EXA_API_KEY is set),
  * then a direct HTML extract when Exa is missing or only returns a snippet.
  * Only call this with a URL already stored on the caller's plan.
  */
 export async function loadArticleText(
   cache: ArticleTextCache,
-  apiKey: string | undefined,
+  exa: ExaAuth,
   article: { url: string; title: string; siteName?: string },
 ): Promise<FetchedArticle | null> {
   if (!publicArticleUrl(article.url)) return null;
@@ -94,17 +95,17 @@ export async function loadArticleText(
   if (cached) return cached;
 
   let best: FetchedArticle | null = null;
-  if (apiKey) {
+  if (exaReady(exa)) {
     try {
-      const exa = await exaContents(apiKey, url, ARTICLE_TEXT_MAX);
-      if (exa?.text && exa.text.length >= 80) {
+      const fetched = await exaContents(exa, url, ARTICLE_TEXT_MAX);
+      if (fetched?.text && fetched.text.length >= 80) {
         best = {
           url,
-          title: article.title || exa.title,
-          author: exa.author,
+          title: article.title || fetched.title,
+          author: fetched.author,
           siteName: article.siteName || hostOf(url),
-          text: exa.text,
-          truncated: exa.text.length >= ARTICLE_TEXT_MAX - 32,
+          text: fetched.text,
+          truncated: fetched.text.length >= ARTICLE_TEXT_MAX - 32,
         };
       }
     } catch {
