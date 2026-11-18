@@ -1,6 +1,6 @@
-import { normalizeBlockType, type BlockType } from "./block-types";
-import type { LearnPlanProgress } from "./learn/plan-progress";
-import type { LearnPlan } from "./learn/types";
+import { normalizeBlockType, type BlockType } from "./block-types.ts";
+import { normalizeLearnProgress, type LearnPlanProgress } from "./learn/plan-progress.ts";
+import { lessonKind, type LearnPlan } from "./learn/types.ts";
 
 export type ProjectKind = "learn";
 
@@ -100,13 +100,38 @@ export function defaultTitle(project: Project): string {
   return "Untitled path";
 }
 
-function hydrateProject(project: Project): Project {
+/**
+ * Fill defaults added after a project was saved.
+ * Lesson/study archives have neither learnPlan nor learnProgress and are returned as-is.
+ * Missing LearnLesson.kind becomes "core". Progress is upgraded to v3.
+ */
+export function normalizeStoredProject(project: Project): Project {
+  if (!project.learnPlan && project.learnProgress == null) return project;
   return {
+    ...project,
+    ...(project.learnPlan ? { learnPlan: normalizeStoredLearnPlan(project.learnPlan) } : {}),
+    ...(project.learnProgress != null ? { learnProgress: normalizeLearnProgress(project.learnProgress) } : {}),
+  };
+}
+
+function normalizeStoredLearnPlan(plan: LearnPlan): LearnPlan {
+  if (!Array.isArray(plan.lessons)) return plan;
+  return {
+    ...plan,
+    lessons: plan.lessons.map((lesson) => {
+      if (!lesson || typeof lesson !== "object") return lesson;
+      return { ...lesson, kind: lessonKind(lesson) };
+    }),
+  };
+}
+
+function hydrateProject(project: Project): Project {
+  return normalizeStoredProject({
     ...project,
     importComplete: project.importComplete ?? true,
     sourceImages: project.sourceImages ?? (project.sourceImage ? [project.sourceImage] : undefined),
     blocks: Array.isArray(project.blocks) ? project.blocks.map((block) => normalizeBlock(block)) : [newBlock()],
-  };
+  });
 }
 
 /** Local notes from before the workspace Durable Object. Does not seed. */

@@ -19,6 +19,8 @@ import type {
   SourcePassage,
 } from "@/app/lib/learn/types";
 import type { PassageRef } from "@/app/lib/bible/parse-reference";
+import type { PlanAttemptRecord } from "@/app/lib/learn/attempts";
+import { normalizeLearnProgress, type ConceptMastery } from "@/app/lib/learn/plan-progress";
 import type { LearnEnv, LearnMessage } from "./queues";
 
 export const BUDGET = {
@@ -300,6 +302,39 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
 
   async putLesson(lesson: LearnLesson): Promise<void> {
     await this.ctx.storage.put(`lesson:${lesson.id}`, lesson);
+  }
+
+  /** Mastery written by the attempt API. Empty until the first submitted attempt. */
+  async getConceptMastery(): Promise<Record<string, ConceptMastery>> {
+    const stored = await this.ctx.storage.get<unknown>("conceptMastery");
+    return normalizeLearnProgress({ conceptMastery: stored ?? {} }).conceptMastery;
+  }
+
+  /**
+   * Append a quiz or review attempt and replace the plan's conceptMastery
+   * with the server copy. Scheduling math is intentionally not applied here.
+   */
+  async recordLearnAttempt(record: PlanAttemptRecord): Promise<void> {
+    if (record.target !== "lesson" && record.target !== "final" && record.target !== "review") {
+      throw new Error("Invalid attempt.");
+    }
+    if (!Array.isArray(record.answers) || record.answers.length < 1 || record.answers.length > 30) {
+      throw new Error("Invalid attempt.");
+    }
+    if (!record.conceptMastery || typeof record.conceptMastery !== "object") {
+      throw new Error("Invalid attempt.");
+    }
+    const mastery = normalizeLearnProgress({ conceptMastery: record.conceptMastery }).conceptMastery;
+    const prev = await this.ctx.storage.get<unknown>("attempts");
+    const attempts = Array.isArray(prev) ? prev : [];
+    attempts.push({
+      at: record.at,
+      target: record.target,
+      ...(record.lessonId ? { lessonId: record.lessonId } : {}),
+      answers: record.answers,
+    });
+    await this.ctx.storage.put("attempts", attempts.slice(-100));
+    await this.ctx.storage.put("conceptMastery", mastery);
   }
 
   /** Intermediate stage data (e.g. research candidates) passed between queues by key. */

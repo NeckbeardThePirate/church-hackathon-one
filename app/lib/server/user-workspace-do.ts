@@ -3,8 +3,15 @@
  * Owns notes/projects and small prefs. Learn pipeline state stays on LearnPlanDO.
  */
 import { DurableObject } from "cloudflare:workers";
+import { normalizeStoredProject, type Project, type StoredProjectKind } from "@/app/lib/projects";
 import type { ChatGptIdentity } from "./chatgpt-auth";
-import type { Project, StoredProjectKind } from "@/app/lib/projects";
+import {
+  applyWorkspaceMigrations,
+  readLearnerStats,
+  setLearnerStats as persistLearnerStats,
+  type LearnerStats,
+  type WorkspaceSql,
+} from "./user-workspace-schema";
 
 /** Lesson/study stay valid so projects saved by earlier versions keep loading and saving. */
 const KINDS = new Set<StoredProjectKind>(["lesson", "study", "learn"]);
@@ -34,47 +41,7 @@ export class UserWorkspaceDO extends DurableObject {
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS _sql_schema_migrations (
-          id INTEGER PRIMARY KEY,
-          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-      `);
-      const version = this.ctx.storage.sql
-        .exec<{ version: number }>("SELECT COALESCE(MAX(id), 0) AS version FROM _sql_schema_migrations")
-        .one().version;
-
-      if (version < 1) {
-        this.ctx.storage.sql.exec(`
-          CREATE TABLE IF NOT EXISTS projects (
-            id TEXT PRIMARY KEY,
-            kind TEXT NOT NULL,
-            title TEXT NOT NULL,
-            updated_at INTEGER NOT NULL,
-            import_complete INTEGER NOT NULL,
-            payload TEXT NOT NULL
-          )
-        `);
-        this.ctx.storage.sql.exec(
-          "CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects (updated_at DESC)",
-        );
-        this.ctx.storage.sql.exec(`
-          CREATE TABLE IF NOT EXISTS prefs (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-          )
-        `);
-        this.ctx.storage.sql.exec("INSERT INTO _sql_schema_migrations (id) VALUES (1)");
-      }
-      if (version < 2) {
-        this.ctx.storage.sql.exec(`
-          CREATE TABLE IF NOT EXISTS oauth (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            payload TEXT NOT NULL
-          )
-        `);
-        this.ctx.storage.sql.exec("INSERT INTO _sql_schema_migrations (id) VALUES (2)");
-      }
+      applyWorkspaceMigrations(workspaceSql(this.ctx.storage.sql));
     });
   }
 
@@ -113,7 +80,7 @@ export class UserWorkspaceDO extends DurableObject {
     for (const row of rows) {
       try {
         const parsed = JSON.parse(row.payload) as unknown;
-        if (isProject(parsed)) projects.push(parsed);
+        if (isProject(parsed)) projects.push(normalizeStoredProject(parsed));
       } catch {
         // Skip a corrupt row rather than failing the whole workspace.
       }
@@ -128,7 +95,7 @@ export class UserWorkspaceDO extends DurableObject {
     if (!row) return null;
     try {
       const parsed = JSON.parse(row.payload) as unknown;
-      return isProject(parsed) ? parsed : null;
+      return isProject(parsed) ? normalizeStoredProject(parsed) : null;
     } catch {
       return null;
     }
@@ -141,18 +108,28 @@ export class UserWorkspaceDO extends DurableObject {
     return row.n > 0;
   }
 
+  findProjectByLearnPlan(planId: string): Project | null {
+    if (!planId || planId.length > 80) return null;
+    // listProjects is newest first.
+    for (const project of this.listProjects()) {
+      if (project.learnPlanId === planId || project.learnPlan?.id === planId) return project;
+    }
+    return null;
+  }
+
   upsertProject(input: unknown): Project {
     if (!isProject(input)) {
       throw new Error("Invalid project.");
     }
+    const project = normalizeStoredProject(input);
     const existing = this.ctx.storage.sql
       .exec<{ updated_at: number }>("SELECT updated_at FROM projects WHERE id = ?", input.id)
       .toArray()[0];
     // A slower request must not overwrite a newer edit of the same note.
-    if (existing && existing.updated_at > input.updatedAt) {
-      return this.getProject(input.id) ?? input;
+    if (existing && existing.updated_at > project.updatedAt) {
+      return this.getProject(project.id) ?? project;
     }
-    const payload = JSON.stringify(input);
+    const payload = JSON.stringify(project);
     this.ctx.storage.sql.exec(
       `INSERT INTO projects (id, kind, title, updated_at, import_complete, payload)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -162,14 +139,14 @@ export class UserWorkspaceDO extends DurableObject {
          updated_at = excluded.updated_at,
          import_complete = excluded.import_complete,
          payload = excluded.payload`,
-      input.id,
-      input.kind,
-      input.title.slice(0, 500),
-      input.updatedAt,
-      input.importComplete ? 1 : 0,
+      project.id,
+      project.kind,
+      project.title.slice(0, 500),
+      project.updatedAt,
+      project.importComplete ? 1 : 0,
       payload,
     );
-    return input;
+    return project;
   }
 
   deleteProject(id: string): void {
@@ -182,6 +159,15 @@ export class UserWorkspaceDO extends DurableObject {
       .exec<{ value: string }>("SELECT value FROM prefs WHERE key = ?", key)
       .toArray()[0];
     return row?.value ?? null;
+  }
+
+  /** Zeros and a null timezone when the learner has no stats row yet. */
+  getLearnerStats(): LearnerStats {
+    return readLearnerStats(workspaceSql(this.ctx.storage.sql));
+  }
+
+  setLearnerStats(input: unknown): LearnerStats {
+    return persistLearnerStats(workspaceSql(this.ctx.storage.sql), input);
   }
 
   setPref(key: string, value: string): void {
@@ -198,4 +184,16 @@ export class UserWorkspaceDO extends DurableObject {
 
 function isPrefKey(key: string): boolean {
   return /^[a-z0-9-]{1,64}$/.test(key);
+}
+
+function workspaceSql(sql: DurableObjectState["storage"]["sql"]): WorkspaceSql {
+  return {
+    exec(query, ...bindings) {
+      const cursor = sql.exec(query, ...bindings);
+      return {
+        one: () => cursor.one(),
+        toArray: () => cursor.toArray(),
+      };
+    },
+  };
 }
