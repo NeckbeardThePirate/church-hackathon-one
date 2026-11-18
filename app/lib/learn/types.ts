@@ -60,6 +60,16 @@ export type QuizItem = {
   rationale: string;
   objectiveIndex: number;
   sourceRef?: string;
+  /**
+   * Stable slug, e.g. "l2-justification".
+   * Optional on read so plans saved before concept tags still load.
+   * The teach pipeline writes this on newly generated items.
+   */
+  conceptId?: string;
+  /** Short human label. Optional on read for the same reason as conceptId. */
+  conceptLabel?: string;
+  /** Item-bank sibling generated at teach time. Not itself nested. */
+  alternate?: Omit<QuizItem, "alternate">;
 };
 
 export type ResourceBase = {
@@ -126,7 +136,16 @@ export type LearnLesson = LessonOutline & {
   library?: LibraryCitation[];
   quiz: QuizItem[];
   warnings: string[];
+  /** Missing on plans already stored. Treat that as "core". */
+  kind?: "core" | "gap";
+  sourceLessonId?: string;
+  sourceConceptIds?: string[];
 };
+
+/** Stored plans omit kind. Anything other than an explicit gap lesson is core. */
+export function lessonKind(lesson: { kind?: string }): "core" | "gap" {
+  return lesson.kind === "gap" ? "gap" : "core";
+}
 
 export type LearnPlan = {
   id: string;

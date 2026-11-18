@@ -18,8 +18,28 @@ export type PersistedQuiz = {
   answers: PersistedQuizAnswer[];
 };
 
+/** SM-2 row for one concept. Scheduling fields stay at defaults until the review card. */
+export type ConceptMastery = {
+  conceptId: string;
+  conceptLabel: string;
+  lessonId: string;
+  easiness: number;
+  repetitions: number;
+  intervalDays: number;
+  dueAt: number;
+  lastQuality: number | null;
+  lastReviewedAt: number | null;
+  correctStreak: number;
+  gapPlanId?: string;
+  /**
+   * Monotonic generation assigned by the plan DO when the row is created or changed.
+   * Workspace mirrors keep the higher revision. Absent on rows written before versions existed.
+   */
+  masteryRev?: number;
+};
+
 export type LearnPlanProgress = {
-  v: 2;
+  v: 3;
   location: LearnLocation;
   /** Scroll depth 0–100 per lesson (reading). */
   lessonReadScroll: Record<string, number>;
@@ -30,7 +50,28 @@ export type LearnPlanProgress = {
   articleScroll: Record<string, number>;
   /** Explicitly marked complete, keyed by article URL. */
   articleDone: Record<string, boolean>;
+  conceptMastery: Record<string, ConceptMastery>;
 };
+
+/** New concept row. easiness starts at the SM-2 default; dueAt stays 0 until scheduling exists. */
+export function newConceptMastery(input: {
+  conceptId: string;
+  conceptLabel: string;
+  lessonId: string;
+}): ConceptMastery {
+  return {
+    conceptId: input.conceptId,
+    conceptLabel: input.conceptLabel,
+    lessonId: input.lessonId,
+    easiness: 2.5,
+    repetitions: 0,
+    intervalDays: 0,
+    dueAt: 0,
+    lastQuality: null,
+    lastReviewedAt: null,
+    correctStreak: 0,
+  };
+}
 
 const STORAGE_PREFIX = "learn-progress:";
 
@@ -40,7 +81,7 @@ export function defaultLocation(): LearnLocation {
 
 export function emptyLearnProgress(): LearnPlanProgress {
   return {
-    v: 2,
+    v: 3,
     location: defaultLocation(),
     lessonReadScroll: {},
     lessonReadDone: {},
@@ -48,6 +89,7 @@ export function emptyLearnProgress(): LearnPlanProgress {
     finalQuiz: null,
     articleScroll: {},
     articleDone: {},
+    conceptMastery: {},
   };
 }
 
@@ -70,24 +112,145 @@ function boolMap(value: unknown): Record<string, boolean> {
   return out;
 }
 
-/** Fill fields added after v2 so older saved progress still spreads safely. */
-export function normalizeLearnProgress(progress: LearnPlanProgress): LearnPlanProgress {
-  return {
-    ...emptyLearnProgress(),
-    ...progress,
-    v: 2,
-    location: progress.location ?? defaultLocation(),
-    lessonReadScroll: progress.lessonReadScroll ?? {},
-    lessonReadDone: progress.lessonReadDone ?? {},
-    lessonQuiz: progress.lessonQuiz ?? {},
-    finalQuiz: progress.finalQuiz ?? null,
-    articleScroll: numberMap(progress.articleScroll),
-    articleDone: boolMap(progress.articleDone),
-  };
+function finiteMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) continue;
+    out[key] = raw;
+  }
+  return out;
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function intOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) ? value : fallback;
 }
 
 function emptyQuizAnswer(): PersistedQuizAnswer {
   return { mcChoice: null, shortText: "", shortSubmitted: false, correct: null };
+}
+
+function parseQuizAnswer(value: unknown): PersistedQuizAnswer {
+  if (!value || typeof value !== "object") return emptyQuizAnswer();
+  const row = value as Record<string, unknown>;
+  return {
+    mcChoice: typeof row.mcChoice === "string" ? row.mcChoice : null,
+    shortText: typeof row.shortText === "string" ? row.shortText : "",
+    shortSubmitted: row.shortSubmitted === true,
+    correct: row.correct === true ? true : row.correct === false ? false : null,
+  };
+}
+
+function parseQuiz(value: unknown): PersistedQuiz | null {
+  if (!value || typeof value !== "object") return null;
+  const answers = (value as { answers?: unknown }).answers;
+  if (!Array.isArray(answers)) return null;
+  return { answers: answers.map((item) => parseQuizAnswer(item)) };
+}
+
+function quizMap(value: unknown): Record<string, PersistedQuiz> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, PersistedQuiz> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const quiz = parseQuiz(raw);
+    if (quiz) out[key] = quiz;
+  }
+  return out;
+}
+
+function parseLocation(value: unknown): LearnLocation {
+  if (!value || typeof value !== "object") return defaultLocation();
+  const raw = value as LearnLocation;
+  const screen = raw.screen === "lesson" || raw.screen === "final" || raw.screen === "overview" ? raw.screen : "overview";
+  return {
+    screen,
+    ...(typeof raw.lessonId === "string" ? { lessonId: raw.lessonId } : {}),
+  };
+}
+
+function normalizeConceptMastery(value: unknown): Record<string, ConceptMastery> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, ConceptMastery> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const conceptId = typeof row.conceptId === "string" && row.conceptId.trim() ? row.conceptId : key;
+    if (!conceptId) continue;
+    const conceptLabel =
+      typeof row.conceptLabel === "string" && row.conceptLabel.trim() ? row.conceptLabel : conceptId;
+    const lessonId = typeof row.lessonId === "string" ? row.lessonId : "";
+    const mastery: ConceptMastery = {
+      ...newConceptMastery({ conceptId, conceptLabel, lessonId }),
+      easiness: finiteOr(row.easiness, 2.5),
+      repetitions: intOr(row.repetitions, 0),
+      intervalDays: intOr(row.intervalDays, 0),
+      dueAt: finiteOr(row.dueAt, 0),
+      lastQuality: row.lastQuality == null ? null : finiteOr(row.lastQuality, 0),
+      lastReviewedAt: row.lastReviewedAt == null ? null : finiteOr(row.lastReviewedAt, 0),
+      correctStreak: intOr(row.correctStreak, 0),
+    };
+    if (typeof row.gapPlanId === "string" && row.gapPlanId) mastery.gapPlanId = row.gapPlanId;
+    if (typeof row.masteryRev === "number" && Number.isInteger(row.masteryRev) && row.masteryRev > 0) {
+      mastery.masteryRev = row.masteryRev;
+    }
+    out[conceptId] = mastery;
+  }
+  return out;
+}
+
+function hasModernProgressFields(raw: Record<string, unknown>): boolean {
+  if (raw.v === 2 || raw.v === 3) return true;
+  for (const key of [
+    "lessonQuiz",
+    "lessonReadDone",
+    "lessonReadScroll",
+    "articleScroll",
+    "articleDone",
+    "finalQuiz",
+    "conceptMastery",
+    "location",
+  ]) {
+    if (raw[key] != null) return true;
+  }
+  return false;
+}
+
+function hasLegacyProgressFields(raw: Record<string, unknown>): boolean {
+  return "lessonQuizDone" in raw || "lessonViewed" in raw || "finalQuizDone" in raw;
+}
+
+/**
+ * Upgrade v2, v3, unversioned, or legacy progress to v3.
+ * Quiz, read, and article fields already on the payload are kept.
+ * Missing conceptMastery becomes an empty map. Existing mastery rows are kept.
+ */
+export function normalizeLearnProgress(progress: unknown): LearnPlanProgress {
+  if (!progress || typeof progress !== "object") return emptyLearnProgress();
+  const raw = progress as Record<string, unknown>;
+  if (!hasModernProgressFields(raw)) return migrateLegacy(raw);
+
+  const next: LearnPlanProgress = {
+    v: 3,
+    location: parseLocation(raw.location),
+    lessonReadScroll: finiteMap(raw.lessonReadScroll),
+    lessonReadDone: boolMap(raw.lessonReadDone),
+    lessonQuiz: quizMap(raw.lessonQuiz),
+    finalQuiz: parseQuiz(raw.finalQuiz),
+    articleScroll: numberMap(raw.articleScroll),
+    articleDone: boolMap(raw.articleDone),
+    conceptMastery: normalizeConceptMastery(raw.conceptMastery),
+  };
+  if (hasLegacyProgressFields(raw)) {
+    const legacy = migrateLegacy(raw);
+    for (const [id, done] of Object.entries(legacy.lessonReadDone)) {
+      if (next.lessonReadDone[id] === undefined) next.lessonReadDone[id] = done;
+    }
+  }
+  return next;
 }
 
 export function emptyQuiz(count: number): PersistedQuiz {
@@ -134,54 +297,12 @@ function migrateLegacy(raw: Record<string, unknown>): LearnPlanProgress {
   return base;
 }
 
-function hydrateProgress(parsed: unknown): LearnPlanProgress {
-  if (!parsed || typeof parsed !== "object") return emptyLearnProgress();
-  const raw = parsed as Record<string, unknown>;
-  if (raw.v !== 2) return migrateLegacy(raw);
-
-  const location =
-    raw.location && typeof raw.location === "object"
-      ? ({
-          screen:
-            (raw.location as LearnLocation).screen === "lesson" ||
-            (raw.location as LearnLocation).screen === "final" ||
-            (raw.location as LearnLocation).screen === "overview"
-              ? (raw.location as LearnLocation).screen
-              : "overview",
-          lessonId:
-            typeof (raw.location as LearnLocation).lessonId === "string"
-              ? (raw.location as LearnLocation).lessonId
-              : undefined,
-        } satisfies LearnLocation)
-      : defaultLocation();
-
-  return normalizeLearnProgress({
-    v: 2,
-    location,
-    lessonReadScroll:
-      raw.lessonReadScroll && typeof raw.lessonReadScroll === "object"
-        ? (raw.lessonReadScroll as Record<string, number>)
-        : {},
-    lessonReadDone:
-      raw.lessonReadDone && typeof raw.lessonReadDone === "object"
-        ? (raw.lessonReadDone as Record<string, boolean>)
-        : {},
-    lessonQuiz:
-      raw.lessonQuiz && typeof raw.lessonQuiz === "object"
-        ? (raw.lessonQuiz as Record<string, PersistedQuiz>)
-        : {},
-    finalQuiz: raw.finalQuiz && typeof raw.finalQuiz === "object" ? (raw.finalQuiz as PersistedQuiz) : null,
-    articleScroll: numberMap(raw.articleScroll),
-    articleDone: boolMap(raw.articleDone),
-  });
-}
-
 export function readLearnProgress(projectId: string): LearnPlanProgress {
   if (typeof window === "undefined") return emptyLearnProgress();
   try {
     const raw = window.localStorage.getItem(`${STORAGE_PREFIX}${projectId}`);
     if (!raw) return emptyLearnProgress();
-    return hydrateProgress(JSON.parse(raw));
+    return normalizeLearnProgress(JSON.parse(raw));
   } catch {
     return emptyLearnProgress();
   }
@@ -196,11 +317,13 @@ export function writeLearnProgress(projectId: string, progress: LearnPlanProgres
   }
 }
 
-export function mergeLearnProgress(
-  fromProject: LearnPlanProgress | undefined,
-  projectId: string,
-): LearnPlanProgress {
-  if (fromProject?.v === 2) return normalizeLearnProgress(fromProject);
+export function mergeLearnProgress(fromProject: unknown, projectId: string): LearnPlanProgress {
+  if (fromProject && typeof fromProject === "object") {
+    const raw = fromProject as Record<string, unknown>;
+    // Saved project progress wins, including v2 and unversioned payloads.
+    // An unrelated object still falls through to this browser's copy.
+    if (hasModernProgressFields(raw) || hasLegacyProgressFields(raw)) return normalizeLearnProgress(fromProject);
+  }
   return readLearnProgress(projectId);
 }
 

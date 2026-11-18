@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
-import { requireUser } from "../clerk-auth";
-import { planStub, type LearnEnv } from "./queues";
+import { requireUser } from "../clerk-auth.ts";
+import { unownedPlanResponse } from "./access.ts";
+import { planStub, type LearnEnv } from "./queues.ts";
 
 const PLAN_ID = /^[0-9a-f-]{36}$/i;
 
@@ -32,7 +33,7 @@ export async function ownedPlan(
   }
   const stub = planStub(e, planId);
   const info = await stub.info().catch(() => null);
-  // Same 404 for missing and not-owned: don't reveal other users' plan ids.
-  if (!info || info.userId !== auth.userId) return Response.json({ error: "Plan not found" }, { status: 404 });
+  const denied = unownedPlanResponse(auth.userId, info);
+  if (denied) return denied;
   return { stub, userId: auth.userId };
 }
