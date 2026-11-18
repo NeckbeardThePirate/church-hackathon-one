@@ -1,6 +1,6 @@
-import { requireUser } from "@/app/lib/server/clerk-auth";
-import { userWorkspaceStub } from "@/app/lib/server/user-workspace";
-import { handleStatsGet, handleStatsPut } from "@/app/lib/server/workspace-stats";
+import { requireUser } from "../../../lib/server/clerk-auth.ts";
+import { userWorkspaceStub } from "../../../lib/server/user-workspace.ts";
+import { handleStatsGet, handleStatsPut } from "../../../lib/server/workspace-stats.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +22,8 @@ export async function PUT(request: Request): Promise<Response> {
       return Response.json({ error: "Invalid JSON." }, { status: 400 });
     }
   }
-  return handleStatsPut(auth, body, (stats) => {
+  return handleStatsPut(auth, body, (patch) => {
     if (auth instanceof Response) throw new Error("Sign in required.");
-    return userWorkspaceStub(auth.userId).setLearnerStats(stats);
+    return userWorkspaceStub(auth.userId).setLearnerStats(patch);
   });
 }

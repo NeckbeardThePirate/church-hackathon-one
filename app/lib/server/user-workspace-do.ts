@@ -3,15 +3,21 @@
  * Owns notes/projects and small prefs. Learn pipeline state stays on LearnPlanDO.
  */
 import { DurableObject } from "cloudflare:workers";
-import { normalizeStoredProject, type Project, type StoredProjectKind } from "@/app/lib/projects";
-import type { ChatGptIdentity } from "./chatgpt-auth";
+import {
+  attemptLessonError,
+  mirrorAttemptOntoProgress,
+  type LearnAttempt,
+} from "../learn/attempts.ts";
+import type { ConceptMastery } from "../learn/plan-progress.ts";
+import { normalizeStoredProject, type Project, type StoredProjectKind } from "../projects.ts";
+import type { ChatGptIdentity } from "./chatgpt-auth.ts";
 import {
   applyWorkspaceMigrations,
   readLearnerStats,
   setLearnerStats as persistLearnerStats,
   type LearnerStats,
   type WorkspaceSql,
-} from "./user-workspace-schema";
+} from "./user-workspace-schema.ts";
 
 /** Lesson/study stay valid so projects saved by earlier versions keep loading and saving. */
 const KINDS = new Set<StoredProjectKind>(["lesson", "study", "learn"]);
@@ -115,6 +121,30 @@ export class UserWorkspaceDO extends DurableObject {
       if (project.learnPlanId === planId || project.learnPlan?.id === planId) return project;
     }
     return null;
+  }
+
+  /** Reject an unknown lesson from the project as it is stored right now. */
+  previewLearnAttempt(planId: string, attempt: LearnAttempt): { ok: true } | { ok: false; error: string } {
+    const error = attemptLessonError(this.findProjectByLearnPlan(planId), attempt);
+    return error ? { ok: false, error } : { ok: true };
+  }
+
+  /**
+   * Re-read the linked project and patch only this attempt's quiz plus the plan DO's mastery.
+   * Read and write are synchronous, so a workspace save that already committed is included.
+   */
+  mirrorLearnAttempt(
+    planId: string,
+    input: { attempt: LearnAttempt; conceptMastery: Record<string, ConceptMastery>; now: number },
+  ): { ok: true } | { ok: false; error: string } {
+    const project = this.findProjectByLearnPlan(planId);
+    const error = attemptLessonError(project, input.attempt);
+    if (error) return { ok: false, error };
+    if (!project) return { ok: true };
+    const learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery);
+    const updatedAt = Math.max(project.updatedAt, input.now);
+    this.upsertProject({ ...project, learnProgress, updatedAt });
+    return { ok: true };
   }
 
   upsertProject(input: unknown): Project {

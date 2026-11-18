@@ -19,8 +19,8 @@ import type {
   SourcePassage,
 } from "@/app/lib/learn/types";
 import type { PassageRef } from "@/app/lib/bible/parse-reference";
-import type { PlanAttemptRecord } from "@/app/lib/learn/attempts";
-import { normalizeLearnProgress, type ConceptMastery } from "@/app/lib/learn/plan-progress";
+import { mergeConceptMastery, type StoredLearnAttempt } from "../../learn/attempts.ts";
+import { normalizeLearnProgress, type ConceptMastery } from "../../learn/plan-progress.ts";
 import type { LearnEnv, LearnMessage } from "./queues";
 
 export const BUDGET = {
@@ -311,30 +311,37 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   }
 
   /**
-   * Append a quiz or review attempt and replace the plan's conceptMastery
-   * with the server copy. Scheduling math is intentionally not applied here.
+   * Append the attempt and merge concept rows in one storage transaction.
+   * Existing plan-DO rows keep their scheduling fields. Only missing concept ids are created.
+   * The caller's object is not written over the stored map.
    */
-  async recordLearnAttempt(record: PlanAttemptRecord): Promise<void> {
+  async recordLearnAttempt(record: StoredLearnAttempt): Promise<Record<string, ConceptMastery>> {
     if (record.target !== "lesson" && record.target !== "final" && record.target !== "review") {
       throw new Error("Invalid attempt.");
     }
     if (!Array.isArray(record.answers) || record.answers.length < 1 || record.answers.length > 30) {
       throw new Error("Invalid attempt.");
     }
-    if (!record.conceptMastery || typeof record.conceptMastery !== "object") {
-      throw new Error("Invalid attempt.");
-    }
-    const mastery = normalizeLearnProgress({ conceptMastery: record.conceptMastery }).conceptMastery;
-    const prev = await this.ctx.storage.get<unknown>("attempts");
-    const attempts = Array.isArray(prev) ? prev : [];
-    attempts.push({
-      at: record.at,
+    const attempt = {
       target: record.target,
       ...(record.lessonId ? { lessonId: record.lessonId } : {}),
       answers: record.answers,
+    };
+    return this.ctx.storage.transactionSync(() => {
+      const stored = this.ctx.storage.kv.get<unknown>("conceptMastery");
+      const merged = mergeConceptMastery(stored ?? {}, attempt);
+      const prev = this.ctx.storage.kv.get<unknown>("attempts");
+      const attempts = Array.isArray(prev) ? prev : [];
+      attempts.push({
+        at: record.at,
+        target: record.target,
+        ...(record.lessonId ? { lessonId: record.lessonId } : {}),
+        answers: record.answers,
+      });
+      this.ctx.storage.kv.put("attempts", attempts.slice(-100));
+      this.ctx.storage.kv.put("conceptMastery", merged);
+      return merged;
     });
-    await this.ctx.storage.put("attempts", attempts.slice(-100));
-    await this.ctx.storage.put("conceptMastery", mastery);
   }
 
   /** Intermediate stage data (e.g. research candidates) passed between queues by key. */

@@ -1,31 +1,27 @@
-import { handleLearnAttempt } from "@/app/lib/server/learn/attempt-response";
-import { ownedPlan } from "@/app/lib/server/learn/api";
-import { userWorkspaceStub } from "@/app/lib/server/user-workspace";
+import { handleLearnAttempt } from "../../../../../lib/server/learn/attempt-response.ts";
+import { ownedPlan } from "../../../../../lib/server/learn/api.ts";
+import { userWorkspaceStub } from "../../../../../lib/server/user-workspace.ts";
 
 export const dynamic = "force-dynamic";
 
-/** Record a lesson, final, or review attempt and return the plan's concept mastery. */
+/** Record a lesson, final, or review attempt and return the plan DO's concept mastery. */
 export async function POST(request: Request, context: { params: Promise<{ planId: string }> }): Promise<Response> {
   const { planId } = await context.params;
   const owned = await ownedPlan(request, planId);
   return handleLearnAttempt({
     owned,
     readBody: () => request.json(),
-    loadProject: async () => {
-      if (owned instanceof Response) return null;
-      return userWorkspaceStub(owned.userId).findProjectByLearnPlan(planId);
+    previewAttempt: async (attempt) => {
+      if (owned instanceof Response) return { ok: false, error: "Sign in required." };
+      return userWorkspaceStub(owned.userId).previewLearnAttempt(planId, attempt);
     },
-    loadPlanMastery: async () => {
-      if (owned instanceof Response) return {};
-      return owned.stub.getConceptMastery();
+    recordPlanAttempt: async (record) => {
+      if (owned instanceof Response) throw new Error("Sign in required.");
+      return owned.stub.recordLearnAttempt(record);
     },
-    saveProject: async (project) => {
-      if (owned instanceof Response) return;
-      await userWorkspaceStub(owned.userId).upsertProject(project);
-    },
-    savePlanAttempt: async (record) => {
-      if (owned instanceof Response) return;
-      await owned.stub.recordLearnAttempt(record);
+    mirrorAttempt: async (input) => {
+      if (owned instanceof Response) throw new Error("Sign in required.");
+      return userWorkspaceStub(owned.userId).mirrorLearnAttempt(planId, input);
     },
   });
 }

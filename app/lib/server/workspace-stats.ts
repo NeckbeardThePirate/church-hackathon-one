@@ -1,4 +1,4 @@
-import { parseLearnerStatsPut, type LearnerStats } from "./user-workspace-schema.ts";
+import { parseLearnerStatsPut, type LearnerStats, type LearnerStatsPatch } from "./user-workspace-schema.ts";
 
 type Auth = { userId: string } | Response;
 
@@ -21,13 +21,13 @@ export async function handleStatsGet(auth: Auth, read: () => Promise<LearnerStat
 export async function handleStatsPut(
   auth: Auth,
   body: unknown,
-  write: (stats: LearnerStats) => Promise<LearnerStats> | LearnerStats,
+  write: (patch: LearnerStatsPatch) => Promise<LearnerStats> | LearnerStats,
 ): Promise<Response> {
   if (auth instanceof Response) return auth;
   const parsed = parseLearnerStatsPut(body);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
   try {
-    return Response.json(await write(parsed.stats));
+    return Response.json(await write(parsed.patch));
   } catch (error) {
     return failure(error, "Could not save stats.");
   }

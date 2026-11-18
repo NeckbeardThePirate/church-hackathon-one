@@ -1,6 +1,6 @@
 import { createClerkClient } from "@clerk/backend";
 import { env } from "cloudflare:workers";
-import { readSession, resolveSessionSecret } from "./session";
+import { readSession, resolveSessionSecret } from "./session.ts";
 
 export type AuthContext = {
   userId: string;

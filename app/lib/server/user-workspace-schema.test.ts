@@ -3,10 +3,13 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { handleStatsGet, handleStatsPut } from "./workspace-stats.ts";
 import {
+  applyLearnerStatsPatch,
   applyWorkspaceMigrations,
   readLearnerStats,
+  WORKSPACE_SCHEMA_VERSION,
   writeLearnerStats,
   type LearnerStats,
+  type LearnerStatsPatch,
   type WorkspaceSql,
 } from "./user-workspace-schema.ts";
 
@@ -98,11 +101,14 @@ test("stats routes require sign-in and round-trip xp, streak, timezone, and last
   assert.equal(empty.last_goal_date, null);
   assert.equal(count(db, "learner_stats"), 0);
 
-  let writes = 0;
-  const invalid = await handleStatsPut(auth, { ...roundTrip, timezone: "Not/AZone" }, (stats) => {
-    writes += 1;
-    writeLearnerStats(sql, stats);
+  const save = (patch: LearnerStatsPatch) => {
+    writeLearnerStats(sql, applyLearnerStatsPatch(readLearnerStats(sql), patch));
     return readLearnerStats(sql);
+  };
+  let writes = 0;
+  const invalid = await handleStatsPut(auth, { ...roundTrip, timezone: "Not/AZone" }, (patch) => {
+    writes += 1;
+    return save(patch);
   });
   assert.equal(invalid.status, 400);
   assert.equal(writes, 0);
@@ -125,10 +131,7 @@ test("stats routes require sign-in and round-trip xp, streak, timezone, and last
   assert.equal(writes, 0);
   assert.equal(count(db, "learner_stats"), 0);
 
-  const saved = await handleStatsPut(auth, roundTrip, (stats) => {
-    writeLearnerStats(sql, stats);
-    return readLearnerStats(sql);
-  });
+  const saved = await handleStatsPut(auth, roundTrip, save);
   assert.equal(saved.status, 200);
   const body = (await saved.json()) as LearnerStats;
   assert.equal(body.xp, 35);
@@ -139,10 +142,7 @@ test("stats routes require sign-in and round-trip xp, streak, timezone, and last
   const again = await handleStatsGet(auth, () => readLearnerStats(sql));
   assert.deepEqual(await again.json(), body);
 
-  const unset = await handleStatsPut(auth, { ...roundTrip, timezone: null, last_goal_date: null }, (stats) => {
-    writeLearnerStats(sql, stats);
-    return readLearnerStats(sql);
-  });
+  const unset = await handleStatsPut(auth, { ...roundTrip, timezone: null, last_goal_date: null }, save);
   const cleared = (await unset.json()) as LearnerStats;
   assert.equal(cleared.timezone, null);
   assert.equal(cleared.last_goal_date, null);
@@ -150,4 +150,51 @@ test("stats routes require sign-in and round-trip xp, streak, timezone, and last
   const row = db.prepare("SELECT timezone FROM learner_stats WHERE id = 1").get() as { timezone: string };
   assert.equal(row.timezone, "");
   assert.equal(count(db, "learner_stats"), 1);
+
+  const { payload: _payload, ...withoutPayload } = roundTrip;
+  const omitted = await handleStatsPut(auth, { ...withoutPayload, xp: 41 }, save);
+  const kept = (await omitted.json()) as LearnerStats;
+  assert.equal(kept.xp, 41);
+  assert.equal(kept.streak, 4);
+  assert.equal(kept.timezone, "America/Los_Angeles");
+  assert.equal(kept.last_goal_date, "2026-11-17");
+  assert.equal(kept.payload.dailyGoalMet[0], "2026-11-17");
+  assert.equal(kept.payload.xpLog[0]?.amount, 10);
+
+  const onlyXp = await handleStatsPut(auth, { xp: 42 }, save);
+  const still = (await onlyXp.json()) as LearnerStats;
+  assert.equal(still.xp, 42);
+  assert.equal(still.streak, 4);
+  assert.equal(still.payload.xpLog[0]?.amount, 10);
+  assert.equal(still.payload.dailyGoalMet[0], "2026-11-17");
+});
+
+test("schema 1 migrates to learner stats without dropping projects or prefs", () => {
+  const { db, sql } = open();
+  applyWorkspaceMigrations(sql, 1);
+  assert.equal(count(db, "_sql_schema_migrations"), 1);
+  const before = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('oauth', 'learner_stats')").all();
+  assert.equal(before.length, 0);
+  db.prepare(
+    "INSERT INTO projects (id, kind, title, updated_at, import_complete, payload) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run("p1", "study", "Kept", 10, 1, JSON.stringify({ id: "p1" }));
+  db.prepare("INSERT INTO prefs (key, value) VALUES (?, ?)").run("fontScale", "1");
+
+  applyWorkspaceMigrations(sql, WORKSPACE_SCHEMA_VERSION);
+  applyWorkspaceMigrations(sql, WORKSPACE_SCHEMA_VERSION);
+  const project = db.prepare("SELECT payload FROM projects WHERE id = ?").get("p1") as { payload: string };
+  assert.equal(JSON.parse(project.payload).id, "p1");
+  const pref = db.prepare("SELECT value FROM prefs WHERE key = ?").get("fontScale") as { value: string };
+  assert.equal(pref.value, "1");
+  const oauth = db.prepare("SELECT COUNT(*) AS n FROM oauth").get() as { n: number | bigint };
+  assert.equal(Number(oauth.n), 0);
+  const stats = readLearnerStats(sql);
+  assert.equal(stats.xp, 0);
+  assert.equal(stats.timezone, null);
+  assert.equal(count(db, "learner_stats"), 0);
+  const versions = db.prepare("SELECT id FROM _sql_schema_migrations ORDER BY id").all() as { id: number }[];
+  assert.deepEqual(
+    versions.map((row) => row.id),
+    [1, 2, 3],
+  );
 });

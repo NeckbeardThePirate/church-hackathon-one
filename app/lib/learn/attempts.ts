@@ -17,13 +17,12 @@ export type LearnAttempt = {
   answers: LearnAttemptAnswer[];
 };
 
-/** Answer log stored on the plan. conceptMastery is stored beside it, not copied onto every row. */
-export type PlanAttemptRecord = {
+/** Answer log stored on the plan. Mastery is merged in the plan DO, not supplied by the caller. */
+export type StoredLearnAttempt = {
   at: number;
   target: LearnAttemptTarget;
   lessonId?: string;
   answers: LearnAttemptAnswer[];
-  conceptMastery: Record<string, ConceptMastery>;
 };
 
 const CONCEPT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
@@ -112,35 +111,78 @@ function parseAnswer(value: unknown, index: number): { ok: true; answer: LearnAt
   };
 }
 
-/**
- * Store lesson or final answers on the progress record and create conceptMastery
- * rows for concept ids that do not already have one. Existing easiness and dueAt stay put.
- * Review answers are not written over the lesson quiz; the plan attempt log keeps those.
- */
-export function applyLearnAttempt(progress: unknown, attempt: LearnAttempt): LearnPlanProgress {
-  const next = normalizeLearnProgress(progress);
-  const persisted: PersistedQuiz = {
-    answers: attempt.answers.map((answer) => ({
-      mcChoice: answer.mcChoice,
-      shortText: answer.shortText,
-      shortSubmitted: answer.shortSubmitted,
-      correct: answer.correct,
-    })),
+function persistedAnswer(answer: LearnAttemptAnswer) {
+  return {
+    mcChoice: answer.mcChoice,
+    shortText: answer.shortText,
+    shortSubmitted: answer.shortSubmitted,
+    correct: answer.correct,
   };
-  if (attempt.target === "lesson" && attempt.lessonId) {
-    next.lessonQuiz = { ...next.lessonQuiz, [attempt.lessonId]: persisted };
-  } else if (attempt.target === "final") {
-    next.finalQuiz = persisted;
+}
+
+/**
+ * Overlay submitted answers by question index.
+ * A shorter submission keeps the stored tail. The spec does not say to replace the whole quiz.
+ */
+export function mergeQuizByIndex(existing: PersistedQuiz | null | undefined, incoming: LearnAttemptAnswer[]): PersistedQuiz {
+  const previous = existing?.answers ?? [];
+  const answers = [];
+  const length = Math.max(previous.length, incoming.length);
+  for (let i = 0; i < length; i++) {
+    const next = incoming[i];
+    answers.push(next ? persistedAnswer(next) : previous[i]!);
   }
-  const conceptMastery = { ...next.conceptMastery };
+  return { answers };
+}
+
+/**
+ * Plan-DO mastery is the base. A concept that already exists is left untouched,
+ * including its scheduling fields. Missing concept ids are initialized.
+ */
+export function mergeConceptMastery(existing: unknown, attempt: LearnAttempt): Record<string, ConceptMastery> {
+  const next = { ...normalizeLearnProgress({ conceptMastery: existing }).conceptMastery };
   for (const answer of attempt.answers) {
-    if (!answer.conceptId || conceptMastery[answer.conceptId]) continue;
-    conceptMastery[answer.conceptId] = newConceptMastery({
+    if (!answer.conceptId || next[answer.conceptId]) continue;
+    next[answer.conceptId] = newConceptMastery({
       conceptId: answer.conceptId,
       conceptLabel: answer.conceptLabel?.trim() || answer.conceptId,
       lessonId: attempt.target === "final" ? "final" : (attempt.lessonId ?? ""),
     });
   }
-  next.conceptMastery = conceptMastery;
+  return next;
+}
+
+/** "final" is the lesson id stored for final-assessment concepts, so a later review can use it. */
+export function attemptLessonError(
+  project: { learnPlan?: { lessons?: { id?: string }[] } } | null,
+  attempt: LearnAttempt,
+): string | null {
+  if (attempt.target === "final") return null;
+  if (attempt.target === "review" && attempt.lessonId === "final") return null;
+  const lessons = project?.learnPlan?.lessons;
+  if (!project?.learnPlan || !Array.isArray(lessons) || lessons.length === 0) return null;
+  if (attempt.lessonId && lessons.some((lesson) => lesson?.id === attempt.lessonId)) return null;
+  return "Unknown lesson.";
+}
+
+/**
+ * Copy the plan DO's mastery onto progress and merge this attempt's answers into one quiz.
+ * Other progress fields are kept. Review attempts do not rewrite a lesson or final quiz.
+ */
+export function mirrorAttemptOntoProgress(
+  progress: unknown,
+  attempt: LearnAttempt,
+  planMastery: unknown,
+): LearnPlanProgress {
+  const next = normalizeLearnProgress(progress);
+  if (attempt.target === "lesson" && attempt.lessonId) {
+    next.lessonQuiz = {
+      ...next.lessonQuiz,
+      [attempt.lessonId]: mergeQuizByIndex(next.lessonQuiz[attempt.lessonId], attempt.answers),
+    };
+  } else if (attempt.target === "final") {
+    next.finalQuiz = mergeQuizByIndex(next.finalQuiz, attempt.answers);
+  }
+  next.conceptMastery = normalizeLearnProgress({ conceptMastery: planMastery }).conceptMastery;
   return next;
 }

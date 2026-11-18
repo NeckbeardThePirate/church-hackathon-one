@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { requireUser } from "../clerk-auth";
-import { unownedPlanResponse } from "./access";
-import { planStub, type LearnEnv } from "./queues";
+import { requireUser } from "../clerk-auth.ts";
+import { unownedPlanResponse } from "./access.ts";
+import { planStub, type LearnEnv } from "./queues.ts";
 
 const PLAN_ID = /^[0-9a-f-]{36}$/i;
 
