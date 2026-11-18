@@ -160,7 +160,7 @@ test("a project save during the attempt await keeps the newer quiz, read, and ar
     },
   });
 
-  const planFaith: ConceptMastery = { ...faithDefaults, easiness: 2.1, repetitions: 3, dueAt: 9999 };
+  const planFaith: ConceptMastery = { ...faithDefaults, easiness: 2.1, repetitions: 3, dueAt: 9999, masteryRev: 1 };
   const response = await handleLearnAttempt({
     owned: { userId: "user_a" },
     now: 600,
@@ -276,4 +276,180 @@ test("overlapping plan attempts keep every concept and the plan's scheduling fie
   assert.equal(stored["l1-law"]?.repetitions, 0);
   assert.equal(stored["final-hope"]?.lessonId, "final");
   assert.equal(Object.keys(stored).sort().join(","), "final-hope,l1-faith,l1-law");
+  assert.ok((stored["l1-faith"]?.masteryRev ?? 0) >= 1);
+  assert.ok((stored["l1-law"]?.masteryRev ?? 0) > (stored["l1-faith"]?.masteryRev ?? 0));
+});
+
+async function openWorkspace() {
+  const { UserWorkspaceDO } = await import("../user-workspace-do.ts");
+  const db = new DatabaseSync(":memory:");
+  let ready = Promise.resolve();
+  const ctx = {
+    storage: { sql: sqliteSql(db) },
+    blockConcurrencyWhile(task: () => Promise<void>) {
+      ready = task();
+    },
+  };
+  const workspace = new UserWorkspaceDO(ctx as never, {} as never);
+  await ready;
+  return workspace;
+}
+
+function learnProject(planId: string, id: string) {
+  return {
+    id,
+    kind: "learn" as const,
+    title: "Justification",
+    blocks: [],
+    updatedAt: 10,
+    importComplete: true,
+    learnPlanId: planId,
+    learnPlan: { id: planId, lessons: [{ id: "l1" }] },
+    learnProgress: {
+      v: 3,
+      conceptMastery: {
+        "l1-faith": newConceptMastery({ conceptId: "l1-faith", conceptLabel: "Faith", lessonId: "l1" }),
+      },
+    },
+  };
+}
+
+test("out-of-order mastery snapshots keep every concept on the workspace project", async () => {
+  installEnv();
+  const workspace = await openWorkspace();
+  const faith = {
+    ...newConceptMastery({ conceptId: "l1-faith", conceptLabel: "Faith", lessonId: "l1" }),
+    easiness: 2.1,
+    repetitions: 3,
+    dueAt: 9999,
+    masteryRev: 1,
+  };
+  const law = { ...newConceptMastery({ conceptId: "l1-law", conceptLabel: "Law", lessonId: "l1" }), masteryRev: 3 };
+  const hope = {
+    ...newConceptMastery({ conceptId: "final-hope", conceptLabel: "Hope", lessonId: "final" }),
+    masteryRev: 2,
+  };
+  const full = { "l1-faith": faith, "l1-law": law, "final-hope": hope };
+  const older = { "l1-faith": faith, "final-hope": hope };
+  const lawAttempt = {
+    target: "lesson" as const,
+    lessonId: "l1",
+    answers: [{ mcChoice: "Law", shortText: "", shortSubmitted: false, correct: true, conceptId: "l1-law", conceptLabel: "Law" }],
+  };
+  const hopeAttempt = {
+    target: "review" as const,
+    lessonId: "final",
+    answers: [{ mcChoice: "Hope", shortText: "", shortSubmitted: false, correct: true, conceptId: "final-hope", conceptLabel: "Hope" }],
+  };
+
+  workspace.upsertProject(learnProject("plan-a", "p-a"));
+  assert.equal(workspace.mirrorLearnAttempt("plan-a", { attempt: lawAttempt, conceptMastery: full, now: 500 }).ok, true);
+  assert.equal(workspace.mirrorLearnAttempt("plan-a", { attempt: hopeAttempt, conceptMastery: older, now: 900 }).ok, true);
+  const afterLateOlder = workspace.findProjectByLearnPlan("plan-a");
+  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-law"]?.conceptId, "l1-law");
+  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["final-hope"]?.lessonId, "final");
+  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
+  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-faith"]?.repetitions, 3);
+  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-faith"]?.dueAt, 9999);
+  assert.equal(afterLateOlder?.updatedAt, 900);
+
+  workspace.upsertProject(learnProject("plan-b", "p-b"));
+  assert.equal(workspace.mirrorLearnAttempt("plan-b", { attempt: hopeAttempt, conceptMastery: older, now: 900 }).ok, true);
+  assert.equal(workspace.mirrorLearnAttempt("plan-b", { attempt: lawAttempt, conceptMastery: full, now: 400 }).ok, true);
+  const afterLateFuller = workspace.findProjectByLearnPlan("plan-b");
+  assert.equal(afterLateFuller?.learnProgress?.conceptMastery["l1-law"]?.masteryRev, 3);
+  assert.equal(afterLateFuller?.learnProgress?.conceptMastery["final-hope"]?.conceptId, "final-hope");
+  assert.equal(afterLateFuller?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
+  assert.equal(afterLateFuller?.updatedAt, 900);
+
+  const rolledBack = {
+    "l1-faith": { ...faith, easiness: 2.5, repetitions: 0, dueAt: 0, masteryRev: 1 },
+  };
+  assert.equal(workspace.mirrorLearnAttempt("plan-a", { attempt: hopeAttempt, conceptMastery: rolledBack, now: 1200 }).ok, true);
+  const still = workspace.findProjectByLearnPlan("plan-a");
+  assert.equal(still?.learnProgress?.conceptMastery["l1-law"]?.conceptId, "l1-law");
+  assert.equal(still?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
+  assert.equal(still?.learnProgress?.conceptMastery["l1-faith"]?.masteryRev, 1);
+});
+
+test("the real attempt route returns 200 for the plan owner", async () => {
+  installEnv();
+  const workspace = await openWorkspace();
+  workspace.upsertProject({
+    ...learnProject(PLAN_ID, "p-owner"),
+    learnProgress: {
+      v: 3,
+      conceptMastery: {
+        "l1-faith": newConceptMastery({ conceptId: "l1-faith", conceptLabel: "Faith", lessonId: "l1" }),
+      },
+    },
+  });
+  const { LearnPlanDO } = await import("./plan-do.ts");
+  const data = new Map<string, unknown>();
+  data.set("meta", {
+    planId: PLAN_ID,
+    userId: "user_a",
+    topic: "Faith",
+    notes: "",
+    passages: [],
+    options: {},
+    status: "ready",
+    stage: "done",
+    createdAt: 1,
+    round: 0,
+    spent: { llm: 0, exa: 0 },
+    lessonIds: [],
+    pending: [],
+  });
+  data.set("conceptMastery", {
+    "l1-faith": {
+      ...newConceptMastery({ conceptId: "l1-faith", conceptLabel: "Faith", lessonId: "l1" }),
+      easiness: 2.1,
+      repetitions: 3,
+      dueAt: 9999,
+    },
+  });
+  const plan = new LearnPlanDO(
+    {
+      storage: {
+        kv: {
+          get: (key: string) => data.get(key),
+          put: (key: string, value: unknown) => {
+            data.set(key, value);
+          },
+        },
+        get: async (key: string) => data.get(key),
+        put: async (key: string, value: unknown) => {
+          data.set(key, value);
+        },
+        transactionSync: <T>(fn: () => T) => fn(),
+      },
+    } as never,
+    {} as never,
+  );
+  workersEnv.LEARN_PLAN = {
+    idFromName: (id: string) => id,
+    get: () => plan,
+  };
+  workersEnv.USER_WORKSPACE = {
+    getByName: () => workspace,
+  };
+  const { POST } = await import("../../../api/learn/plans/[planId]/attempts/route.ts");
+  const request = await signedRequest(`/api/learn/plans/${PLAN_ID}/attempts`, "user_a", {
+    target: "lesson",
+    lessonId: "l1",
+    answers: [{ mcChoice: "Faith", shortText: "", shortSubmitted: true, correct: true, conceptId: "l1-faith", conceptLabel: "Faith" }],
+  });
+  const response = await POST(request, { params: Promise.resolve({ planId: PLAN_ID }) });
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as { conceptMastery: Record<string, ConceptMastery> };
+  assert.equal(body.conceptMastery["l1-faith"]?.easiness, 2.1);
+  assert.equal(body.conceptMastery["l1-faith"]?.repetitions, 3);
+  assert.equal(body.conceptMastery["l1-faith"]?.dueAt, 9999);
+  assert.ok((body.conceptMastery["l1-faith"]?.masteryRev ?? 0) >= 1);
+  const stored = workspace.findProjectByLearnPlan(PLAN_ID);
+  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
+  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.repetitions, 3);
+  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.dueAt, 9999);
+  assert.equal(stored?.learnProgress?.lessonQuiz.l1?.answers[0]?.mcChoice, "Faith");
 });

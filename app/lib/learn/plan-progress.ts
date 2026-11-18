@@ -31,6 +31,11 @@ export type ConceptMastery = {
   lastReviewedAt: number | null;
   correctStreak: number;
   gapPlanId?: string;
+  /**
+   * Monotonic generation assigned by the plan DO when the row is created or changed.
+   * Workspace mirrors keep the higher revision. Absent on rows written before versions existed.
+   */
+  masteryRev?: number;
 };
 
 export type LearnPlanProgress = {
@@ -189,6 +194,9 @@ function normalizeConceptMastery(value: unknown): Record<string, ConceptMastery>
       correctStreak: intOr(row.correctStreak, 0),
     };
     if (typeof row.gapPlanId === "string" && row.gapPlanId) mastery.gapPlanId = row.gapPlanId;
+    if (typeof row.masteryRev === "number" && Number.isInteger(row.masteryRev) && row.masteryRev > 0) {
+      mastery.masteryRev = row.masteryRev;
+    }
     out[conceptId] = mastery;
   }
   return out;

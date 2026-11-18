@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   attemptLessonError,
   mergeConceptMastery,
+  mergeMasterySnapshots,
   mergeQuizByIndex,
   mirrorAttemptOntoProgress,
   parseLearnAttempt,
@@ -31,6 +32,7 @@ function scheduledFaith(): ConceptMastery {
     easiness: 2.1,
     repetitions: 3,
     dueAt: 9999,
+    masteryRev: 1,
   };
 }
 
@@ -150,6 +152,24 @@ test("plan scheduling fields win and overlapping concepts are kept", () => {
   });
   assert.equal(again["l1-faith"]?.easiness, 2.1);
   assert.equal(again["l1-law"]?.conceptId, "l1-law");
+});
+
+test("an older mastery snapshot cannot drop a concept or roll a revision back", () => {
+  const faith = scheduledFaith();
+  const law = { ...newConceptMastery({ conceptId: "l1-law", conceptLabel: "Law", lessonId: "l1" }), masteryRev: 3 };
+  const hope = {
+    ...newConceptMastery({ conceptId: "final-hope", conceptLabel: "Hope", lessonId: "final" }),
+    masteryRev: 2,
+  };
+  const current = mergeMasterySnapshots({}, { "l1-faith": { ...faith, masteryRev: 4 }, "l1-law": law, "final-hope": hope });
+  const next = mergeMasterySnapshots(current, {
+    "l1-faith": { ...faith, easiness: 2.5, repetitions: 0, dueAt: 0, masteryRev: 1 },
+    "final-hope": hope,
+  });
+  assert.equal(next["l1-law"]?.conceptId, "l1-law");
+  assert.equal(next["final-hope"]?.lessonId, "final");
+  assert.equal(next["l1-faith"]?.easiness, 2.1);
+  assert.equal(next["l1-faith"]?.masteryRev, 4);
 });
 
 test("a final-quiz concept can be reviewed and an unknown lesson cannot", () => {

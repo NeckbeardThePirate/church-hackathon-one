@@ -135,19 +135,57 @@ export function mergeQuizByIndex(existing: PersistedQuiz | null | undefined, inc
   return { answers };
 }
 
+function highestMasteryRev(mastery: Record<string, ConceptMastery>): number {
+  let rev = 0;
+  for (const row of Object.values(mastery)) {
+    if (typeof row.masteryRev === "number" && row.masteryRev > rev) rev = row.masteryRev;
+  }
+  return rev;
+}
+
 /**
  * Plan-DO mastery is the base. A concept that already exists is left untouched,
- * including its scheduling fields. Missing concept ids are initialized.
+ * including its scheduling fields. Missing concept ids are initialized with the next revision.
+ * Rows that predate revisions are stamped once so later mirrors can order them.
  */
 export function mergeConceptMastery(existing: unknown, attempt: LearnAttempt): Record<string, ConceptMastery> {
   const next = { ...normalizeLearnProgress({ conceptMastery: existing }).conceptMastery };
+  let rev = highestMasteryRev(next);
+  for (const [id, row] of Object.entries(next)) {
+    if (row.masteryRev !== undefined) continue;
+    rev += 1;
+    next[id] = { ...row, masteryRev: rev };
+  }
   for (const answer of attempt.answers) {
     if (!answer.conceptId || next[answer.conceptId]) continue;
-    next[answer.conceptId] = newConceptMastery({
-      conceptId: answer.conceptId,
-      conceptLabel: answer.conceptLabel?.trim() || answer.conceptId,
-      lessonId: attempt.target === "final" ? "final" : (attempt.lessonId ?? ""),
-    });
+    rev += 1;
+    next[answer.conceptId] = {
+      ...newConceptMastery({
+        conceptId: answer.conceptId,
+        conceptLabel: answer.conceptLabel?.trim() || answer.conceptId,
+        lessonId: attempt.target === "final" ? "final" : (attempt.lessonId ?? ""),
+      }),
+      masteryRev: rev,
+    };
+  }
+  return next;
+}
+
+/**
+ * Union two mastery snapshots. A concept only one side has is kept.
+ * The same concept keeps the higher masteryRev, so an older plan snapshot cannot
+ * erase a concept or roll a row back. Equal revisions keep the row already stored.
+ */
+export function mergeMasterySnapshots(
+  current: Record<string, ConceptMastery>,
+  incoming: Record<string, ConceptMastery>,
+): Record<string, ConceptMastery> {
+  const next = { ...current };
+  for (const [id, row] of Object.entries(incoming)) {
+    const stored = next[id];
+    const incomingRev = row.masteryRev ?? 0;
+    const storedRev = stored?.masteryRev ?? 0;
+    if (!stored || incomingRev > storedRev) next[id] = row;
   }
   return next;
 }
@@ -166,8 +204,10 @@ export function attemptLessonError(
 }
 
 /**
- * Copy the plan DO's mastery onto progress and merge this attempt's answers into one quiz.
- * Other progress fields are kept. Review attempts do not rewrite a lesson or final quiz.
+ * Merge this attempt's answers into one quiz and fold the plan snapshot into mastery.
+ * The snapshot may be stale. Concepts already on the project are kept, and a lower
+ * masteryRev cannot replace a higher one. Other progress fields are kept.
+ * Review attempts do not rewrite a lesson or final quiz.
  */
 export function mirrorAttemptOntoProgress(
   progress: unknown,
@@ -183,6 +223,7 @@ export function mirrorAttemptOntoProgress(
   } else if (attempt.target === "final") {
     next.finalQuiz = mergeQuizByIndex(next.finalQuiz, attempt.answers);
   }
-  next.conceptMastery = normalizeLearnProgress({ conceptMastery: planMastery }).conceptMastery;
+  const incoming = normalizeLearnProgress({ conceptMastery: planMastery }).conceptMastery;
+  next.conceptMastery = mergeMasterySnapshots(next.conceptMastery, incoming);
   return next;
 }

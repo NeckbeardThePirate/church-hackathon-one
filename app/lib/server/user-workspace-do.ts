@@ -130,7 +130,9 @@ export class UserWorkspaceDO extends DurableObject {
   }
 
   /**
-   * Re-read the linked project and patch only this attempt's quiz plus the plan DO's mastery.
+   * Re-read the linked project and patch only this attempt's quiz plus a mastery merge.
+   * The plan snapshot is unioned by concept id. A lower masteryRev cannot replace a higher one,
+   * so two mirrors can commit in either order without dropping a concept.
    * Read and write are synchronous, so a workspace save that already committed is included.
    */
   mirrorLearnAttempt(
