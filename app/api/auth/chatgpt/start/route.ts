@@ -16,7 +16,8 @@ export async function GET(request: Request): Promise<Response> {
   const secret = resolveSessionSecret(request, env.SESSION_SECRET);
   if (!secret) return redirectError(request, "session_secret");
 
-  const registered = env.OPENAI_CLIENT_ID?.trim();
+  const registeredRaw = env.OPENAI_CLIENT_ID?.trim();
+  const registered = registeredRaw && registeredRaw !== "OPENAI_CLIENT_ID" ? registeredRaw : "";
   const saved = readCookie(request, CLIENT_COOKIE);
   const savedClient = saved ? await verifyBlob<{ clientId?: string }>(saved, secret) : null;
   let clientId = registered || savedClient?.clientId || "";

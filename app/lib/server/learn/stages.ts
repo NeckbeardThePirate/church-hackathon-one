@@ -22,7 +22,7 @@ import {
   type TeachBlock,
 } from "@/app/lib/learn/types";
 import { fetchPassageFromD1 } from "../bible-db";
-import { exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId, youtubeOembed } from "./exa";
+import { exaAuthFrom, exaReady, exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId, youtubeOembed } from "./exa";
 import { citeLibrary } from "./library-cite";
 import { list, llmJson, num, obj, str, strList, type LlmMeta, type LlmRole } from "./llm";
 import { openSourceQueryOrder, searchOpenLibrary, searchWikipedia } from "./open-sources";
@@ -255,10 +255,11 @@ export async function runResearch(ctx: Ctx): Promise<void> {
   const lesson = await ctx.stub.getLesson(lessonId);
   if (!lesson) throw new Error(`Lesson ${lessonId} not found.`);
   const scope = await requireScope(ctx);
-  const apiKey = ctx.env.EXA_API_KEY;
+  const exa = exaAuthFrom(ctx.env);
   const next = { planId: ctx.msg.planId, lessonId, round: ctx.msg.round };
 
-  if (!apiKey) {
+  // No gateway token and no Exa key: skip Exa. Open sources still build the plan.
+  if (!exaReady(exa)) {
     await researchOpenSources(ctx, lesson, scope.title);
     return;
   }
@@ -271,10 +272,10 @@ export async function runResearch(ctx: Ctx): Promise<void> {
   const [articleSets, videoResults] = await Promise.all([
     Promise.all(
       queries.map((query) =>
-        exaSearch(apiKey, { query, numResults: 5, excludeDomains: YOUTUBE_DOMAINS, textChars: ARTICLE_TEXT_CHARS }),
+        exaSearch(exa, { query, numResults: 5, excludeDomains: YOUTUBE_DOMAINS, textChars: ARTICLE_TEXT_CHARS }),
       ),
     ),
-    exaSearch(apiKey, { query: `${base} explained`, numResults: 6, includeDomains: YOUTUBE_DOMAINS, textChars: 800 }),
+    exaSearch(exa, { query: `${base} explained`, numResults: 6, includeDomains: YOUTUBE_DOMAINS, textChars: 800 }),
   ]);
 
   const seen = new Set<string>();
@@ -292,7 +293,7 @@ export async function runResearch(ctx: Ctx): Promise<void> {
 
   // S4 verify (code only). Articles: Exa /contents per-URL status. Videos: YouTube oEmbed.
   const { live, dropped } = await exaVerify(
-    apiKey,
+    exa,
     articles.map((a) => a.url),
   );
   const verifiedArticles = articles.filter((a) => live.has(a.url));

@@ -9,22 +9,26 @@
 # Session cookie HMAC. Required on any public host. Generate a long random string.
 # SESSION_SECRET=
 #
-# Sign in with ChatGPT. Website clients need a registered OAuth client (no secret for a public PKCE client).
+# Sign in with ChatGPT. Optional at deploy. A public host needs a registered OAuth client.
+# Public PKCE clients leave the secret unset. A confidential client needs the secret or sign-in fails with a clear error.
 # OPENAI_CLIENT_ID=
 # OPENAI_CLIENT_SECRET=
-# Optional Responses API model. Used only after Workers AI fails, and only if the user granted ChatGPT plan usage.
-# LEARN_CHATGPT_MODEL=
+# ChatGPT plan fallback model. Plain Worker var (gpt-6-luna), not a secret. Override only if you change cloudflare.config.ts.
 #
 # AI Gateway `study-buddy` has authentication on. Without the token, calls fall back to Workers AI directly.
 # AI_GATEWAY_TOKEN=
 #
-# Clerk (optional). Also set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env.local.
+# Clerk secret is optional locally. CLERK_PUBLISHABLE_KEY stays required at deploy:
+# the repo has no real pk_test_ / pk_live_ value to move into a plain var.
+# Also set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env.local when you have one.
 # CLERK_SECRET_KEY=
 # CLERK_PUBLISHABLE_KEY=
 #
-# Optional. Plans still build from Scripture, confessions, fathers, Wikipedia, and Open Library without these.
+# Optional. Exa calls go through AI Gateway (custom provider slug `exa`) with AI_GATEWAY_TOKEN.
+# The Exa key is not sent when unset. Brave has no call site; an unset key means Brave is not called.
 # EXA_API_KEY=
 # BRAVE_SEARCH_API_KEY=
+# Gates POST /api/admin/embed-scripture (x-admin-token). Required at deploy.
 # ADMIN_TOKEN=
 #
 # LEARN_MODEL_PLANNER=@cf/zai-org/glm-5.3-flash

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { bindings, defineConfig, defineWorker, exports, triggers } from "cf/config";
 
 // Account + D1 IDs live in .env.local (gitignored). See .env.local.example.
@@ -5,6 +6,48 @@ try {
   process.loadEnvFile(".env.local");
 } catch {
   // No .env.local: rely on the shell environment.
+}
+
+/**
+ * Names present in `.dev.vars`. Not loaded into `process.env`: that would bake
+ * `DEV_AUTH` / `MOCK_AI` from the local file into a production build.
+ */
+function readDevVars(): Record<string, string> {
+  let text: string;
+  try {
+    text = readFileSync(".dev.vars", "utf8");
+  } catch {
+    return {};
+  }
+  const vars: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key && value) vars[key] = value;
+  }
+  return vars;
+}
+
+const devVars = readDevVars();
+
+/**
+ * `bindings.secret()` is always required at deploy. Declare it only when a local
+ * `.dev.vars` value exists, so Workers Builds does not demand the secret, and
+ * local dev still injects the value. `cf deploy` keeps secrets set on the Worker
+ * outside this file (`keepSecrets`).
+ */
+function optionalSecret(name: string) {
+  return devVars[name] ? bindings.secret() : undefined;
 }
 
 const WORKER_NAME = "church-hackathon";
@@ -97,20 +140,26 @@ export default defineConfig({
       LEARN_Q_CHECK: bindings.queue({ name: LEARN_QUEUES.LEARN_Q_CHECK }),
       LEARN_Q_CRITIC: bindings.queue({ name: LEARN_QUEUES.LEARN_Q_CRITIC }),
       LEARN_Q_ASSEMBLE: bindings.queue({ name: LEARN_QUEUES.LEARN_Q_ASSEMBLE }),
-      // Learn secrets — must be declared here to reach Worker env from `.dev.vars` / wrangler secrets.
-      EXA_API_KEY: bindings.secret(),
+      // Optional locally when set in `.dev.vars`. Not required at deploy. Exa calls
+      // use the gateway token; this key is sent only when present.
+      EXA_API_KEY: optionalSecret("EXA_API_KEY"),
       AI_GATEWAY_ID: bindings.text("study-buddy"),
       // Empty means the Workers AI default (@cf/zai-org/glm-5.3-flash). Set a model id to override.
       LEARN_MODEL_PLANNER: bindings.text(""),
       LEARN_MODEL_WORKER: bindings.text(""),
       AI_GATEWAY_TOKEN: bindings.secret(),
       SESSION_SECRET: bindings.secret(),
-      OPENAI_CLIENT_ID: bindings.secret(),
-      OPENAI_CLIENT_SECRET: bindings.secret(),
-      LEARN_CHATGPT_MODEL: bindings.secret(),
+      // Public hosts need a registered client id. Loopback can register without one.
+      OPENAI_CLIENT_ID: optionalSecret("OPENAI_CLIENT_ID"),
+      // Public PKCE clients omit this. Confidential clients fail sign-in with a clear error.
+      OPENAI_CLIENT_SECRET: optionalSecret("OPENAI_CLIENT_SECRET"),
+      // OpenAI Responses model id. Not a secret. Latest Luna is gpt-6-luna (no gpt-6.1-luna).
+      LEARN_CHATGPT_MODEL: bindings.text("gpt-6-luna"),
       ADMIN_TOKEN: bindings.secret(),
-      BRAVE_SEARCH_API_KEY: bindings.secret(),
+      // No code path calls Brave. Declared only so a local .dev.vars value still binds.
+      BRAVE_SEARCH_API_KEY: optionalSecret("BRAVE_SEARCH_API_KEY"),
       CLERK_SECRET_KEY: bindings.secret(),
+      // Public key, but the real value is not in the repo, so deploy still requires it.
       CLERK_PUBLISHABLE_KEY: bindings.secret(),
       // Baked at process start. Production deploys must leave these unset so both stay "".
       DEV_AUTH: bindings.text(process.env.DEV_AUTH === "1" ? "1" : ""),

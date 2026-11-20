@@ -58,7 +58,7 @@ export function stageForQueue(queueName: string): QueueStage | "dlq" | null {
 export type LearnEnv = LlmEnv & {
   BIBLE?: D1Database;
   SCRIPTURE_VECTORS?: VectorizeIndex;
-  /** Exa search + contents. Unset = resource stages are skipped (plan still builds). */
+  /** Optional Exa key. Unset calls still go through AI Gateway and do not send x-api-key. */
   EXA_API_KEY?: string;
   LEARN_PLAN: DurableObjectNamespace<LearnPlanDO>;
   USER_WORKSPACE: DurableObjectNamespace<UserWorkspaceDO>;
