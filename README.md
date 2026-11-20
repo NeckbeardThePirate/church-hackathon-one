@@ -13,7 +13,7 @@ It is a [vinext](https://github.com/cloudflare/vinext) app deployed as one Cloud
 - `npm run typecheck` regenerates Worker types and runs `tsc`.
 - `npm run test` runs the unit tests.
 - `npm run build` writes the Worker bundle.
-- `npm run deploy` deploys with the Cloudflare CLI (`vinext-cloudflare deploy`). Do not deploy from the stub `wrangler.jsonc`.
+- `npm run deploy` deploys the build from `npm run build` with `cf deploy --prebuilt --force`. Do not deploy from the stub `wrangler.jsonc`.
 
 ## Auth
 
