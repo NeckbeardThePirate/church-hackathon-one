@@ -147,6 +147,10 @@ export default defineConfig({
       // Empty means the Workers AI default (@cf/zai-org/glm-5.3-flash). Set a model id to override.
       LEARN_MODEL_PLANNER: bindings.text(""),
       LEARN_MODEL_WORKER: bindings.text(""),
+      // Public Clerk frontend key. Plain var so a strict deploy keeps the dashboard value.
+      CLERK_PUBLISHABLE_KEY: bindings.text(
+        "pk_test_cGVhY2VmdWwtaGFsaWJ1dC0yNjA1LmNsZXJrLmFjY291bnRzLmRldiQ",
+      ),
       AI_GATEWAY_TOKEN: bindings.secret(),
       SESSION_SECRET: bindings.secret(),
       // Public hosts need a registered client id. Loopback can register without one.
@@ -159,8 +163,6 @@ export default defineConfig({
       // No code path calls Brave. Declared only so a local .dev.vars value still binds.
       BRAVE_SEARCH_API_KEY: optionalSecret("BRAVE_SEARCH_API_KEY"),
       CLERK_SECRET_KEY: bindings.secret(),
-      // Public key, but the real value is not in the repo, so deploy still requires it.
-      CLERK_PUBLISHABLE_KEY: bindings.secret(),
       // Baked at process start. Production deploys must leave these unset so both stay "".
       DEV_AUTH: bindings.text(process.env.DEV_AUTH === "1" ? "1" : ""),
       MOCK_AI: bindings.text(process.env.MOCK_AI === "1" ? "1" : ""),

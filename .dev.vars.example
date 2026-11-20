@@ -18,11 +18,9 @@
 # AI Gateway `study-buddy` has authentication on. Without the token, calls fall back to Workers AI directly.
 # AI_GATEWAY_TOKEN=
 #
-# Clerk secret is optional locally. CLERK_PUBLISHABLE_KEY stays required at deploy:
-# the repo has no real pk_test_ / pk_live_ value to move into a plain var.
-# Also set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env.local when you have one.
+# Clerk secret is optional locally. The publishable key is a plain var in cloudflare.config.ts.
+# Also set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env.local when you want it inlined at build time.
 # CLERK_SECRET_KEY=
-# CLERK_PUBLISHABLE_KEY=
 #
 # Optional. Exa calls go through AI Gateway (custom provider slug `exa`) with AI_GATEWAY_TOKEN.
 # The Exa key is not sent when unset. Brave has no call site; an unset key means Brave is not called.

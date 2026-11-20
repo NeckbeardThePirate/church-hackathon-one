@@ -17,7 +17,7 @@ export function readClerkSecretKey(): string | undefined {
 
 export function readClerkPublishableKey(): string | undefined {
   const fromBinding = env.CLERK_PUBLISHABLE_KEY;
-  if (fromBinding && fromBinding !== "CLERK_PUBLISHABLE_KEY" && /^(pk_test_|pk_live_)/.test(fromBinding)) {
+  if (fromBinding && /^(pk_test_|pk_live_)/.test(fromBinding)) {
     return fromBinding;
   }
   if (typeof process === "undefined") return undefined;
