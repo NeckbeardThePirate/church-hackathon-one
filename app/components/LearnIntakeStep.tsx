@@ -18,6 +18,8 @@ type Props = {
   learnPlanId?: string;
   onStarted: (planId: string, topic: string) => void;
   onComplete: (plan: LearnPlan) => void;
+  onMarkFailed?: () => void;
+  onRequestRemove?: () => void;
 };
 
 const STEPS: { stage: LearnStage[]; label: string }[] = [
@@ -34,7 +36,7 @@ function stepIndex(stage: LearnStage | undefined): number {
   return i === -1 ? 0 : i;
 }
 
-export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete }: Props) {
+export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete, onMarkFailed, onRequestRemove }: Props) {
   const [planId, setPlanId] = useState<string | undefined>(learnPlanId);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [snapshot, setSnapshot] = useState<PlanSnapshot | null>(null);
@@ -138,6 +140,10 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete 
     [onStarted],
   );
 
+  useEffect(() => {
+    if (snapshot?.status === "failed") onMarkFailed?.();
+  }, [snapshot?.status, onMarkFailed]);
+
   const currentStage = events.at(-1)?.stage ?? snapshot?.stage;
   const active = stepIndex(currentStage);
   const lessonsTotal = snapshot?.lessonsTotal ?? 0;
@@ -222,10 +228,30 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete 
             >
               Start over
             </button>
+            {onRequestRemove ? (
+              <button
+                type="button"
+                onClick={onRequestRemove}
+                className="min-h-11 rounded-lg border border-[color-mix(in_srgb,#c0533f_45%,var(--line))] px-4 py-2 text-sm text-[var(--ink)]"
+              >
+                Remove path
+              </button>
+            ) : null}
           </div>
         </div>
       ) : (
-        <p className="text-xs text-[var(--ink-muted)]">You can leave this page. Progress resumes when you come back.</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-[var(--ink-muted)]">You can leave this page. Progress resumes when you come back.</p>
+          {onRequestRemove ? (
+            <button
+              type="button"
+              onClick={onRequestRemove}
+              className="min-h-11 rounded-lg border border-[var(--line)] px-4 py-2 text-sm text-[var(--ink-muted)] hover:text-[var(--ink)]"
+            >
+              Remove path
+            </button>
+          ) : null}
+        </div>
       )}
     </section>
   );

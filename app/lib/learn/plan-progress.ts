@@ -12,10 +12,16 @@ export type PersistedQuizAnswer = {
   shortText: string;
   shortSubmitted: boolean;
   correct: boolean | null;
+  /** 0–1 semantic score. Partial credit is below the correct band. */
+  score?: number;
 };
 
 export type PersistedQuiz = {
   answers: PersistedQuizAnswer[];
+  /** Highest number of correct answers kept across retries. */
+  bestCorrect?: number;
+  /** True once every question has been answered. Retrying misses does not clear it. */
+  settled?: boolean;
 };
 
 /** SM-2 row for one concept. Scheduling fields stay at defaults until the review card. */
@@ -137,19 +143,30 @@ function emptyQuizAnswer(): PersistedQuizAnswer {
 function parseQuizAnswer(value: unknown): PersistedQuizAnswer {
   if (!value || typeof value !== "object") return emptyQuizAnswer();
   const row = value as Record<string, unknown>;
-  return {
+  const answer: PersistedQuizAnswer = {
     mcChoice: typeof row.mcChoice === "string" ? row.mcChoice : null,
     shortText: typeof row.shortText === "string" ? row.shortText : "",
     shortSubmitted: row.shortSubmitted === true,
     correct: row.correct === true ? true : row.correct === false ? false : null,
   };
+  if (typeof row.score === "number" && Number.isFinite(row.score)) {
+    answer.score = Math.min(1, Math.max(0, row.score));
+  }
+  return answer;
 }
 
 function parseQuiz(value: unknown): PersistedQuiz | null {
   if (!value || typeof value !== "object") return null;
   const answers = (value as { answers?: unknown }).answers;
   if (!Array.isArray(answers)) return null;
-  return { answers: answers.map((item) => parseQuizAnswer(item)) };
+  const row = value as { bestCorrect?: unknown; settled?: unknown };
+  const bestCorrect =
+    typeof row.bestCorrect === "number" && Number.isFinite(row.bestCorrect) ? Math.max(0, Math.round(row.bestCorrect)) : undefined;
+  return {
+    answers: answers.map((item) => parseQuizAnswer(item)),
+    ...(bestCorrect !== undefined ? { bestCorrect } : {}),
+    ...(row.settled === true ? { settled: true } : {}),
+  };
 }
 
 function quizMap(value: unknown): Record<string, PersistedQuiz> {
@@ -258,13 +275,38 @@ export function emptyQuiz(count: number): PersistedQuiz {
 }
 
 export function normalizeQuiz(saved: PersistedQuiz | undefined | null, count: number): PersistedQuiz {
-  if (!saved?.answers?.length) return emptyQuiz(count);
-  if (saved.answers.length === count) return saved;
+  const flags = quizFlags(saved);
+  if (!saved?.answers?.length) return { ...emptyQuiz(count), ...flags };
+  if (saved.answers.length === count) return { ...saved, ...flags };
   const next = emptyQuiz(count);
   for (let i = 0; i < Math.min(saved.answers.length, count); i++) {
     next.answers[i] = saved.answers[i]!;
   }
-  return next;
+  return { ...next, ...flags };
+}
+
+function quizFlags(saved: PersistedQuiz | undefined | null): Pick<PersistedQuiz, "bestCorrect" | "settled"> {
+  if (!saved) return {};
+  return {
+    ...(typeof saved.bestCorrect === "number" ? { bestCorrect: saved.bestCorrect } : {}),
+    ...(saved.settled === true ? { settled: true } : {}),
+  };
+}
+
+/** Drop missed questions and keep correct ones. A finished quiz stays finished. */
+export function retryMissedQuiz(quiz: PersistedQuiz): PersistedQuiz {
+  const bestCorrect = Math.max(quiz.bestCorrect ?? 0, quizCorrectCount(quiz));
+  const settled = quiz.settled === true || quizAllAnswered(quiz);
+  return {
+    answers: quiz.answers.map((answer) => (answer.correct === true ? answer : emptyQuizAnswer())),
+    bestCorrect,
+    ...(settled ? { settled: true } : {}),
+  };
+}
+
+export function isQuizSettled(quiz: PersistedQuiz | null | undefined): boolean {
+  if (!quiz) return false;
+  return quiz.settled === true || quizAllAnswered(quiz);
 }
 
 export function quizAllAnswered(quiz: PersistedQuiz): boolean {
@@ -317,14 +359,99 @@ export function writeLearnProgress(projectId: string, progress: LearnPlanProgres
   }
 }
 
+function hasStoredLearning(progress: LearnPlanProgress): boolean {
+  return (
+    progress.location.screen !== "overview" ||
+    Object.keys(progress.lessonReadScroll).length > 0 ||
+    Object.keys(progress.lessonReadDone).length > 0 ||
+    Object.keys(progress.lessonQuiz).length > 0 ||
+    progress.finalQuiz != null ||
+    Object.keys(progress.articleScroll).length > 0 ||
+    Object.keys(progress.articleDone).length > 0 ||
+    Object.keys(progress.conceptMastery).length > 0
+  );
+}
+
+function unionQuizSlot(remote: PersistedQuiz | null, local: PersistedQuiz | null): PersistedQuiz | null {
+  if (!local) return remote;
+  if (!remote) return local;
+  const length = Math.max(remote.answers.length, local.answers.length);
+  const answers = [];
+  for (let i = 0; i < length; i++) {
+    const saved = remote.answers[i];
+    const browser = local.answers[i];
+    if (!browser) {
+      if (saved) answers.push(saved);
+      continue;
+    }
+    if (!saved || browser.correct === true) {
+      answers.push(browser);
+      continue;
+    }
+    if (saved.correct === true) {
+      answers.push(saved);
+      continue;
+    }
+    // A settled quiz on this browser has cleared a miss for retry. Keep that clear.
+    if (local.settled && browser.correct == null) answers.push(browser);
+    else if (browser.correct != null) answers.push(browser);
+    else answers.push(saved);
+  }
+  const bests = [remote.bestCorrect, local.bestCorrect].filter((value): value is number => typeof value === "number");
+  const settled = remote.settled === true || local.settled === true;
+  return {
+    answers,
+    ...(bests.length ? { bestCorrect: Math.max(...bests) } : {}),
+    ...(settled ? { settled: true } : {}),
+  };
+}
+
+/** Lift reading and not-yet-synced answers from this browser without replacing saved project fields. */
+function unionUnsyncedProgress(remote: LearnPlanProgress, local: LearnPlanProgress): LearnPlanProgress {
+  if (!hasStoredLearning(local)) return remote;
+  const lessonReadScroll = { ...remote.lessonReadScroll };
+  for (const [id, pct] of Object.entries(local.lessonReadScroll)) {
+    lessonReadScroll[id] = Math.max(lessonReadScroll[id] ?? 0, pct);
+  }
+  const lessonReadDone = { ...remote.lessonReadDone };
+  for (const [id, done] of Object.entries(local.lessonReadDone)) {
+    if (done) lessonReadDone[id] = true;
+  }
+  const articleScroll = { ...remote.articleScroll };
+  for (const [id, pct] of Object.entries(local.articleScroll)) {
+    articleScroll[id] = Math.max(articleScroll[id] ?? 0, pct);
+  }
+  const articleDone = { ...remote.articleDone };
+  for (const [id, done] of Object.entries(local.articleDone)) {
+    if (done) articleDone[id] = true;
+  }
+  const lessonQuiz: Record<string, PersistedQuiz> = { ...remote.lessonQuiz };
+  for (const id of new Set([...Object.keys(remote.lessonQuiz), ...Object.keys(local.lessonQuiz)])) {
+    const quiz = unionQuizSlot(remote.lessonQuiz[id] ?? null, local.lessonQuiz[id] ?? null);
+    if (quiz) lessonQuiz[id] = quiz;
+  }
+  return {
+    ...remote,
+    lessonReadScroll,
+    lessonReadDone,
+    articleScroll,
+    articleDone,
+    lessonQuiz,
+    finalQuiz: unionQuizSlot(remote.finalQuiz, local.finalQuiz),
+  };
+}
+
 export function mergeLearnProgress(fromProject: unknown, projectId: string): LearnPlanProgress {
+  const local = readLearnProgress(projectId);
   if (fromProject && typeof fromProject === "object") {
     const raw = fromProject as Record<string, unknown>;
     // Saved project progress wins, including v2 and unversioned payloads.
-    // An unrelated object still falls through to this browser's copy.
-    if (hasModernProgressFields(raw) || hasLegacyProgressFields(raw)) return normalizeLearnProgress(fromProject);
+    // This browser's copy only fills reading and answers the project has not stored yet.
+    if (hasModernProgressFields(raw) || hasLegacyProgressFields(raw)) {
+      return unionUnsyncedProgress(normalizeLearnProgress(fromProject), local);
+    }
   }
-  return readLearnProgress(projectId);
+  return local;
 }
 
 export function lessonHasQuiz(lesson: { quiz: unknown[] }): boolean {
@@ -338,14 +465,12 @@ export function isLessonStepComplete(
 ): boolean {
   if (!progress.lessonReadDone[lessonId]) return false;
   if (!hasQuiz) return true;
-  const quiz = progress.lessonQuiz[lessonId];
-  return quiz ? quizAllAnswered(quiz) : false;
+  return isQuizSettled(progress.lessonQuiz[lessonId]);
 }
 
 export function isFinalStepComplete(progress: LearnPlanProgress, hasFinal: boolean): boolean {
   if (!hasFinal) return false;
-  const quiz = progress.finalQuiz;
-  return quiz ? quizAllAnswered(quiz) : false;
+  return isQuizSettled(progress.finalQuiz);
 }
 
 export function countPlanProgress(
@@ -395,7 +520,11 @@ export function resumeLabel(
   return null;
 }
 
+export const MAIN_SCROLL_SELECTOR = "[data-learn-scroll]";
+
 export function mainScrollElement(): HTMLElement | null {
   if (typeof document === "undefined") return null;
+  const marked = document.querySelector(MAIN_SCROLL_SELECTOR);
+  if (marked instanceof HTMLElement) return marked;
   return document.querySelector(".min-w-0.flex-1.overflow-y-auto");
 }

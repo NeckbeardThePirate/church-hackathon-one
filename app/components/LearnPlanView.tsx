@@ -11,21 +11,37 @@ import {
   type ReactNode,
 } from "react";
 import { bibleGatewayEsvUrl } from "../lib/bible/bible-gateway";
+import { gradeShortAnswerLocal, type GradeResult } from "../lib/learn/grade-answer";
+import {
+  XP_QUIZ_ATTEMPT,
+  XP_QUIZ_CORRECT,
+  XP_QUIZ_PARTIAL,
+  XP_READ_LESSON,
+  lessonMasteryPercent,
+} from "../lib/learn/learner-stats";
+import { locationForPlan, parsePathUrl, pathSearch } from "../lib/learn/path-url";
+import {
+  combineReadPercent,
+  readPercentMarksDone,
+  scrollDepthPercent,
+  sectionVisibilityPercent,
+} from "../lib/learn/read-progress";
+import { mirrorAttemptOntoProgress, type LearnAttemptAnswer } from "../lib/learn/attempts";
 import {
   countPlanProgress,
   defaultLocation,
-  emptyLearnProgress,
   emptyQuiz,
   isFinalStepComplete,
   isLessonStepComplete,
   mainScrollElement,
   mergeLearnProgress,
+  newConceptMastery,
   normalizeQuiz,
   quizAllAnswered,
   quizCorrectCount,
-  readLearnProgress,
   resolveLocation,
   resumeLabel,
+  retryMissedQuiz,
   writeLearnProgress,
   type LearnLocation,
   type LearnPlanProgress,
@@ -45,6 +61,7 @@ import type {
 } from "../lib/learn/types";
 import { ArticleReadWindow } from "./ArticleReadWindow";
 import { LearnAgentFloat } from "./LearnAgentFloat";
+import { LearnerStatsPanel } from "./LearnerStatsPanel";
 import { LessonVideoPlayer } from "./LessonVideoPlayer";
 import { PROJECT_KIND_LABEL } from "../lib/projects";
 
@@ -54,6 +71,9 @@ type Props = {
   displayTitle?: string;
   savedProgress?: LearnPlanProgress;
   onSaveProgress?: (progress: LearnPlanProgress) => void;
+  onProgress?: (progress: LearnPlanProgress) => void;
+  onAward?: (reason: string, amount: number) => void;
+  stats?: { xp: number; streak: number } | null;
 };
 
 function esc(text: string): string {
@@ -164,30 +184,30 @@ function TeachBlocks({ blocks }: { blocks: TeachBlock[] }) {
   return (
     <>
       {blocks.map((block, i) => {
-        if (block.type === "divider") return <hr key={i} className="my-8 border-[var(--line)]" />;
+        if (block.type === "divider") return <hr key={i} className="my-8 border-[var(--line)]" data-read-section />;
         const html = esc(block.text);
         switch (block.type) {
           case "heading1":
             return (
-              <h3 key={i} className="mt-8 text-xl font-semibold tracking-[-0.02em] text-[var(--ink)]">
+              <h3 key={i} data-read-section className="mt-8 text-xl font-semibold tracking-[-0.02em] text-[var(--ink)]">
                 {block.text}
               </h3>
             );
           case "heading2":
             return (
-              <h4 key={i} className="mt-6 text-base font-semibold text-[var(--ink)]">
+              <h4 key={i} data-read-section className="mt-6 text-base font-semibold text-[var(--ink)]">
                 {block.text}
               </h4>
             );
           case "bullet":
             return (
-              <ul key={i} className="my-2 list-disc pl-6 text-[var(--ink)]">
+              <ul key={i} data-read-section className="my-2 list-disc pl-6 text-[var(--ink)]">
                 <li className="leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
               </ul>
             );
           case "numbered":
             return (
-              <ol key={i} className="my-2 list-decimal pl-6 text-[var(--ink)]">
+              <ol key={i} data-read-section className="my-2 list-decimal pl-6 text-[var(--ink)]">
                 <li className="leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
               </ol>
             );
@@ -195,6 +215,7 @@ function TeachBlocks({ blocks }: { blocks: TeachBlock[] }) {
             return (
               <blockquote
                 key={i}
+                data-read-section
                 className="my-4 border-l-2 border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] pl-4 text-[var(--ink-muted)] italic"
                 dangerouslySetInnerHTML={{ __html: html }}
               />
@@ -203,6 +224,7 @@ function TeachBlocks({ blocks }: { blocks: TeachBlock[] }) {
             return (
               <p
                 key={i}
+                data-read-section
                 className="my-3 text-[15px] leading-[1.65] text-[var(--ink)]"
                 dangerouslySetInnerHTML={{ __html: html }}
               />
@@ -217,13 +239,27 @@ function normAnswer(text: string): string {
   return text.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function shortAnswerMatches(given: string, key: string): boolean {
-  const g = normAnswer(given);
-  const k = normAnswer(key);
-  if (!g) return false;
-  if (g === k) return true;
-  if (g.length >= 4 && (k.includes(g) || g.includes(k))) return true;
-  return false;
+async function gradeFreeText(planId: string, item: QuizItem, given: string): Promise<GradeResult> {
+  try {
+    const res = await fetch(`/api/learn/plans/${planId}/grade`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        question: item.question,
+        expected: item.answer,
+        given,
+        ...(item.rationale ? { rationale: item.rationale } : {}),
+      }),
+    });
+    const body = (await res.json().catch(() => null)) as GradeResult | null;
+    if (res.ok && body && typeof body.correct === "boolean" && typeof body.score === "number") {
+      return { correct: body.correct === true, partial: body.partial === true, score: body.score };
+    }
+  } catch {
+    /* The semantic grader still accepts a paraphrase when the model is unreachable. */
+  }
+  return gradeShortAnswerLocal(given, item.answer);
 }
 
 function choiceButtonClass(state: "idle" | "picked" | "correct" | "wrong"): string {
@@ -241,17 +277,31 @@ function choiceButtonClass(state: "idle" | "picked" | "correct" | "wrong"): stri
   }
 }
 
-function QuizFeedback({ correct, rationale, answer }: { correct: boolean; rationale: string; answer?: string }) {
+function QuizFeedback({
+  correct,
+  partial,
+  rationale,
+  answer,
+}: {
+  correct: boolean;
+  partial?: boolean;
+  rationale: string;
+  answer?: string;
+}) {
+  const title = correct ? "Correct" : partial ? "Close" : "Not quite";
   return (
     <div
       className={`mt-3 rounded-lg border px-3 py-2.5 text-sm leading-relaxed ${
         correct
           ? "border-[color-mix(in_srgb,#6b9f7a_40%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_8%,var(--canvas))] text-[var(--ink)]"
-          : "border-[color-mix(in_srgb,#c97a7a_40%,var(--line))] bg-[color-mix(in_srgb,#c97a7a_8%,var(--canvas))] text-[var(--ink)]"
+          : partial
+            ? "border-[color-mix(in_srgb,var(--accent)_40%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_8%,var(--canvas))] text-[var(--ink)]"
+            : "border-[color-mix(in_srgb,#c97a7a_40%,var(--line))] bg-[color-mix(in_srgb,#c97a7a_8%,var(--canvas))] text-[var(--ink)]"
       }`}
       role="status"
     >
-      <p className="font-medium">{correct ? "Correct" : "Not quite"}</p>
+      <p className="font-medium">{title}</p>
+      {partial ? <p className="mt-1 text-[var(--ink-muted)]">Partial credit. The main idea is only partly there.</p> : null}
       {!correct && answer ? (
         <p className="mt-1 text-[var(--ink-muted)]">
           <span className="text-[var(--ink)]">Answer:</span> {answer}
@@ -267,15 +317,19 @@ function QuizQuestion({
   index,
   state,
   onChange,
+  gradeShort,
 }: {
   item: QuizItem;
   index: number;
   state: PersistedQuizAnswer;
   onChange: (next: PersistedQuizAnswer) => void;
+  gradeShort: (item: QuizItem, given: string) => Promise<GradeResult>;
 }) {
+  const [grading, setGrading] = useState(false);
   const mcAnswered = state.mcChoice !== null;
   const mcCorrect = state.correct === true;
   const shortCorrect = state.shortSubmitted && state.correct === true;
+  const shortPartial = state.shortSubmitted && !shortCorrect && (state.score ?? 0) >= 0.4;
 
   const handlePick = (choice: string) => {
     if (mcAnswered) return;
@@ -289,12 +343,20 @@ function QuizQuestion({
 
   const handleShortSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (state.shortSubmitted || !state.shortText.trim()) return;
-    onChange({
-      ...state,
-      shortSubmitted: true,
-      correct: shortAnswerMatches(state.shortText, item.answer),
-    });
+    if (state.shortSubmitted || grading || !state.shortText.trim()) return;
+    const given = state.shortText;
+    setGrading(true);
+    void gradeShort(item, given)
+      .then((grade) => {
+        onChange({
+          ...state,
+          shortText: given,
+          shortSubmitted: true,
+          correct: grade.correct,
+          score: grade.score,
+        });
+      })
+      .finally(() => setGrading(false));
   };
 
   return (
@@ -345,16 +407,16 @@ function QuizQuestion({
                 correct: null,
               })
             }
-            disabled={state.shortSubmitted}
+            disabled={state.shortSubmitted || grading}
             placeholder="Type your answer"
             className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))] disabled:opacity-70"
           />
           <button
             type="submit"
-            disabled={!state.shortText.trim() || state.shortSubmitted}
+            disabled={!state.shortText.trim() || state.shortSubmitted || grading}
             className="shrink-0 rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] disabled:cursor-not-allowed disabled:opacity-45"
           >
-            Check
+            {grading ? "Checking…" : "Check"}
           </button>
         </form>
       )}
@@ -363,7 +425,12 @@ function QuizQuestion({
         <QuizFeedback correct={mcCorrect} rationale={item.rationale} answer={mcCorrect ? undefined : item.answer} />
       ) : null}
       {item.kind === "short" && state.shortSubmitted ? (
-        <QuizFeedback correct={shortCorrect} rationale={item.rationale} answer={shortCorrect ? undefined : item.answer} />
+        <QuizFeedback
+          correct={shortCorrect}
+          partial={shortPartial}
+          rationale={item.rationale}
+          answer={shortCorrect ? undefined : item.answer}
+        />
       ) : null}
     </li>
   );
@@ -374,24 +441,28 @@ function QuizSection({
   heading,
   saved,
   onSave,
+  gradeShort,
 }: {
   items: QuizItem[];
   heading: string;
   saved: PersistedQuiz;
   onSave: (quiz: PersistedQuiz) => void;
+  gradeShort: (item: QuizItem, given: string) => Promise<GradeResult>;
 }) {
   const quiz = normalizeQuiz(saved, items.length);
   const answeredCount = quiz.answers.filter((a) => a.correct !== null).length;
   const correctCount = quizCorrectCount(quiz);
+  const bestCorrect = Math.max(quiz.bestCorrect ?? 0, correctCount);
+  const missed = quiz.answers.some((answer) => answer.correct === false);
   const allAnswered = quizAllAnswered(quiz);
 
   const updateAnswer = (index: number, answer: PersistedQuizAnswer) => {
-    const next = { answers: [...quiz.answers] };
+    const next = { ...quiz, answers: [...quiz.answers] };
     next.answers[index] = answer;
     onSave(next);
   };
 
-  const reset = () => onSave(emptyQuiz(items.length));
+  const retryMissed = () => onSave(retryMissedQuiz(quiz));
 
   if (!items.length) return null;
 
@@ -399,10 +470,11 @@ function QuizSection({
     <section className="mt-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h4 className="text-base font-semibold text-[var(--ink)]">{heading}</h4>
-        {answeredCount > 0 ? (
+        {answeredCount > 0 || bestCorrect > 0 ? (
           <p className="text-xs tabular-nums text-[var(--ink-muted)]">
-            {correctCount}/{answeredCount} correct
-            {allAnswered ? ` · ${correctCount}/${items.length} total` : ""}
+            {correctCount}/{items.length} correct
+            {bestCorrect > correctCount ? ` · best ${bestCorrect}/${items.length}` : ""}
+            {allAnswered ? "" : answeredCount > 0 ? ` · ${answeredCount} answered` : ""}
           </p>
         ) : null}
       </div>
@@ -414,13 +486,14 @@ function QuizSection({
             index={i}
             state={quiz.answers[i] ?? emptyQuiz(1).answers[0]!}
             onChange={(answer) => updateAnswer(i, answer)}
+            gradeShort={gradeShort}
           />
         ))}
       </ol>
-      {answeredCount > 0 ? (
+      {missed ? (
         <button
           type="button"
-          onClick={reset}
+          onClick={retryMissed}
           className="mt-4 rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-3 py-1.5 text-xs font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
         >
           Try again
@@ -553,7 +626,7 @@ function LessonBody({
       </p>
 
       {lesson.objectives.length ? (
-        <div className="mt-6">
+        <div className="mt-6" data-read-section>
           <h2 className="text-sm font-semibold uppercase tracking-[0.06em] text-[var(--ink-muted)]">You will be able to</h2>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-[var(--ink)]">
             {lesson.objectives.map((o, i) => (
@@ -568,7 +641,7 @@ function LessonBody({
       </div>
 
       {lesson.videos.length ? (
-        <div className="mt-8">
+        <div className="mt-8" data-read-section>
           <h2 className="text-base font-semibold text-[var(--ink)]">Watch</h2>
           <ul className="mt-3 space-y-3">
             {lesson.videos.map((v) => (
@@ -586,7 +659,7 @@ function LessonBody({
       ) : null}
 
       {lesson.articles.length ? (
-        <div className="mt-8">
+        <div className="mt-8" data-read-section>
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="text-base font-semibold text-[var(--ink)]">Read</h2>
             {articlesDone > 0 ? (
@@ -615,7 +688,7 @@ function LessonBody({
       ) : null}
 
       {lesson.books.length ? (
-        <div className="mt-8">
+        <div className="mt-8" data-read-section>
           <h2 className="text-base font-semibold text-[var(--ink)]">Books</h2>
           <ul className="mt-3 space-y-2">
             {lesson.books.map((b) => (
@@ -626,7 +699,7 @@ function LessonBody({
       ) : null}
 
       {lesson.library?.length ? (
-        <div className="mt-8">
+        <div className="mt-8" data-read-section>
           <h2 className="text-base font-semibold text-[var(--ink)]">Confessions and church fathers</h2>
           <ul className="mt-3 space-y-3">
             {lesson.library.map((item) => (
@@ -637,7 +710,7 @@ function LessonBody({
       ) : null}
 
       {lesson.scripture.length ? (
-        <div className="mt-8">
+        <div className="mt-8" data-read-section>
           <h2 className="text-base font-semibold text-[var(--ink)]">Scripture readings</h2>
           {lesson.scripture.map((reading, i) => (
             <ScriptureCallout key={`${reading.reference}-${i}`} reading={reading} />
@@ -659,13 +732,27 @@ function LessonBody({
   );
 }
 
-function ReadingProgressBar({ percent }: { percent: number }) {
-  const pct = Math.min(100, Math.max(0, percent));
+function ReadingProgressBar({ percent, done, onMarkRead }: { percent: number; done: boolean; onMarkRead: () => void }) {
+  const pct = Math.min(100, Math.max(0, done ? Math.max(percent, 100) : percent));
   return (
     <div className="rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3">
-      <div className="flex items-baseline justify-between gap-2 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
         <span className="font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">Reading</span>
-        <span className="tabular-nums text-[var(--ink-muted)]">{pct}%</span>
+        <span className="ml-auto flex items-center gap-2">
+          <span className="tabular-nums text-[var(--ink-muted)]">{pct}%</span>
+          <button
+            type="button"
+            aria-pressed={done}
+            onClick={onMarkRead}
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+              done
+                ? "border-[color-mix(in_srgb,#6b9f7a_50%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_18%,var(--sidebar))] text-[color-mix(in_srgb,#6b9f7a_85%,var(--ink))]"
+                : "border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] text-[var(--ink)]"
+            }`}
+          >
+            {done ? "Read" : "Mark as read"}
+          </button>
+        </span>
       </div>
       <div
         className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--line)]"
@@ -710,7 +797,97 @@ function NavButton({
   );
 }
 
-export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, onSaveProgress }: Props) {
+function rememberQuiz(quiz: PersistedQuiz): PersistedQuiz {
+  const bestCorrect = Math.max(quiz.bestCorrect ?? 0, quizCorrectCount(quiz));
+  const settled = quiz.settled === true || quizAllAnswered(quiz);
+  return { ...quiz, bestCorrect, ...(settled ? { settled: true } : {}) };
+}
+
+function awardQuizDelta(
+  projectId: string,
+  lessonKey: string,
+  previous: PersistedQuiz | undefined,
+  next: PersistedQuiz,
+  award: ((reason: string, amount: number) => void) | undefined,
+) {
+  if (!award) return;
+  next.answers.forEach((answer, index) => {
+    if (answer.correct == null && (answer.score ?? 0) < 0.4) return;
+    const before = previous?.answers[index];
+    if (before?.correct === true && answer.correct === true) return;
+    if (before && before.correct === answer.correct && (before.score ?? null) === (answer.score ?? null)) return;
+    const outcome = answer.correct ? "correct" : (answer.score ?? 0) >= 0.4 ? "partial" : "wrong";
+    const amount = outcome === "correct" ? XP_QUIZ_CORRECT : outcome === "partial" ? XP_QUIZ_PARTIAL : XP_QUIZ_ATTEMPT;
+    award(`quiz:${projectId}:${lessonKey}:${index}:${outcome}`, amount);
+  });
+}
+
+function attemptAnswers(quiz: PersistedQuiz, items: QuizItem[]): LearnAttemptAnswer[] {
+  return quiz.answers.map((answer, index) => ({
+    ...(items[index]?.conceptId ? { conceptId: items[index]!.conceptId } : {}),
+    ...(items[index]?.conceptLabel ? { conceptLabel: items[index]!.conceptLabel } : {}),
+    mcChoice: answer.mcChoice,
+    shortText: answer.shortText,
+    shortSubmitted: answer.shortSubmitted,
+    correct: answer.correct,
+  }));
+}
+
+function paintAnswerMastery(progress: LearnPlanProgress, lessonId: string, items: QuizItem[]): LearnPlanProgress {
+  const quiz = lessonId === "final" ? progress.finalQuiz : progress.lessonQuiz[lessonId];
+  if (!quiz) return progress;
+  let conceptMastery = progress.conceptMastery;
+  let changed = false;
+  const storedLesson = lessonId === "final" ? "final" : lessonId;
+  items.forEach((item, index) => {
+    if (!item.conceptId) return;
+    const answer = quiz.answers[index];
+    if (!answer || answer.correct == null) return;
+    const quality = answer.correct ? 5 : (answer.score ?? 0) >= 0.4 ? 3 : 1;
+    const prev =
+      conceptMastery[item.conceptId] ??
+      newConceptMastery({
+        conceptId: item.conceptId,
+        conceptLabel: item.conceptLabel || item.conceptId,
+        lessonId: storedLesson,
+      });
+    if (prev.lastQuality === quality && prev.repetitions >= 1 && prev.lessonId === storedLesson) return;
+    if (!changed) conceptMastery = { ...conceptMastery };
+    changed = true;
+    conceptMastery[item.conceptId] = {
+      ...prev,
+      conceptLabel: item.conceptLabel || prev.conceptLabel,
+      lessonId: storedLesson,
+      lastQuality: quality,
+      lastReviewedAt: Date.now(),
+      repetitions: Math.max(prev.repetitions, 1),
+      correctStreak: quality >= 4 ? Math.max(1, prev.correctStreak) : 0,
+    };
+  });
+  return changed ? { ...progress, conceptMastery } : progress;
+}
+
+function applyRead(prev: LearnPlanProgress, lessonId: string, percent: number, forceDone = false): LearnPlanProgress {
+  const nextPct = Math.min(100, Math.max(prev.lessonReadScroll[lessonId] ?? 0, forceDone ? 100 : Math.round(percent)));
+  const done = forceDone || readPercentMarksDone(nextPct) || prev.lessonReadDone[lessonId] === true;
+  if ((prev.lessonReadScroll[lessonId] ?? 0) === nextPct && (prev.lessonReadDone[lessonId] === true) === done) return prev;
+  return {
+    ...prev,
+    lessonReadScroll: { ...prev.lessonReadScroll, [lessonId]: nextPct },
+    lessonReadDone: { ...prev.lessonReadDone, [lessonId]: done },
+  };
+}
+
+export function LearnPlanView({
+  projectId,
+  plan,
+  displayTitle,
+  savedProgress,
+  onSaveProgress,
+  onProgress,
+  onAward,
+  stats,
+}: Props) {
   const title = displayTitle?.trim() || plan.title.trim() || plan.topic;
   const totalMin = plan.lessons.reduce((n, l) => n + l.estimatedMinutes, 0);
   const roundedMin = Math.round(totalMin / 5) * 5;
@@ -726,32 +903,55 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
 
   const saveTimerRef = useRef<number | null>(null);
   const lessonScrollIntentRef = useRef<LessonScrollIntent>("restore");
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
   const onSaveProgressRef = useRef(onSaveProgress);
   onSaveProgressRef.current = onSaveProgress;
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
+  const onAwardRef = useRef(onAward);
+  onAwardRef.current = onAward;
+  const urlAppliedRef = useRef(false);
 
   useEffect(() => {
-    const next = mergeLearnProgress(savedProgress, projectId);
-    setProgress(next);
-    setLocation(resolveLocation(plan.lessons, next.location));
-  }, [projectId, savedProgress, plan.lessons]);
+    onProgressRef.current?.(progressRef.current);
+  }, [projectId]);
 
   useEffect(() => {
-    return () => {
+    const flush = () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      onSaveProgressRef.current?.(progressRef.current);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
     };
   }, []);
 
   const commitProgress = useCallback(
-    (updater: (prev: LearnPlanProgress) => LearnPlanProgress) => {
-      setProgress((prev) => {
-        const next = updater(prev);
-        writeLearnProgress(projectId, next);
-        if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = window.setTimeout(() => {
-          onSaveProgressRef.current?.(next);
-        }, 450);
-        return next;
-      });
+    (updater: (prev: LearnPlanProgress) => LearnPlanProgress, immediate = false) => {
+      const prev = progressRef.current;
+      const next = updater(prev);
+      if (next === prev) return;
+      progressRef.current = next;
+      setProgress(next);
+      writeLearnProgress(projectId, next);
+      onProgressRef.current?.(next);
+      for (const [id, done] of Object.entries(next.lessonReadDone)) {
+        if (done && prev.lessonReadDone[id] !== true) onAwardRef.current?.(`read:${projectId}:${id}`, XP_READ_LESSON);
+      }
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      if (immediate) {
+        saveTimerRef.current = null;
+        onSaveProgressRef.current?.(next);
+        return;
+      }
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        onSaveProgressRef.current?.(next);
+      }, 450);
     },
     [projectId],
   );
@@ -767,6 +967,40 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
     },
     [commitProgress, plan.lessons],
   );
+
+  useEffect(() => {
+    const lessonIds = plan.lessons.map((lesson) => lesson.id);
+    if (!urlAppliedRef.current) {
+      urlAppliedRef.current = true;
+      const fromUrl = locationForPlan(parsePathUrl(window.location.search).location, lessonIds);
+      if (fromUrl) {
+        const resolved = resolveLocation(plan.lessons, fromUrl);
+        setLocation(resolved);
+        commitProgress((prev) =>
+          prev.location.screen === resolved.screen && prev.location.lessonId === resolved.lessonId
+            ? prev
+            : { ...prev, location: resolved },
+        );
+        return;
+      }
+    }
+    const next = pathSearch(projectId, location, window.location.search);
+    if (window.location.search === next) return;
+    window.history.replaceState(null, "", next ? `/${next}` : "/");
+  }, [location, projectId, plan.lessons, commitProgress]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const fromUrl = locationForPlan(parsePathUrl(window.location.search).location, plan.lessons.map((lesson) => lesson.id));
+      if (!fromUrl || parsePathUrl(window.location.search).pathId !== projectId) return;
+      urlAppliedRef.current = true;
+      const resolved = resolveLocation(plan.lessons, fromUrl);
+      setLocation(resolved);
+      commitProgress((prev) => ({ ...prev, location: resolved }));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [plan.lessons, projectId, commitProgress]);
 
   const goOverview = useCallback(() => navigate(defaultLocation(), "top"), [navigate]);
   const goLesson = useCallback(
@@ -814,13 +1048,75 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
   const prevLesson = lessonIndex > 0 ? plan.lessons[lessonIndex - 1] : undefined;
   const nextLesson = lessonIndex >= 0 && lessonIndex < plan.lessons.length - 1 ? plan.lessons[lessonIndex + 1] : undefined;
 
-  useLessonScrollPersistence(activeLesson?.id, progress, commitProgress, lessonScrollIntentRef);
+  useLessonScrollPersistence(
+    activeLesson?.id,
+    activeLesson ? (progress.lessonReadScroll[activeLesson.id] ?? 0) : 0,
+    commitProgress,
+    lessonScrollIntentRef,
+  );
 
   useEffect(() => {
     setOpenArticleUrl(null);
   }, [activeLesson?.id]);
 
   const resume = resumeLabel(plan, progress, hasFinal);
+
+  const gradeShort = useCallback((item: QuizItem, given: string) => gradeFreeText(plan.id, item, given), [plan.id]);
+
+  const saveQuiz = useCallback(
+    (lessonKey: string, items: QuizItem[], quiz: PersistedQuiz, target: "lesson" | "final") => {
+      const stored = rememberQuiz(quiz);
+      const previous = target === "final" ? progressRef.current.finalQuiz ?? undefined : progressRef.current.lessonQuiz[lessonKey];
+      awardQuizDelta(projectId, lessonKey, previous, stored, onAwardRef.current);
+      commitProgress((prev) => {
+        const withQuiz =
+          target === "final"
+            ? { ...prev, finalQuiz: stored }
+            : {
+                ...prev,
+                lessonQuiz: { ...prev.lessonQuiz, [lessonKey]: stored },
+                lessonReadDone: stored.settled ? { ...prev.lessonReadDone, [lessonKey]: true } : prev.lessonReadDone,
+              };
+        return paintAnswerMastery(withQuiz, lessonKey, items);
+      }, true);
+      const changed = stored.answers.some((answer, index) => answer.correct !== (previous?.answers[index]?.correct ?? null));
+      if (!changed) return;
+      const answers = attemptAnswers(stored, items);
+      if (!answers.length) return;
+      void fetch(`/api/learn/plans/${plan.id}/attempts`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          target,
+          ...(target === "lesson" ? { lessonId: lessonKey } : {}),
+          answers,
+        }),
+      })
+        .then(async (response) => {
+          if (!response.ok) return null;
+          return (await response.json()) as { conceptMastery?: LearnPlanProgress["conceptMastery"] };
+        })
+        .then((body) => {
+          if (!body?.conceptMastery) return;
+          commitProgress(
+            (prev) =>
+              paintAnswerMastery(
+                mirrorAttemptOntoProgress(
+                  prev,
+                  { target, ...(target === "lesson" ? { lessonId: lessonKey } : {}), answers },
+                  body.conceptMastery,
+                ),
+                lessonKey,
+                items,
+              ),
+            true,
+          );
+        })
+        .catch(() => undefined);
+    },
+    [commitProgress, plan.id, projectId],
+  );
 
   const sidebar = (
     <aside className="hidden w-52 shrink-0 lg:block" aria-label="Course progress and outline">
@@ -841,8 +1137,11 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
                   <StepMark done={done} />
                   <span className="min-w-0 flex-1">
                     <span className="text-xs tabular-nums">{lesson.order}.</span> {lesson.title}
-                    {!done && readPct > 0 ? (
-                      <span className="mt-0.5 block text-[10px] tabular-nums text-[var(--ink-muted)]">{readPct}% read</span>
+                    {!done && (readPct > 0 || lessonMasteryPercent({ lessonId: lesson.id, quizCount: lesson.quiz.length, progress }) > 0) ? (
+                      <span className="mt-0.5 block text-[10px] tabular-nums text-[var(--ink-muted)]">
+                        {lessonMasteryPercent({ lessonId: lesson.id, quizCount: lesson.quiz.length, progress })}% mastery
+                        {readPct > 0 ? ` · ${readPct}% read` : ""}
+                      </span>
                     ) : null}
                   </span>
                 </NavButton>
@@ -863,6 +1162,18 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
   return (
     <div className="mx-auto flex w-full max-w-[1120px] gap-10 px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-8 sm:pt-[72px] sm:pb-24">
       <div className="learn-article min-w-0 flex-1 [scrollbar-gutter:stable]">
+        {stats ? (
+          <LearnerStatsPanel
+            variant="strip"
+            xp={stats.xp}
+            streak={stats.streak}
+            masteryPercent={
+              activeLesson
+                ? lessonMasteryPercent({ lessonId: activeLesson.id, quizCount: activeLesson.quiz.length, progress })
+                : null
+            }
+          />
+        ) : null}
         {location.screen !== "overview" ? (
           <button
             type="button"
@@ -994,8 +1305,12 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
 
         {location.screen === "lesson" && activeLesson ? (
           <>
-            <ReadingProgressBar percent={progress.lessonReadScroll[activeLesson.id] ?? 0} />
-            <div className="mt-6">
+            <ReadingProgressBar
+              percent={progress.lessonReadScroll[activeLesson.id] ?? 0}
+              done={progress.lessonReadDone[activeLesson.id] === true}
+              onMarkRead={() => commitProgress((prev) => applyRead(prev, activeLesson.id, 100, true), true)}
+            />
+            <div id={`lesson-body-${activeLesson.id}`} className="mt-6">
               <LessonBody
                 lesson={activeLesson}
                 total={plan.lessons.length}
@@ -1012,15 +1327,8 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
               items={activeLesson.quiz}
               heading="Check your understanding"
               saved={normalizeQuiz(progress.lessonQuiz[activeLesson.id], activeLesson.quiz.length)}
-              onSave={(quiz) =>
-                commitProgress((prev) => ({
-                  ...prev,
-                  lessonQuiz: { ...prev.lessonQuiz, [activeLesson.id]: quiz },
-                  lessonReadDone: quizAllAnswered(quiz)
-                    ? { ...prev.lessonReadDone, [activeLesson.id]: true }
-                    : prev.lessonReadDone,
-                }))
-              }
+              gradeShort={gradeShort}
+              onSave={(quiz) => saveQuiz(activeLesson.id, activeLesson.quiz, quiz, "lesson")}
             />
             <LessonPager
               prev={prevLesson}
@@ -1041,7 +1349,8 @@ export function LearnPlanView({ projectId, plan, displayTitle, savedProgress, on
               items={plan.finalAssessment}
               heading="Questions"
               saved={normalizeQuiz(progress.finalQuiz, plan.finalAssessment.length)}
-              onSave={(quiz) => commitProgress((prev) => ({ ...prev, finalQuiz: quiz }))}
+              gradeShort={gradeShort}
+              onSave={(quiz) => saveQuiz("final", plan.finalAssessment, quiz, "final")}
             />
             <LessonPager
               prev={plan.lessons[plan.lessons.length - 1]}
@@ -1099,52 +1408,106 @@ function LessonPager({
   );
 }
 
+function measureReadPercent(el: HTMLElement, lessonId: string): number {
+  const scrollPct = scrollDepthPercent(el.scrollTop, el.scrollHeight, el.clientHeight);
+  const root = document.getElementById(`lesson-body-${lessonId}`);
+  const nodes = root ? [...root.querySelectorAll<HTMLElement>("[data-read-section]")] : [];
+  const frame = el.getBoundingClientRect();
+  const sections = nodes.map((node) => {
+    const rect = node.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom };
+  });
+  return combineReadPercent(scrollPct, sectionVisibilityPercent(sections, frame.top, frame.height), 0);
+}
+
 function useLessonScrollPersistence(
   lessonId: string | undefined,
-  progress: LearnPlanProgress,
-  commitProgress: (updater: (prev: LearnPlanProgress) => LearnPlanProgress) => void,
+  savedPercent: number,
+  commitProgress: (updater: (prev: LearnPlanProgress) => LearnPlanProgress, immediate?: boolean) => void,
   scrollIntentRef: MutableRefObject<LessonScrollIntent>,
 ) {
+  const commitRef = useRef(commitProgress);
+  commitRef.current = commitProgress;
+  const savedRef = useRef(savedPercent);
+  savedRef.current = savedPercent;
+
   useEffect(() => {
     if (!lessonId) return;
-    const el = mainScrollElement();
-    if (!el) return;
+    let cancelled = false;
+    let el: HTMLElement | null = null;
+    let timer: number | undefined;
+    let observer: IntersectionObserver | null = null;
+    let latest = 0;
+    let tries = 0;
 
-    const intent = scrollIntentRef.current;
-    scrollIntentRef.current = "restore";
+    const publish = (immediate = false) => {
+      if (!el) return;
+      latest = Math.max(latest, measureReadPercent(el, lessonId));
+      commitRef.current((prev) => applyRead(prev, lessonId, latest), immediate);
+    };
 
-    const pct = progress.lessonReadScroll[lessonId] ?? 0;
-    const applyScroll = () => {
-      if (intent === "top") {
-        el.scrollTop = 0;
+    const onScroll = () => {
+      if (!el) return;
+      latest = Math.max(latest, measureReadPercent(el, lessonId));
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => publish(false), 120);
+    };
+
+    const start = (node: HTMLElement) => {
+      el = node;
+      const intent = scrollIntentRef.current;
+      scrollIntentRef.current = "restore";
+      const restore = () => {
+        if (intent === "top") {
+          node.scrollTop = 0;
+          return;
+        }
+        const saved = latest;
+        const max = node.scrollHeight - node.clientHeight;
+        node.scrollTop = max > 0 ? (saved / 100) * max : 0;
+      };
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        restore();
+        requestAnimationFrame(() => {
+          if (cancelled) return;
+          latest = Math.max(latest, measureReadPercent(node, lessonId));
+          publish(latest >= 92);
+        });
+      });
+      node.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", onScroll);
+      const sections = document.getElementById(`lesson-body-${lessonId}`)?.querySelectorAll("[data-read-section]");
+      if (sections?.length && typeof IntersectionObserver !== "undefined") {
+        observer = new IntersectionObserver(() => {
+          if (!cancelled) publish(false);
+        }, { root: node, threshold: [0, 0.25, 0.6] });
+        sections.forEach((section) => observer?.observe(section));
+      }
+    };
+
+    const wait = () => {
+      if (cancelled) return;
+      const node = mainScrollElement();
+      if (!node) {
+        if (tries++ < 12) requestAnimationFrame(wait);
         return;
       }
-      const max = el.scrollHeight - el.clientHeight;
-      el.scrollTop = max > 0 ? (pct / 100) * max : 0;
+      latest = savedRef.current;
+      start(node);
     };
-    requestAnimationFrame(() => requestAnimationFrame(applyScroll));
+    wait();
 
-    let timer: number | undefined;
-    const onScroll = () => {
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        const max = el.scrollHeight - el.clientHeight;
-        const nextPct = max <= 0 ? 100 : Math.min(100, Math.round((el.scrollTop / max) * 100));
-        commitProgress((prev) => {
-          const readDone = nextPct >= 90 || prev.lessonReadDone[lessonId] === true;
-          return {
-            ...prev,
-            lessonReadScroll: { ...prev.lessonReadScroll, [lessonId]: nextPct },
-            lessonReadDone: readDone ? { ...prev.lessonReadDone, [lessonId]: true } : prev.lessonReadDone,
-          };
-        });
-      }, 150);
-    };
-
-    el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
-      el.removeEventListener("scroll", onScroll);
+      cancelled = true;
       if (timer) window.clearTimeout(timer);
+      observer?.disconnect();
+      el?.removeEventListener("scroll", onScroll);
+      if (document.getElementById(`lesson-body-${lessonId}`) && el) {
+        latest = Math.max(latest, measureReadPercent(el, lessonId));
+      }
+      commitRef.current((prev) => applyRead(prev, lessonId, latest), true);
+      window.removeEventListener("resize", onScroll);
     };
-  }, [lessonId, commitProgress]);
+  }, [lessonId, scrollIntentRef]);
 }

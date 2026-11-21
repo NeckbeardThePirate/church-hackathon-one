@@ -52,6 +52,8 @@ export type Project = {
   learnPlan?: LearnPlan;
   /** Learn projects: reading + quiz progress for resume. */
   learnProgress?: LearnPlanProgress;
+  /** The plan builder stopped. The path stays until the learner removes it. */
+  learnFailed?: boolean;
 };
 
 export const PROJECT_KIND_LABEL: Record<StoredProjectKind, string> = {
@@ -63,6 +65,13 @@ export const PROJECT_KIND_LABEL: Record<StoredProjectKind, string> = {
 /** True for projects saved by earlier versions (lesson/study). These open read-only. */
 export function isLegacyProject(project: Pick<Project, "kind">): boolean {
   return project.kind !== "learn";
+}
+
+/** A learn project that was never given a topic or a plan. These are not listed. */
+export function isEmptyLearnPath(project: Pick<Project, "kind" | "title" | "learnPlan" | "learnPlanId">): boolean {
+  if (isLegacyProject(project)) return false;
+  if (project.learnPlan || project.learnPlanId) return false;
+  return project.title.trim().length === 0;
 }
 
 const STORAGE_KEY = "church-hackathon-projects";
