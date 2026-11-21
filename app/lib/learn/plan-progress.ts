@@ -1,4 +1,20 @@
-/** Persisted learn course state (per project). */
+/** Persisted learn course state (per project and plan). */
+
+import {
+  adoptProgressForScope,
+  duplicateProgressIndexes,
+  emptyScopedProgress,
+  finalQuizFor,
+  hasScopedLearning,
+  lessonQuizFor,
+  parseProgressKey,
+  parseScopeId,
+  projectForScope,
+  readDoneFor,
+  scopeFromProject,
+  type ProgressClaimProject,
+  type ProgressScope,
+} from "./progress-scope.ts";
 
 export type LearnScreen = "overview" | "lesson" | "final";
 
@@ -46,11 +62,17 @@ export type ConceptMastery = {
 
 export type LearnPlanProgress = {
   v: 3;
+  /**
+   * Set once this blob has been claimed for one path.
+   * `projectId` + separator + `planId`. Bare lesson keys are not displayable until then.
+   */
+  scopeId?: string;
   location: LearnLocation;
-  /** Scroll depth 0–100 per lesson (reading). */
+  /** Scroll depth 0–100. Keys are `projectId`, `planId`, and lesson id, not the lesson id alone. */
   lessonReadScroll: Record<string, number>;
   lessonReadDone: Record<string, boolean>;
   lessonQuiz: Record<string, PersistedQuiz>;
+  /** Legacy single slot. New writes leave this null and store the final under `lessonQuiz`. */
   finalQuiz: PersistedQuiz | null;
   /** Scroll depth 0–100 per article URL, inside the reading window. */
   articleScroll: Record<string, number>;
@@ -195,11 +217,16 @@ function normalizeConceptMastery(value: unknown): Record<string, ConceptMastery>
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (!raw || typeof raw !== "object") continue;
     const row = raw as Record<string, unknown>;
-    const conceptId = typeof row.conceptId === "string" && row.conceptId.trim() ? row.conceptId : key;
+    const scoped = parseProgressKey(key);
+    const slugFromRow = typeof row.conceptId === "string" && row.conceptId.trim() && !parseProgressKey(row.conceptId)
+      ? row.conceptId
+      : "";
+    const conceptId = slugFromRow || (scoped ? scoped.rest : key);
     if (!conceptId) continue;
+    const storageKey = scoped ? key : conceptId;
     const conceptLabel =
       typeof row.conceptLabel === "string" && row.conceptLabel.trim() ? row.conceptLabel : conceptId;
-    const lessonId = typeof row.lessonId === "string" ? row.lessonId : "";
+    const lessonId = typeof row.lessonId === "string" ? (parseProgressKey(row.lessonId)?.rest ?? row.lessonId) : "";
     const mastery: ConceptMastery = {
       ...newConceptMastery({ conceptId, conceptLabel, lessonId }),
       easiness: finiteOr(row.easiness, 2.5),
@@ -214,7 +241,7 @@ function normalizeConceptMastery(value: unknown): Record<string, ConceptMastery>
     if (typeof row.masteryRev === "number" && Number.isInteger(row.masteryRev) && row.masteryRev > 0) {
       mastery.masteryRev = row.masteryRev;
     }
-    out[conceptId] = mastery;
+    out[storageKey] = mastery;
   }
   return out;
 }
@@ -250,8 +277,10 @@ export function normalizeLearnProgress(progress: unknown): LearnPlanProgress {
   const raw = progress as Record<string, unknown>;
   if (!hasModernProgressFields(raw)) return migrateLegacy(raw);
 
+  const scopeId = parseScopeId(raw.scopeId);
   const next: LearnPlanProgress = {
     v: 3,
+    ...(scopeId ? { scopeId } : {}),
     location: parseLocation(raw.location),
     lessonReadScroll: finiteMap(raw.lessonReadScroll),
     lessonReadDone: boolMap(raw.lessonReadDone),
@@ -441,17 +470,60 @@ function unionUnsyncedProgress(remote: LearnPlanProgress, local: LearnPlanProgre
   };
 }
 
-export function mergeLearnProgress(fromProject: unknown, projectId: string): LearnPlanProgress {
-  const local = readLearnProgress(projectId);
-  if (fromProject && typeof fromProject === "object") {
-    const raw = fromProject as Record<string, unknown>;
-    // Saved project progress wins, including v2 and unversioned payloads.
-    // This browser's copy only fills reading and answers the project has not stored yet.
-    if (hasModernProgressFields(raw) || hasLegacyProgressFields(raw)) {
-      return unionUnsyncedProgress(normalizeLearnProgress(fromProject), local);
+/**
+ * Progress for one path. Bare lesson keys are not applied here: a copied legacy blob
+ * would otherwise show up on every path that uses l1..l4. Claim the workspace first.
+ * This browser's cache is adopted only when the saved path has no scoped learning yet
+ * and the cache is not stamped for a different plan.
+ */
+export function mergeLearnProgress(fromProject: unknown, scope: ProgressScope): LearnPlanProgress {
+  const remoteNorm = normalizeIncoming(fromProject);
+  const remote = projectForScope(remoteNorm, scope);
+  const localNorm = readLearnProgress(scope.projectId);
+  const localOwned =
+    !hasScopedLearning(remote, scope) && (!localNorm.scopeId || localNorm.scopeId === remote.scopeId)
+      ? adoptProgressForScope(localNorm, scope)
+      : projectForScope(localNorm, scope);
+  if (!hasModernFields(fromProject) && !hasLegacyFields(fromProject)) return localOwned;
+  return unionUnsyncedProgress(remote, localOwned);
+}
+
+function normalizeIncoming(progress: unknown): LearnPlanProgress {
+  if (!hasModernFields(progress) && !hasLegacyFields(progress)) return emptyLearnProgress();
+  return normalizeLearnProgress(progress);
+}
+
+function hasModernFields(progress: unknown): boolean {
+  return !!progress && typeof progress === "object" && hasModernProgressFields(progress as Record<string, unknown>);
+}
+
+function hasLegacyFields(progress: unknown): boolean {
+  return !!progress && typeof progress === "object" && hasLegacyProgressFields(progress as Record<string, unknown>);
+}
+
+/**
+ * Give legacy unscoped answers to the path they were made on.
+ * When two paths share the same answer payload, the earlier path keeps it and the later path starts empty.
+ */
+export function claimLegacyProgress<T extends ProgressClaimProject>(projects: T[]): T[] {
+  const normalized = projects.map((project) => {
+    if (project.learnProgress == null) return project;
+    return { ...project, learnProgress: normalizeLearnProgress(project.learnProgress) };
+  });
+  const drop = duplicateProgressIndexes(normalized);
+  return normalized.map((project, index) => {
+    const progress = project.learnProgress;
+    if (!progress) return project;
+    const scope = scopeFromProject(project);
+    if (drop.has(index)) {
+      return {
+        ...project,
+        learnProgress: scope ? emptyScopedProgress(scope, { screen: "overview" }) : emptyLearnProgress(),
+      };
     }
-  }
-  return local;
+    if (!scope) return project;
+    return { ...project, learnProgress: adoptProgressForScope(progress, scope) };
+  });
 }
 
 export function lessonHasQuiz(lesson: { quiz: unknown[] }): boolean {
@@ -459,21 +531,23 @@ export function lessonHasQuiz(lesson: { quiz: unknown[] }): boolean {
 }
 
 export function isLessonStepComplete(
+  scope: ProgressScope,
   lessonId: string,
   hasQuiz: boolean,
   progress: LearnPlanProgress,
 ): boolean {
-  if (!progress.lessonReadDone[lessonId]) return false;
+  if (!readDoneFor(progress, scope, lessonId)) return false;
   if (!hasQuiz) return true;
-  return isQuizSettled(progress.lessonQuiz[lessonId]);
+  return isQuizSettled(lessonQuizFor(progress, scope, lessonId));
 }
 
-export function isFinalStepComplete(progress: LearnPlanProgress, hasFinal: boolean): boolean {
+export function isFinalStepComplete(scope: ProgressScope, progress: LearnPlanProgress, hasFinal: boolean): boolean {
   if (!hasFinal) return false;
-  return isQuizSettled(progress.finalQuiz);
+  return isQuizSettled(finalQuizFor(progress, scope));
 }
 
 export function countPlanProgress(
+  scope: ProgressScope,
   lessons: { id: string; hasQuiz: boolean }[],
   hasFinal: boolean,
   progress: LearnPlanProgress,
@@ -481,11 +555,11 @@ export function countPlanProgress(
   let completed = 0;
   let total = lessons.length;
   for (const { id, hasQuiz } of lessons) {
-    if (isLessonStepComplete(id, hasQuiz, progress)) completed += 1;
+    if (isLessonStepComplete(scope, id, hasQuiz, progress)) completed += 1;
   }
   if (hasFinal) {
     total += 1;
-    if (isFinalStepComplete(progress, true)) completed += 1;
+    if (isFinalStepComplete(scope, progress, true)) completed += 1;
   }
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
   return { completed, total, percent };
@@ -504,6 +578,7 @@ export function resolveLocation(
 }
 
 export function resumeLabel(
+  scope: ProgressScope,
   plan: { lessons: { id: string; order: number; title: string }[] },
   progress: LearnPlanProgress,
   hasFinal: boolean,
@@ -514,9 +589,9 @@ export function resumeLabel(
     if (lesson) return `Lesson ${lesson.order}: ${lesson.title}`;
   }
   if (loc.screen === "final" && hasFinal) return "Final assessment";
-  const next = plan.lessons.find((l) => !progress.lessonReadDone[l.id]);
+  const next = plan.lessons.find((l) => !readDoneFor(progress, scope, l.id));
   if (next) return `Lesson ${next.order}: ${next.title}`;
-  if (hasFinal && !isFinalStepComplete(progress, true)) return "Final assessment";
+  if (hasFinal && !isFinalStepComplete(scope, progress, true)) return "Final assessment";
   return null;
 }
 

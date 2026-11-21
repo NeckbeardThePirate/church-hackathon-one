@@ -9,6 +9,8 @@ import {
   type LearnAttempt,
 } from "../learn/attempts.ts";
 import type { ConceptMastery } from "../learn/plan-progress.ts";
+import { claimLegacyProgress } from "../learn/plan-progress.ts";
+import { scopeFromProject } from "../learn/progress-scope.ts";
 import { normalizeStoredProject, type Project, type StoredProjectKind } from "../projects.ts";
 import type { ChatGptIdentity } from "./chatgpt-auth.ts";
 import {
@@ -78,7 +80,7 @@ export class UserWorkspaceDO extends DurableObject {
     this.ctx.storage.sql.exec("DELETE FROM oauth WHERE id = 1");
   }
 
-  listProjects(): Project[] {
+  private readProjects(): Project[] {
     const rows = this.ctx.storage.sql
       .exec<ProjectRow>("SELECT id, payload FROM projects ORDER BY updated_at DESC")
       .toArray();
@@ -92,6 +94,24 @@ export class UserWorkspaceDO extends DurableObject {
       }
     }
     return projects;
+  }
+
+  listProjects(): Project[] {
+    const projects = this.readProjects();
+    const claimed = claimLegacyProgress(projects);
+    for (const project of claimed) {
+      const before = projects.find((item) => item.id === project.id);
+      if (!before) continue;
+      if (JSON.stringify(before.learnProgress ?? null) === JSON.stringify(project.learnProgress ?? null)) continue;
+      this.upsertProject({ ...before, learnProgress: project.learnProgress });
+    }
+    return claimed;
+  }
+
+  /** Project and plan that own attempts for this plan. Null when the plan is not in the workspace yet. */
+  learnScopeForPlan(planId: string): { projectId: string; planId: string } | null {
+    const project = this.findProjectByLearnPlan(planId);
+    return project ? scopeFromProject(project) : null;
   }
 
   getProject(id: string): Project | null {
@@ -116,8 +136,7 @@ export class UserWorkspaceDO extends DurableObject {
 
   findProjectByLearnPlan(planId: string): Project | null {
     if (!planId || planId.length > 80) return null;
-    // listProjects is newest first.
-    for (const project of this.listProjects()) {
+    for (const project of this.readProjects()) {
       if (project.learnPlanId === planId || project.learnPlan?.id === planId) return project;
     }
     return null;
@@ -143,7 +162,9 @@ export class UserWorkspaceDO extends DurableObject {
     const error = attemptLessonError(project, input.attempt);
     if (error) return { ok: false, error };
     if (!project) return { ok: true };
-    const learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery);
+    const scope = scopeFromProject(project);
+    if (!scope) return { ok: true };
+    const learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery, scope);
     const updatedAt = Math.max(project.updatedAt, input.now);
     this.upsertProject({ ...project, learnProgress, updatedAt });
     return { ok: true };

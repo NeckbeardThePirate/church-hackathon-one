@@ -48,6 +48,22 @@ import {
   type PersistedQuiz,
   type PersistedQuizAnswer,
 } from "../lib/learn/plan-progress";
+import {
+  articleDoneFor,
+  articleScrollFor,
+  conceptProgressKey,
+  finalQuizFor,
+  lessonQuizFor,
+  readDoneFor,
+  readScrollFor,
+  withArticleDone,
+  withArticleScroll,
+  withConceptMastery,
+  withFinalQuiz,
+  withLessonQuiz,
+  withReadState,
+  type ProgressScope,
+} from "../lib/learn/progress-scope";
 import type {
   ArticleResource,
   BookResource,
@@ -70,7 +86,7 @@ type Props = {
   plan: LearnPlan;
   displayTitle?: string;
   savedProgress?: LearnPlanProgress;
-  onSaveProgress?: (progress: LearnPlanProgress) => void;
+  onSaveProgress?: (projectId: string, progress: LearnPlanProgress) => void;
   onProgress?: (progress: LearnPlanProgress) => void;
   onAward?: (reason: string, amount: number) => void;
   stats?: { xp: number; streak: number } | null;
@@ -804,7 +820,7 @@ function rememberQuiz(quiz: PersistedQuiz): PersistedQuiz {
 }
 
 function awardQuizDelta(
-  projectId: string,
+  scope: ProgressScope,
   lessonKey: string,
   previous: PersistedQuiz | undefined,
   next: PersistedQuiz,
@@ -818,7 +834,7 @@ function awardQuizDelta(
     if (before && before.correct === answer.correct && (before.score ?? null) === (answer.score ?? null)) return;
     const outcome = answer.correct ? "correct" : (answer.score ?? 0) >= 0.4 ? "partial" : "wrong";
     const amount = outcome === "correct" ? XP_QUIZ_CORRECT : outcome === "partial" ? XP_QUIZ_PARTIAL : XP_QUIZ_ATTEMPT;
-    award(`quiz:${projectId}:${lessonKey}:${index}:${outcome}`, amount);
+    award(`quiz:${scope.projectId}:${scope.planId}:${lessonKey}:${index}:${outcome}`, amount);
   });
 }
 
@@ -833,28 +849,31 @@ function attemptAnswers(quiz: PersistedQuiz, items: QuizItem[]): LearnAttemptAns
   }));
 }
 
-function paintAnswerMastery(progress: LearnPlanProgress, lessonId: string, items: QuizItem[]): LearnPlanProgress {
-  const quiz = lessonId === "final" ? progress.finalQuiz : progress.lessonQuiz[lessonId];
+function paintAnswerMastery(
+  progress: LearnPlanProgress,
+  scope: ProgressScope,
+  lessonId: string,
+  items: QuizItem[],
+): LearnPlanProgress {
+  const quiz = lessonId === "final" ? finalQuizFor(progress, scope) : lessonQuizFor(progress, scope, lessonId);
   if (!quiz) return progress;
-  let conceptMastery = progress.conceptMastery;
-  let changed = false;
+  let next = progress;
   const storedLesson = lessonId === "final" ? "final" : lessonId;
   items.forEach((item, index) => {
     if (!item.conceptId) return;
     const answer = quiz.answers[index];
     if (!answer || answer.correct == null) return;
     const quality = answer.correct ? 5 : (answer.score ?? 0) >= 0.4 ? 3 : 1;
+    const key = conceptProgressKey(scope, item.conceptId);
     const prev =
-      conceptMastery[item.conceptId] ??
+      next.conceptMastery[key] ??
       newConceptMastery({
         conceptId: item.conceptId,
         conceptLabel: item.conceptLabel || item.conceptId,
         lessonId: storedLesson,
       });
     if (prev.lastQuality === quality && prev.repetitions >= 1 && prev.lessonId === storedLesson) return;
-    if (!changed) conceptMastery = { ...conceptMastery };
-    changed = true;
-    conceptMastery[item.conceptId] = {
+    next = withConceptMastery(next, scope, item.conceptId, {
       ...prev,
       conceptLabel: item.conceptLabel || prev.conceptLabel,
       lessonId: storedLesson,
@@ -862,20 +881,24 @@ function paintAnswerMastery(progress: LearnPlanProgress, lessonId: string, items
       lastReviewedAt: Date.now(),
       repetitions: Math.max(prev.repetitions, 1),
       correctStreak: quality >= 4 ? Math.max(1, prev.correctStreak) : 0,
-    };
+    });
   });
-  return changed ? { ...progress, conceptMastery } : progress;
+  return next;
 }
 
-function applyRead(prev: LearnPlanProgress, lessonId: string, percent: number, forceDone = false): LearnPlanProgress {
-  const nextPct = Math.min(100, Math.max(prev.lessonReadScroll[lessonId] ?? 0, forceDone ? 100 : Math.round(percent)));
-  const done = forceDone || readPercentMarksDone(nextPct) || prev.lessonReadDone[lessonId] === true;
-  if ((prev.lessonReadScroll[lessonId] ?? 0) === nextPct && (prev.lessonReadDone[lessonId] === true) === done) return prev;
-  return {
-    ...prev,
-    lessonReadScroll: { ...prev.lessonReadScroll, [lessonId]: nextPct },
-    lessonReadDone: { ...prev.lessonReadDone, [lessonId]: done },
-  };
+function applyRead(
+  prev: LearnPlanProgress,
+  scope: ProgressScope,
+  lessonId: string,
+  percent: number,
+  forceDone = false,
+): LearnPlanProgress {
+  const current = readScrollFor(prev, scope, lessonId);
+  const alreadyDone = readDoneFor(prev, scope, lessonId);
+  const nextPct = Math.min(100, Math.max(current, forceDone ? 100 : Math.round(percent)));
+  const done = forceDone || readPercentMarksDone(nextPct) || alreadyDone;
+  if (current === nextPct && alreadyDone === done) return prev;
+  return withReadState(prev, scope, lessonId, nextPct, done);
 }
 
 export function LearnPlanView({
@@ -892,10 +915,11 @@ export function LearnPlanView({
   const totalMin = plan.lessons.reduce((n, l) => n + l.estimatedMinutes, 0);
   const roundedMin = Math.round(totalMin / 5) * 5;
   const hasFinal = plan.finalAssessment.length > 0;
+  const scope = useMemo<ProgressScope>(() => ({ projectId, planId: plan.id }), [projectId, plan.id]);
 
   const hydrated = useMemo(
-    () => mergeLearnProgress(savedProgress, projectId),
-    [savedProgress, projectId],
+    () => mergeLearnProgress(savedProgress, scope),
+    [savedProgress, scope],
   );
 
   const [progress, setProgress] = useState<LearnPlanProgress>(hydrated);
@@ -912,6 +936,8 @@ export function LearnPlanView({
   const onAwardRef = useRef(onAward);
   onAwardRef.current = onAward;
   const urlAppliedRef = useRef(false);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
 
   useEffect(() => {
     onProgressRef.current?.(progressRef.current);
@@ -921,7 +947,8 @@ export function LearnPlanView({
     const flush = () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
-      onSaveProgressRef.current?.(progressRef.current);
+      const current = scopeRef.current;
+      onSaveProgressRef.current?.(current.projectId, progressRef.current);
     };
     window.addEventListener("pagehide", flush);
     return () => {
@@ -939,21 +966,23 @@ export function LearnPlanView({
       setProgress(next);
       writeLearnProgress(projectId, next);
       onProgressRef.current?.(next);
-      for (const [id, done] of Object.entries(next.lessonReadDone)) {
-        if (done && prev.lessonReadDone[id] !== true) onAwardRef.current?.(`read:${projectId}:${id}`, XP_READ_LESSON);
+      for (const lesson of plan.lessons) {
+        if (readDoneFor(next, scope, lesson.id) && !readDoneFor(prev, scope, lesson.id)) {
+          onAwardRef.current?.(`read:${projectId}:${plan.id}:${lesson.id}`, XP_READ_LESSON);
+        }
       }
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
       if (immediate) {
         saveTimerRef.current = null;
-        onSaveProgressRef.current?.(next);
+        onSaveProgressRef.current?.(projectId, next);
         return;
       }
       saveTimerRef.current = window.setTimeout(() => {
         saveTimerRef.current = null;
-        onSaveProgressRef.current?.(next);
+        onSaveProgressRef.current?.(projectId, next);
       }, 450);
     },
-    [projectId],
+    [plan.id, plan.lessons, projectId, scope],
   );
 
   const navigate = useCallback(
@@ -1014,20 +1043,17 @@ export function LearnPlanView({
   const onArticleScroll = useCallback(
     (url: string, percent: number) => {
       commitProgress((prev) => {
-        if ((prev.articleScroll?.[url] ?? 0) === percent) return prev;
-        return { ...prev, articleScroll: { ...prev.articleScroll, [url]: percent } };
+        if (articleScrollFor(prev, scope, url) === percent) return prev;
+        return withArticleScroll(prev, scope, url, percent);
       });
     },
-    [commitProgress],
+    [commitProgress, scope],
   );
   const onArticleDone = useCallback(
     (url: string, done: boolean) => {
-      commitProgress((prev) => ({
-        ...prev,
-        articleDone: { ...prev.articleDone, [url]: done },
-      }));
+      commitProgress((prev) => withArticleDone(prev, scope, url, done));
     },
-    [commitProgress],
+    [commitProgress, scope],
   );
 
   const lessonSteps = useMemo(
@@ -1035,8 +1061,8 @@ export function LearnPlanView({
     [plan.lessons],
   );
   const progressStats = useMemo(
-    () => countPlanProgress(lessonSteps, hasFinal, progress),
-    [lessonSteps, hasFinal, progress],
+    () => countPlanProgress(scope, lessonSteps, hasFinal, progress),
+    [scope, lessonSteps, hasFinal, progress],
   );
 
   const activeLesson =
@@ -1050,7 +1076,8 @@ export function LearnPlanView({
 
   useLessonScrollPersistence(
     activeLesson?.id,
-    activeLesson ? (progress.lessonReadScroll[activeLesson.id] ?? 0) : 0,
+    scope,
+    activeLesson ? readScrollFor(progress, scope, activeLesson.id) : 0,
     commitProgress,
     lessonScrollIntentRef,
   );
@@ -1059,25 +1086,30 @@ export function LearnPlanView({
     setOpenArticleUrl(null);
   }, [activeLesson?.id]);
 
-  const resume = resumeLabel(plan, progress, hasFinal);
+  const resume = resumeLabel(scope, plan, progress, hasFinal);
 
   const gradeShort = useCallback((item: QuizItem, given: string) => gradeFreeText(plan.id, item, given), [plan.id]);
 
   const saveQuiz = useCallback(
     (lessonKey: string, items: QuizItem[], quiz: PersistedQuiz, target: "lesson" | "final") => {
       const stored = rememberQuiz(quiz);
-      const previous = target === "final" ? progressRef.current.finalQuiz ?? undefined : progressRef.current.lessonQuiz[lessonKey];
-      awardQuizDelta(projectId, lessonKey, previous, stored, onAwardRef.current);
+      const previous =
+        target === "final"
+          ? (finalQuizFor(progressRef.current, scope) ?? undefined)
+          : lessonQuizFor(progressRef.current, scope, lessonKey);
+      awardQuizDelta(scope, lessonKey, previous, stored, onAwardRef.current);
       commitProgress((prev) => {
         const withQuiz =
           target === "final"
-            ? { ...prev, finalQuiz: stored }
-            : {
-                ...prev,
-                lessonQuiz: { ...prev.lessonQuiz, [lessonKey]: stored },
-                lessonReadDone: stored.settled ? { ...prev.lessonReadDone, [lessonKey]: true } : prev.lessonReadDone,
-              };
-        return paintAnswerMastery(withQuiz, lessonKey, items);
+            ? withFinalQuiz(prev, scope, stored)
+            : withReadState(
+                withLessonQuiz(prev, scope, lessonKey, stored),
+                scope,
+                lessonKey,
+                readScrollFor(prev, scope, lessonKey),
+                stored.settled ? true : readDoneFor(prev, scope, lessonKey),
+              );
+        return paintAnswerMastery(withQuiz, scope, lessonKey, items);
       }, true);
       const changed = stored.answers.some((answer, index) => answer.correct !== (previous?.answers[index]?.correct ?? null));
       if (!changed) return;
@@ -1106,7 +1138,9 @@ export function LearnPlanView({
                   prev,
                   { target, ...(target === "lesson" ? { lessonId: lessonKey } : {}), answers },
                   body.conceptMastery,
+                  scope,
                 ),
+                scope,
                 lessonKey,
                 items,
               ),
@@ -1115,7 +1149,7 @@ export function LearnPlanView({
         })
         .catch(() => undefined);
     },
-    [commitProgress, plan.id, projectId],
+    [commitProgress, plan.id, scope],
   );
 
   const sidebar = (
@@ -1128,8 +1162,8 @@ export function LearnPlanView({
         <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--ink-muted)]">Lessons</p>
         <ol className="mt-2 space-y-0.5">
           {plan.lessons.map((lesson) => {
-            const done = isLessonStepComplete(lesson.id, lesson.quiz.length > 0, progress);
-            const readPct = progress.lessonReadScroll[lesson.id] ?? 0;
+            const done = isLessonStepComplete(scope, lesson.id, lesson.quiz.length > 0, progress);
+            const readPct = readScrollFor(progress, scope, lesson.id);
             const active = location.screen === "lesson" && location.lessonId === lesson.id;
             return (
               <li key={lesson.id}>
@@ -1137,9 +1171,9 @@ export function LearnPlanView({
                   <StepMark done={done} />
                   <span className="min-w-0 flex-1">
                     <span className="text-xs tabular-nums">{lesson.order}.</span> {lesson.title}
-                    {!done && (readPct > 0 || lessonMasteryPercent({ lessonId: lesson.id, quizCount: lesson.quiz.length, progress }) > 0) ? (
+                    {!done && (readPct > 0 || lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress }) > 0) ? (
                       <span className="mt-0.5 block text-[10px] tabular-nums text-[var(--ink-muted)]">
-                        {lessonMasteryPercent({ lessonId: lesson.id, quizCount: lesson.quiz.length, progress })}% mastery
+                        {lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress })}% mastery
                         {readPct > 0 ? ` · ${readPct}% read` : ""}
                       </span>
                     ) : null}
@@ -1151,7 +1185,7 @@ export function LearnPlanView({
         </ol>
         {hasFinal ? (
           <NavButton onClick={goFinal} active={location.screen === "final"} className="mt-3">
-            <StepMark done={isFinalStepComplete(progress, true)} />
+            <StepMark done={isFinalStepComplete(scope, progress, true)} />
             <span>Final assessment</span>
           </NavButton>
         ) : null}
@@ -1162,18 +1196,17 @@ export function LearnPlanView({
   return (
     <div className="mx-auto flex w-full max-w-[1120px] gap-10 px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-8 sm:pt-[72px] sm:pb-24">
       <div className="learn-article min-w-0 flex-1 [scrollbar-gutter:stable]">
-        {stats ? (
-          <LearnerStatsPanel
-            variant="strip"
-            xp={stats.xp}
-            streak={stats.streak}
-            masteryPercent={
-              activeLesson
-                ? lessonMasteryPercent({ lessonId: activeLesson.id, quizCount: activeLesson.quiz.length, progress })
-                : null
-            }
-          />
-        ) : null}
+        <LearnerStatsPanel
+          variant="strip"
+          pending={!stats}
+          xp={stats?.xp ?? 0}
+          streak={stats?.streak ?? 0}
+          masteryPercent={
+            activeLesson
+              ? lessonMasteryPercent({ scope, lessonId: activeLesson.id, quizCount: activeLesson.quiz.length, progress })
+              : null
+          }
+        />
         {location.screen !== "overview" ? (
           <button
             type="button"
@@ -1208,9 +1241,9 @@ export function LearnPlanView({
                   if (loc.screen === "final") goFinal();
                   else if (loc.screen === "lesson" && loc.lessonId) goLesson(loc.lessonId);
                   else {
-                    const next = plan.lessons.find((l) => !isLessonStepComplete(l.id, l.quiz.length > 0, progress));
+                    const next = plan.lessons.find((l) => !isLessonStepComplete(scope, l.id, l.quiz.length > 0, progress));
                     if (next) goLesson(next.id);
-                    else if (hasFinal && !isFinalStepComplete(progress, true)) goFinal();
+                    else if (hasFinal && !isFinalStepComplete(scope, progress, true)) goFinal();
                   }
                 }}
                 className="mt-5 flex w-full flex-col items-start gap-1 rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_50%,var(--line))]"
@@ -1246,9 +1279,9 @@ export function LearnPlanView({
               <h2 className="text-base font-semibold text-[var(--ink)]">Lessons</h2>
               <ul className="mt-4 space-y-2">
                 {plan.lessons.map((lesson) => {
-                  const done = isLessonStepComplete(lesson.id, lesson.quiz.length > 0, progress);
-                  const readPct = progress.lessonReadScroll[lesson.id] ?? 0;
-                  const quiz = normalizeQuiz(progress.lessonQuiz[lesson.id], lesson.quiz.length);
+                  const done = isLessonStepComplete(scope, lesson.id, lesson.quiz.length > 0, progress);
+                  const readPct = readScrollFor(progress, scope, lesson.id);
+                  const quiz = normalizeQuiz(lessonQuizFor(progress, scope, lesson.id), lesson.quiz.length);
                   const quizAnswered = lesson.quiz.length ? quiz.answers.filter((a) => a.correct !== null).length : 0;
                   return (
                     <li key={lesson.id}>
@@ -1284,7 +1317,7 @@ export function LearnPlanView({
                   onClick={goFinal}
                   className="flex w-full items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3 text-left hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))]"
                 >
-                  <StepMark done={isFinalStepComplete(progress, true)} />
+                  <StepMark done={isFinalStepComplete(scope, progress, true)} />
                   <span className="text-sm font-medium text-[var(--ink)]">Final assessment</span>
                 </button>
               </section>
@@ -1306,17 +1339,17 @@ export function LearnPlanView({
         {location.screen === "lesson" && activeLesson ? (
           <>
             <ReadingProgressBar
-              percent={progress.lessonReadScroll[activeLesson.id] ?? 0}
-              done={progress.lessonReadDone[activeLesson.id] === true}
-              onMarkRead={() => commitProgress((prev) => applyRead(prev, activeLesson.id, 100, true), true)}
+              percent={readScrollFor(progress, scope, activeLesson.id)}
+              done={readDoneFor(progress, scope, activeLesson.id)}
+              onMarkRead={() => commitProgress((prev) => applyRead(prev, scope, activeLesson.id, 100, true), true)}
             />
             <div id={`lesson-body-${activeLesson.id}`} className="mt-6">
               <LessonBody
                 lesson={activeLesson}
                 total={plan.lessons.length}
                 planId={plan.id}
-                articleScroll={progress.articleScroll ?? {}}
-                articleDone={progress.articleDone ?? {}}
+                articleScroll={Object.fromEntries(activeLesson.articles.map((article) => [article.url, articleScrollFor(progress, scope, article.url)]))}
+                articleDone={Object.fromEntries(activeLesson.articles.map((article) => [article.url, articleDoneFor(progress, scope, article.url)]))}
                 openArticleUrl={openArticleUrl}
                 onArticleOpen={onArticleOpen}
                 onArticleScroll={onArticleScroll}
@@ -1324,9 +1357,10 @@ export function LearnPlanView({
               />
             </div>
             <QuizSection
+              key={`${plan.id}:${activeLesson.id}`}
               items={activeLesson.quiz}
               heading="Check your understanding"
-              saved={normalizeQuiz(progress.lessonQuiz[activeLesson.id], activeLesson.quiz.length)}
+              saved={normalizeQuiz(lessonQuizFor(progress, scope, activeLesson.id), activeLesson.quiz.length)}
               gradeShort={gradeShort}
               onSave={(quiz) => saveQuiz(activeLesson.id, activeLesson.quiz, quiz, "lesson")}
             />
@@ -1346,9 +1380,10 @@ export function LearnPlanView({
             <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-3xl">Final assessment</h1>
             <p className="mt-2 text-sm text-[var(--ink-muted)]">Covers the whole course.</p>
             <QuizSection
+              key={`${plan.id}:final`}
               items={plan.finalAssessment}
               heading="Questions"
-              saved={normalizeQuiz(progress.finalQuiz, plan.finalAssessment.length)}
+              saved={normalizeQuiz(finalQuizFor(progress, scope), plan.finalAssessment.length)}
               gradeShort={gradeShort}
               onSave={(quiz) => saveQuiz("final", plan.finalAssessment, quiz, "final")}
             />
@@ -1422,6 +1457,7 @@ function measureReadPercent(el: HTMLElement, lessonId: string): number {
 
 function useLessonScrollPersistence(
   lessonId: string | undefined,
+  scope: ProgressScope,
   savedPercent: number,
   commitProgress: (updater: (prev: LearnPlanProgress) => LearnPlanProgress, immediate?: boolean) => void,
   scrollIntentRef: MutableRefObject<LessonScrollIntent>,
@@ -1443,7 +1479,7 @@ function useLessonScrollPersistence(
     const publish = (immediate = false) => {
       if (!el) return;
       latest = Math.max(latest, measureReadPercent(el, lessonId));
-      commitRef.current((prev) => applyRead(prev, lessonId, latest), immediate);
+      commitRef.current((prev) => applyRead(prev, scope, lessonId, latest), immediate);
     };
 
     const onScroll = () => {
@@ -1506,8 +1542,8 @@ function useLessonScrollPersistence(
       if (document.getElementById(`lesson-body-${lessonId}`) && el) {
         latest = Math.max(latest, measureReadPercent(el, lessonId));
       }
-      commitRef.current((prev) => applyRead(prev, lessonId, latest), true);
+      commitRef.current((prev) => applyRead(prev, scope, lessonId, latest), true);
       window.removeEventListener("resize", onScroll);
     };
-  }, [lessonId, scrollIntentRef]);
+  }, [lessonId, scope, scrollIntentRef]);
 }

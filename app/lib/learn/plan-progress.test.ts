@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  claimLegacyProgress,
   emptyLearnProgress,
   isLessonStepComplete,
   mergeLearnProgress,
@@ -8,6 +9,7 @@ import {
   retryMissedQuiz,
   type ConceptMastery,
 } from "./plan-progress.ts";
+import { adoptProgressForScope, lessonQuizFor } from "./progress-scope.ts";
 import { normalizeStoredProject, type Project } from "../projects.ts";
 import { lessonKind } from "./types.ts";
 
@@ -98,16 +100,26 @@ test("existing conceptMastery is kept, including scheduling fields", () => {
   assert.deepEqual(next.conceptMastery[row.conceptId], row);
 });
 
-test("mergeLearnProgress loads v2 and v3 project progress instead of ignoring it", () => {
-  const fromV2 = mergeLearnProgress({ v: 2, ...savedFields }, "missing-local");
-  assert.equal(fromV2.v, 3);
-  assert.equal(fromV2.location.lessonId, "l1");
-  const fromV3 = mergeLearnProgress(
-    { v: 3, ...savedFields, conceptMastery: { "l2-justification": mastery() } },
-    "missing-local",
-  );
-  assert.equal(fromV3.conceptMastery["l2-justification"]?.easiness, 2.2);
-  assert.equal(mergeLearnProgress(undefined, "missing-local").v, 3);
+test("mergeLearnProgress keeps a claimed path and hides that payload on another path", () => {
+  const ruth = { projectId: "path-ruth", planId: "plan-ruth" };
+  const jonah = { projectId: "path-jonah", planId: "plan-jonah" };
+  const claimed = claimLegacyProgress([
+    {
+      id: ruth.projectId,
+      updatedAt: 10,
+      learnPlan: { id: ruth.planId, createdAt: 10 },
+      learnProgress: normalizeLearnProgress({ v: 2, ...savedFields }),
+    },
+  ]);
+  const stored = claimed[0]?.learnProgress;
+  const loaded = mergeLearnProgress(stored, ruth);
+  assert.equal(loaded.v, 3);
+  assert.equal(loaded.location.lessonId, "l1");
+  assert.equal(lessonQuizFor(loaded, ruth, "l1")?.answers[0]?.shortText, "grace");
+  const other = mergeLearnProgress(stored, jonah);
+  assert.equal(lessonQuizFor(other, jonah, "l1"), undefined);
+  assert.equal(other.finalQuiz, null);
+  assert.equal(mergeLearnProgress(undefined, jonah).v, 3);
 });
 
 test("stored learn plans default missing lesson kind to core and still load quiz items without concept ids", () => {
@@ -169,8 +181,15 @@ test("try again keeps correct answers and a finished lesson stays complete", () 
   assert.equal(retried.bestCorrect, 1);
   assert.equal(retried.settled, true);
 
-  const progress = emptyLearnProgress();
-  progress.lessonReadDone.l1 = true;
-  progress.lessonQuiz.l1 = retried;
-  assert.equal(isLessonStepComplete("l1", true, progress), true);
+  const scope = { projectId: "path-ruth", planId: "plan-ruth" };
+  const progress = adoptProgressForScope(
+    normalizeLearnProgress({
+      v: 3,
+      lessonReadDone: { l1: true },
+      lessonQuiz: { l1: retried },
+    }),
+    scope,
+  );
+  assert.equal(isLessonStepComplete(scope, "l1", true, progress), true);
+  assert.equal(isLessonStepComplete({ projectId: "path-jonah", planId: "plan-jonah" }, "l1", true, progress), false);
 });
