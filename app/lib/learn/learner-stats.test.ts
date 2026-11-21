@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { awardLearning, emptyStats, lessonMasteryPercent, ymdInTimeZone } from "./learner-stats.ts";
-import { emptyLearnProgress, type LearnPlanProgress } from "./plan-progress.ts";
+import { awardLearning, emptyStats, lessonMasteryPercent, statsFigures, ymdInTimeZone } from "./learner-stats.ts";
+import { emptyLearnProgress, normalizeLearnProgress, type LearnPlanProgress } from "./plan-progress.ts";
+import { adoptProgressForScope } from "./progress-scope.ts";
 
 test("awarding XP once per reason advances the streak on a new local day", () => {
   const zone = "UTC";
@@ -22,26 +23,54 @@ test("awarding XP once per reason advances the streak on a new local day", () =>
 });
 
 test("lesson mastery moves when a lesson is read and when a quiz answer is credited", () => {
+  const scope = { projectId: "path-ruth", planId: "plan-ruth" };
   const unread = emptyLearnProgress();
-  assert.equal(lessonMasteryPercent({ lessonId: "l1", quizCount: 2, progress: unread }), 0);
-  const read: LearnPlanProgress = {
-    ...unread,
-    lessonReadScroll: { l1: 100 },
-    lessonReadDone: { l1: true },
-  };
-  const readOnly = lessonMasteryPercent({ lessonId: "l1", quizCount: 2, progress: read });
+  assert.equal(lessonMasteryPercent({ scope, lessonId: "l1", quizCount: 2, progress: unread }), 0);
+  const read = adoptProgressForScope(
+    normalizeLearnProgress({
+      v: 3,
+      lessonReadScroll: { l1: 100 },
+      lessonReadDone: { l1: true },
+    }),
+    scope,
+  );
+  const readOnly = lessonMasteryPercent({ scope, lessonId: "l1", quizCount: 2, progress: read });
   assert.ok(readOnly > 0 && readOnly < 100);
-  const answered: LearnPlanProgress = {
-    ...read,
-    lessonQuiz: {
-      l1: {
-        answers: [
-          { mcChoice: "A", shortText: "", shortSubmitted: false, correct: true },
-          { mcChoice: null, shortText: "loyalty", shortSubmitted: true, correct: false, score: 0.5 },
-        ],
+  const answered: LearnPlanProgress = adoptProgressForScope(
+    normalizeLearnProgress({
+      ...read,
+      lessonQuiz: {
+        l1: {
+          answers: [
+            { mcChoice: "A", shortText: "", shortSubmitted: false, correct: true },
+            { mcChoice: null, shortText: "loyalty", shortSubmitted: true, correct: false, score: 0.5 },
+          ],
+        },
       },
-    },
-  };
-  const afterQuiz = lessonMasteryPercent({ lessonId: "l1", quizCount: 2, progress: answered });
+    }),
+    scope,
+  );
+  const afterQuiz = lessonMasteryPercent({ scope, lessonId: "l1", quizCount: 2, progress: answered });
   assert.ok(afterQuiz > readOnly);
+  assert.equal(
+    lessonMasteryPercent({
+      scope: { projectId: "path-jonah", planId: "plan-jonah" },
+      lessonId: "l1",
+      quizCount: 2,
+      progress: answered,
+    }),
+    0,
+  );
+});
+
+test("stats figures stay blank until a snapshot has loaded", () => {
+  assert.deepEqual(statsFigures(null), { xp: "…", streak: "…", busy: true });
+  assert.equal(statsFigures(null).xp === "0", false);
+  assert.deepEqual(statsFigures({ xp: 15, streak: 2 }), { xp: "15", streak: "2", busy: false });
+});
+
+test("a plan-scoped award does not pay again for the same lesson reason", () => {
+  const first = awardLearning(emptyStats(), { reason: "read:path-ruth:l1", amount: 15 }, Date.parse("2026-11-16T15:00:00Z"), "UTC");
+  const again = awardLearning(first, { reason: "read:path-ruth:plan-ruth:l1", amount: 15 }, Date.parse("2026-11-16T16:00:00Z"), "UTC");
+  assert.equal(again, first);
 });

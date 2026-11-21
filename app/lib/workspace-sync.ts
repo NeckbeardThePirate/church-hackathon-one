@@ -1,3 +1,4 @@
+import { claimLegacyProgress } from "./learn/plan-progress";
 import {
   clearLocalProjects,
   readLocalProjects,
@@ -84,7 +85,7 @@ export async function loadUserWorkspace(): Promise<Project[]> {
 
   clearLocalProjects();
   merged.sort((a, b) => b.updatedAt - a.updatedAt);
-  return merged;
+  return claimLegacyProgress(merged);
 }
 
 export async function fetchLearnPerspective(): Promise<string | null> {
