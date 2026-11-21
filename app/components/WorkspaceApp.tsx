@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createProject, isLegacyProject, type Project } from "../lib/projects";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createProject, defaultTitle, isEmptyLearnPath, isLegacyProject, type Project } from "../lib/projects";
 import { deleteRemoteProject, loadUserWorkspace, putProject } from "../lib/workspace-sync";
+import { awardLearning, emptyStats, lessonMasteryList, type StatsSnapshot } from "../lib/learn/learner-stats";
+import { parsePathUrl } from "../lib/learn/path-url";
 import { AppShell } from "./AppShell";
 import type { LearnPlan } from "../lib/learn/types";
 import type { LearnPlanProgress } from "../lib/learn/plan-progress";
 import { ArchivedProjectView } from "./ArchivedProjectView";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { LearnIntakeStep } from "./LearnIntakeStep";
 import { LearnPlanView } from "./LearnPlanView";
 
@@ -27,6 +30,10 @@ export function WorkspaceApp() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [view, setView] = useState<WorkspaceView>("start");
   const [draft, setDraft] = useState<Project>(() => createProject());
+  const [stats, setStats] = useState<StatsSnapshot | null>(null);
+  const [liveProgress, setLiveProgress] = useState<LearnPlanProgress | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [missingPath, setMissingPath] = useState(false);
   const persistedRef = useRef<Map<string, string>>(new Map());
   const writeGenRef = useRef<Map<string, number>>(new Map());
   const syncReadyRef = useRef(false);
@@ -44,7 +51,7 @@ export function WorkspaceApp() {
           persistedRef.current.set(project.id, JSON.stringify(project));
         }
         syncReadyRef.current = true;
-        setProjects(loaded);
+        setProjects(loaded.filter((project) => !isEmptyLearnPath(project)));
         setHydrated(true);
       })
       .catch((error: unknown) => {
@@ -100,20 +107,127 @@ export function WorkspaceApp() {
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
   const activeProjectRef = useRef(activeProject);
   activeProjectRef.current = activeProject;
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const statsRef = useRef(stats);
+  statsRef.current = stats;
+  const statsTimerRef = useRef<number | null>(null);
+
+  const writePathUrl = useCallback((pathId: string | null, mode: "push" | "replace") => {
+    const params = new URLSearchParams(window.location.search);
+    const samePath = Boolean(pathId) && params.get("path") === pathId;
+    if (pathId) params.set("path", pathId);
+    else params.delete("path");
+    if (!pathId || !samePath) params.delete("lesson");
+    const text = params.toString();
+    const target = text ? `/?${text}` : "/";
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (current === target) return;
+    window.history[mode === "push" ? "pushState" : "replaceState"](null, "", target);
+  }, []);
 
   const openProject = useCallback(
     (projectId: string) => {
-      const project = projects.find((item) => item.id === projectId);
+      const project = projectsRef.current.find((item) => item.id === projectId);
+      setMissingPath(false);
+      setLiveProgress(null);
       setActiveProjectId(projectId);
       if (project) setView(viewForProject(project));
+      writePathUrl(projectId, "push");
     },
-    [projects],
+    [writePathUrl],
   );
 
   const showStart = useCallback(() => {
     setDraft(createProject());
     setActiveProjectId(null);
+    setLiveProgress(null);
+    setMissingPath(false);
     setView("start");
+    writePathUrl(null, "push");
+  }, [writePathUrl]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const parsed = parsePathUrl(window.location.search);
+    if (!parsed.pathId) return;
+    const project = projectsRef.current.find((item) => item.id === parsed.pathId);
+    if (!project) {
+      setMissingPath(true);
+      setView("start");
+      return;
+    }
+    setActiveProjectId(project.id);
+    setView(viewForProject(project));
+  }, [hydrated]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const parsed = parsePathUrl(window.location.search);
+      if (!parsed.pathId) {
+        setActiveProjectId(null);
+        setLiveProgress(null);
+        setMissingPath(false);
+        setView("start");
+        return;
+      }
+      const project = projectsRef.current.find((item) => item.id === parsed.pathId);
+      if (!project) {
+        setMissingPath(true);
+        setActiveProjectId(null);
+        setView("start");
+        return;
+      }
+      setMissingPath(false);
+      setLiveProgress(null);
+      setActiveProjectId(project.id);
+      setView(viewForProject(project));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    void fetch("/api/workspace/stats", { credentials: "same-origin" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as StatsSnapshot;
+      })
+      .then((loaded) => {
+        if (cancelled || !loaded || typeof loaded.xp !== "number") return;
+        const local = statsRef.current;
+        const localNewer =
+          local != null &&
+          ((local.last_activity_at ?? 0) > (loaded.last_activity_at ?? 0) || local.xp > loaded.xp);
+        if (localNewer) return;
+        statsRef.current = loaded;
+        setStats(loaded);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated]);
+
+  const award = useCallback((reason: string, amount: number) => {
+    const zone = statsRef.current?.timezone || browserTimeZone();
+    const next = awardLearning(statsRef.current ?? emptyStats(), { reason, amount }, Date.now(), zone);
+    if (next === (statsRef.current ?? emptyStats()) && statsRef.current) return;
+    statsRef.current = next;
+    setStats(next);
+    if (statsTimerRef.current) window.clearTimeout(statsTimerRef.current);
+    statsTimerRef.current = window.setTimeout(() => {
+      const snapshot = statsRef.current;
+      if (!snapshot) return;
+      void fetch("/api/workspace/stats", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(snapshot),
+      }).catch(() => undefined);
+    }, 300);
   }, []);
 
   const startedPlan = useCallback(
@@ -126,8 +240,9 @@ export function WorkspaceApp() {
       );
       setActiveProjectId(draft.id);
       setView("building");
+      writePathUrl(draft.id, "push");
     },
-    [draft],
+    [draft, writePathUrl],
   );
 
   const updateProject = useCallback((projectId: string, patch: Partial<Project>) => {
@@ -160,6 +275,42 @@ export function WorkspaceApp() {
     },
     [activeProjectId, updateProject],
   );
+
+  const markPathFailed = useCallback(() => {
+    if (!activeProjectId) return;
+    updateProject(activeProjectId, { learnFailed: true });
+  }, [activeProjectId, updateProject]);
+
+  const deleteProject = useCallback(
+    (projectId: string) => {
+      setProjects((prev) => prev.filter((project) => project.id !== projectId));
+      setPendingDeleteId(null);
+      if (activeProjectRef.current?.id === projectId) {
+        setDraft(createProject());
+        setActiveProjectId(null);
+        setLiveProgress(null);
+        setView("start");
+        writePathUrl(null, "replace");
+      }
+    },
+    [writePathUrl],
+  );
+
+  const pendingDelete = projects.find((project) => project.id === pendingDeleteId) ?? null;
+  const mastery = useMemo(() => {
+    if (!activeProject?.learnPlan || isLegacyProject(activeProject)) return [];
+    const progress = liveProgress ?? activeProject.learnProgress;
+    if (!progress) return [];
+    return lessonMasteryList(
+      activeProject.learnPlan.lessons.map((lesson) => ({
+        id: lesson.id,
+        order: lesson.order,
+        title: lesson.title,
+        quizCount: lesson.quiz.length,
+      })),
+      progress,
+    );
+  }, [activeProject, liveProgress]);
 
   const rebuildPath = useCallback(() => {
     if (!activeProjectId) return;
@@ -209,7 +360,15 @@ export function WorkspaceApp() {
         onSelectProject={openProject}
         onNewProject={showStart}
         sidebarCompact={view === "building"}
+        stats={{ xp: stats?.xp ?? 0, streak: stats?.streak ?? 0 }}
+        mastery={mastery}
+        onRequestDelete={setPendingDeleteId}
       >
+        {missingPath && (view === "start" || !activeProject) ? (
+          <p className="mx-auto w-full max-w-[720px] px-4 pt-14 text-sm text-[var(--ink-muted)] sm:px-10">
+            That path isn’t in this workspace.
+          </p>
+        ) : null}
         {view === "start" || !activeProject ? (
           <LearnIntakeStep key={draft.id} projectId={draft.id} onStarted={startedPlan} onComplete={completeLearnPlan} />
         ) : view === "building" ? (
@@ -220,10 +379,13 @@ export function WorkspaceApp() {
             onStarted={(planId, topic) =>
               updateProject(activeProject.id, {
                 learnPlanId: planId,
+                learnFailed: false,
                 ...(activeProject.title.trim() ? {} : { title: topic.trim().slice(0, 120) }),
               })
             }
             onComplete={completeLearnPlan}
+            onMarkFailed={markPathFailed}
+            onRequestRemove={() => setPendingDeleteId(activeProject.id)}
           />
         ) : !isLegacyProject(activeProject) && activeProject.learnPlan ? (
           <LearnPlanView
@@ -233,6 +395,9 @@ export function WorkspaceApp() {
             displayTitle={activeProject.title}
             savedProgress={activeProject.learnProgress}
             onSaveProgress={saveLearnProgress}
+            onProgress={setLiveProgress}
+            onAward={award}
+            stats={{ xp: stats?.xp ?? 0, streak: stats?.streak ?? 0 }}
           />
         ) : (
           <ArchivedProjectView
@@ -242,6 +407,23 @@ export function WorkspaceApp() {
           />
         )}
       </AppShell>
+      {pendingDelete ? (
+        <ConfirmDialog
+          title="Remove this path?"
+          body={`“${defaultTitle(pendingDelete)}” will be removed from your paths.`}
+          confirmLabel="Remove"
+          onConfirm={() => deleteProject(pendingDelete.id)}
+          onClose={() => setPendingDeleteId(null)}
+        />
+      ) : null}
     </>
   );
+}
+
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }

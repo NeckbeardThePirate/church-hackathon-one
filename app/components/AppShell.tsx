@@ -4,6 +4,8 @@ import { UserButton } from "@clerk/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
 import { defaultTitle, isLegacyProject, type Project } from "../lib/projects";
+import { LearnerStatsPanel } from "./LearnerStatsPanel";
+import type { LessonMastery } from "../lib/learn/learner-stats";
 
 type AppShellProps = {
   children: ReactNode;
@@ -13,6 +15,9 @@ type AppShellProps = {
   onNewProject: () => void;
   /** Narrow rail while import / OCR is in progress (desktop only; mobile uses the drawer). */
   sidebarCompact?: boolean;
+  stats?: { xp: number; streak: number } | null;
+  mastery?: LessonMastery[];
+  onRequestDelete?: (id: string) => void;
 };
 
 export function AppShell({
@@ -22,6 +27,9 @@ export function AppShell({
   onSelectProject,
   onNewProject,
   sidebarCompact = false,
+  stats = null,
+  mastery = [],
+  onRequestDelete,
 }: AppShellProps) {
   const { key: clerkKey } = useClerkKey();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -68,40 +76,57 @@ export function AppShell({
     const active = project.id === activeProjectId;
     const archivedItem = isLegacyProject(project);
     const label = `${defaultTitle(project)}${archivedItem ? " (archived)" : ""}`;
+    const rowClass = sidebarInnerCompact
+      ? `hidden size-11 shrink-0 items-center justify-center p-0 md:flex ${
+          active
+            ? "bg-[var(--sidebar-active)] ring-1 ring-[color-mix(in_srgb,var(--accent)_25%,var(--line))]"
+            : "hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)]"
+        }`
+      : `min-h-11 w-full items-center gap-1 px-2 py-2 ${
+          active
+            ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
+            : "text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]"
+        }`;
     return (
-      <button
-        key={project.id}
-        type="button"
-        onClick={() => selectProject(project.id)}
-        title={sidebarInnerCompact ? label : undefined}
-        aria-label={sidebarInnerCompact ? label : undefined}
-        aria-current={active ? "page" : undefined}
-        className={`flex rounded-md text-left text-sm transition-colors ${
-          sidebarInnerCompact
-            ? `hidden size-11 shrink-0 items-center justify-center p-0 md:flex ${
-                active
-                  ? "bg-[var(--sidebar-active)] ring-1 ring-[color-mix(in_srgb,var(--accent)_25%,var(--line))]"
-                  : "hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)]"
-              }`
-            : `min-h-11 w-full items-center gap-2 px-2 py-2 ${
-                active
-                  ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
-                  : "text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]"
-              }`
-        }`}
-      >
-        <span
-          aria-hidden
-          className={`shrink-0 rounded-full ${archivedItem ? "bg-[var(--line)]" : "bg-[#89b09a]"} ${sidebarInnerCompact ? "size-2.5" : "size-2"}`}
-        />
-        {!sidebarInnerCompact ? <span className="min-w-0 flex-1 truncate">{defaultTitle(project)}</span> : null}
-      </button>
+      <div key={project.id} className={`flex rounded-md text-left text-sm transition-colors ${rowClass}`}>
+        <button
+          type="button"
+          onClick={() => selectProject(project.id)}
+          title={sidebarInnerCompact ? label : undefined}
+          aria-label={sidebarInnerCompact ? label : undefined}
+          aria-current={active ? "page" : undefined}
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md text-left ${sidebarInnerCompact ? "size-11 justify-center" : "min-h-11 py-0.5"}`}
+        >
+          <span
+            aria-hidden
+            className={`shrink-0 rounded-full ${archivedItem ? "bg-[var(--line)]" : project.learnFailed && !project.importComplete ? "bg-[#c0533f]" : "bg-[#89b09a]"} ${sidebarInnerCompact ? "size-2.5" : "size-2"}`}
+          />
+          {!sidebarInnerCompact ? (
+            <span className="min-w-0 flex-1 truncate">
+              {defaultTitle(project)}
+              {project.learnFailed && !project.importComplete ? (
+                <span className="ml-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#c0533f]">Failed</span>
+              ) : null}
+            </span>
+          ) : null}
+        </button>
+        {!sidebarInnerCompact && !archivedItem && onRequestDelete ? (
+          <button
+            type="button"
+            aria-label={`Remove ${defaultTitle(project)}`}
+            onClick={() => onRequestDelete(project.id)}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-base leading-none text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
     );
   };
 
 
   return (
-    <div className="flex min-h-dvh bg-[var(--canvas)] text-[var(--ink)]">
+    <div className="flex h-dvh min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
       <header className="safe-area-top safe-area-x fixed inset-x-0 top-0 z-50 flex h-12 items-center gap-2 border-b border-[var(--line)] bg-[var(--sidebar)] px-3 md:hidden">
         <button
           type="button"
@@ -117,6 +142,11 @@ export function AppShell({
           </span>
         </button>
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">StudyBuddy</p>
+        {stats ? (
+          <p className="shrink-0 text-[11px] tabular-nums text-[var(--ink-muted)]" aria-label="Learner stats">
+            {stats.xp} XP · {stats.streak}d
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={openNewProject}
@@ -137,7 +167,7 @@ export function AppShell({
       ) : null}
 
       <aside
-        className={`safe-area-top safe-area-bottom fixed inset-y-0 left-0 z-[60] flex w-[min(100vw-2.5rem,280px)] shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] py-4 transition-transform duration-300 ease-out max-md:pointer-events-none md:static md:z-auto md:w-[240px] md:translate-x-0 md:pointer-events-auto md:px-3 ${
+        className={`safe-area-top safe-area-bottom fixed inset-y-0 left-0 z-[60] flex w-[min(100vw-2.5rem,280px)] shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] py-4 transition-transform duration-300 ease-out max-md:pointer-events-none md:static md:z-auto md:min-h-0 md:w-[240px] md:overflow-hidden md:translate-x-0 md:pointer-events-auto md:px-3 ${
           mobileNavOpen ? "max-md:translate-x-0 max-md:pointer-events-auto px-3" : "-translate-x-full px-3 md:translate-x-0"
         } ${
           compactDesktop
@@ -178,6 +208,11 @@ export function AppShell({
             {sidebarInnerCompact ? "+" : "New path"}
           </button>
         </div>
+        {!sidebarInnerCompact && stats ? (
+          <div className="px-2">
+            <LearnerStatsPanel xp={stats.xp} streak={stats.streak} lessons={mastery} />
+          </div>
+        ) : null}
         <nav
           className={`flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable] ${
             sidebarInnerCompact ? "hidden items-center gap-1.5 px-0 md:flex" : "gap-0.5 px-1"
@@ -229,8 +264,10 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="relative min-w-0 flex-1 overflow-x-hidden pt-12 md:pt-0 [scrollbar-gutter:stable]">
-        <div className="h-full min-h-0 overflow-y-auto [scrollbar-gutter:stable]">{children}</div>
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pt-12 md:pt-0">
+        <div data-learn-scroll className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+          {children}
+        </div>
       </div>
     </div>
   );

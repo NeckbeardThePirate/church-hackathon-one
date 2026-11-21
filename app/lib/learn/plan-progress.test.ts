@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeLearnProgress, normalizeLearnProgress, type ConceptMastery } from "./plan-progress.ts";
+import {
+  emptyLearnProgress,
+  isLessonStepComplete,
+  mergeLearnProgress,
+  normalizeLearnProgress,
+  retryMissedQuiz,
+  type ConceptMastery,
+} from "./plan-progress.ts";
 import { normalizeStoredProject, type Project } from "../projects.ts";
 import { lessonKind } from "./types.ts";
 
@@ -144,4 +151,26 @@ test("stored learn plans default missing lesson kind to core and still load quiz
   assert.deepEqual(next.learnPlan!.lessons[1]!.sourceConceptIds, ["l1-faith"]);
   assert.equal(next.learnProgress?.v, 3);
   assert.deepEqual(next.learnProgress?.lessonQuiz, savedFields.lessonQuiz);
+});
+
+test("try again keeps correct answers and a finished lesson stays complete", () => {
+  const quiz = {
+    answers: [
+      { mcChoice: "A", shortText: "", shortSubmitted: false, correct: true as boolean | null },
+      { mcChoice: "B", shortText: "", shortSubmitted: false, correct: false as boolean | null },
+      { mcChoice: null, shortText: "hesed", shortSubmitted: true, correct: false as boolean | null, score: 0.2 },
+    ],
+  };
+  const retried = retryMissedQuiz(quiz);
+  assert.equal(retried.answers[0]?.mcChoice, "A");
+  assert.equal(retried.answers[0]?.correct, true);
+  assert.equal(retried.answers[1]?.correct, null);
+  assert.equal(retried.answers[2]?.shortText, "");
+  assert.equal(retried.bestCorrect, 1);
+  assert.equal(retried.settled, true);
+
+  const progress = emptyLearnProgress();
+  progress.lessonReadDone.l1 = true;
+  progress.lessonQuiz.l1 = retried;
+  assert.equal(isLessonStepComplete("l1", true, progress), true);
 });
