@@ -24,7 +24,7 @@ Output is a structured `learnPlan` on the project, shown in the Learn plan view.
 |---|---|---|
 | Image upload → R2 | `POST /api/projects/[projectId]/source-image` | `app/api/projects/[projectId]/source-image/route.ts` |
 | OCR (vision) | `runImageOcr` on `@cf/meta/llama-3.2-11b-vision-instruct` | `app/lib/server/ocr.ts` |
-| Structure OCR text | `REFINE_MODEL` (`@cf/zai-org/glm-5.3-flash`) JSON mode | `app/lib/server/refine-ocr.ts` |
+| Structure OCR text | Planned `REFINE_MODEL` path is not in the tree. Learn text stages use `anthropic/claude-haiku-5.5`. | `app/lib/server/refine-ocr.ts` |
 | Retrieval-grounded AI | "Go deeper": model picks from retrieved candidate IDs; text comes from D1 | `app/lib/server/go-deeper.ts` |
 | Scripture lookup | Hybrid semantic + FTS over BSB; passage fetch by reference | `app/lib/server/scripture-search.ts`, `bible-db.ts`, `app/lib/bible/parse-reference.ts` |
 | Fathers / confessions | Library search with `condemned` flag | `app/lib/server/library-search.ts` |
@@ -127,7 +127,7 @@ Each stage is a queue consumer (see §6). Every stage transition emits a progres
 | Role | Stages | Recommended model | Notes |
 |---|---|---|---|
 | Vision / OCR | S0 | `@cf/meta/llama-3.2-11b-vision-instruct` | Already in use. |
-| Structuring | S0 | `@cf/zai-org/glm-5.3-flash` | Already in use. |
+| Structuring | S0 | `anthropic/claude-haiku-5.5` | Learn text stages. Vision/OCR stays on Workers AI. |
 | Planning / critic | S1, S2, S9 | **Decision D2** | Strongest reasoning here. |
 | Research / select / review | S3, S5 | Workers AI mid-tier, or same as planner | Keep tool loops short. |
 | Teach / quiz / check | S6, S7, S8 | Workers AI mid-tier | Quiz check must be a separate call from generation. |
@@ -374,7 +374,7 @@ Changed:
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Web search and fetch provider | **Resolved: Exa** for search and page content. |
-| D2 | Planner / critic model | All calls go through AI Gateway (resolved). Still open: Claude (`claude-sonnet-5-5` or `claude-opus-5-5`) for S1, S2, S9 vs. `glm-5.3-flash`. Depends on whether the gateway holds an Anthropic key. Keep Workers AI for vision, OCR, and cheap steps. |
+| D2 | Planner / critic model | Resolved: Claude Haiku 5.5 (`anthropic/claude-haiku-5.5`) through AI Gateway for scope, plan, review, teach, check, and critic. Provider-native name is `claude-haiku-5-5`. `LEARN_MODEL_PLANNER` / `LEARN_MODEL_WORKER` override when set. Workers AI stays on vision and OCR. |
 | D8 | Video discovery | YouTube Data API for search and metadata (quota: `search.list` = 100 units). Exa as an alternative if its domain filter returns usable video results. Spike in M0(e). |
 | D3 | Persistence | localStorage for M1–M3. Move to D1 only if multi-device use is needed. |
 | D4 | Access control before deploy | Cloudflare Access on `/api/learn/*` for staff use; app-session auth if it goes to clients. |

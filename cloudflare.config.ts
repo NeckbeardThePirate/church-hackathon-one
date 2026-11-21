@@ -144,7 +144,8 @@ export default defineConfig({
       // use the gateway token; this key is sent only when present.
       EXA_API_KEY: optionalSecret("EXA_API_KEY"),
       AI_GATEWAY_ID: bindings.text("study-buddy"),
-      // Empty means the Workers AI default (@cf/zai-org/glm-5.3-flash). Set a model id to override.
+      // Empty means Claude Haiku 5.5 (`anthropic/claude-haiku-5.5`) through AI Gateway.
+      // Set a model id to override. `anthropic/…` uses the gateway Anthropic provider.
       LEARN_MODEL_PLANNER: bindings.text(""),
       LEARN_MODEL_WORKER: bindings.text(""),
       // Public Clerk frontend key. Plain var so a strict deploy keeps the dashboard value.

@@ -29,5 +29,7 @@
 # Gates POST /api/admin/embed-scripture (x-admin-token). Required at deploy.
 # ADMIN_TOKEN=
 #
-# LEARN_MODEL_PLANNER=@cf/zai-org/glm-5.3-flash
-# LEARN_MODEL_WORKER=@cf/zai-org/glm-5.3-flash
+# Empty uses Claude Haiku 5.5 (`anthropic/claude-haiku-5.5`) through AI Gateway.
+# Set a catalog id to override. Provider-native calls send `claude-haiku-5-5`.
+# LEARN_MODEL_PLANNER=
+# LEARN_MODEL_WORKER=
