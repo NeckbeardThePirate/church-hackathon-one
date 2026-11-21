@@ -25,6 +25,14 @@ export function parseWorkersAiText(result: unknown): string {
 
   if (typeof record.response === "string") return record.response.trim();
 
+  // Anthropic Messages (Claude Haiku via AI Gateway): text blocks only.
+  // Thinking blocks are not the answer and must not be parsed as JSON.
+  if (Array.isArray(record.content)) {
+    const text = textFromContentBlocks(record.content);
+    if (text) return text;
+  }
+  if (typeof record.content === "string" && record.content.trim()) return record.content.trim();
+
   const choices = record.choices;
   if (Array.isArray(choices) && choices[0] && typeof choices[0] === "object") {
     const message = (choices[0] as Record<string, unknown>).message;
@@ -55,6 +63,18 @@ export function parseWorkersAiText(result: unknown): string {
   }
 
   return "";
+}
+
+function textFromContentBlocks(content: unknown[]): string {
+  return content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const block = part as Record<string, unknown>;
+      if (block.type === "thinking" || block.type === "redacted_thinking") return "";
+      return typeof block.text === "string" ? block.text : "";
+    })
+    .join("")
+    .trim();
 }
 
 export async function runImageOcr(ai: Ai, imageDataUri: string): Promise<string> {

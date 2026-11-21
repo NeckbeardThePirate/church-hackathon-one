@@ -17,7 +17,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!last || last.role !== "user" || !last.content?.trim()) {
       return Response.json({ error: "messages must end with a non-empty user message" }, { status: 400 });
     }
-    const stream = await streamLearnChat(env.AI, body);
+    const stream = await streamLearnChat(env, body);
     return new Response(stream, {
       headers: {
         "content-type": "text/plain; charset=utf-8",

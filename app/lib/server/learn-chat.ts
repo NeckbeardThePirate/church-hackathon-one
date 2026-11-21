@@ -1,4 +1,4 @@
-import { LEARN_TEXT_MODEL } from "./learn/llm";
+import { callAnthropic, learnModelId, readAnthropicText, type LlmEnv } from "./learn/llm";
 import type { LearnChatContext, LearnChatInput, LearnChatMessage } from "../learn/agent-context";
 
 const clip = (text: string | undefined, n: number) => {
@@ -106,9 +106,14 @@ function parseSseLine(line: string): string {
   if (!payload || payload === "[DONE]") return "";
   try {
     const json = JSON.parse(payload) as {
+      type?: string;
+      delta?: { type?: string; text?: string };
       response?: unknown;
       choices?: { delta?: { content?: unknown } }[];
     };
+    if (json.type === "content_block_delta" && json.delta?.type === "text_delta" && typeof json.delta.text === "string") {
+      return json.delta.text;
+    }
     if (typeof json.response === "string") return json.response;
     const content = json.choices?.[0]?.delta?.content;
     return typeof content === "string" ? content : "";
@@ -117,33 +122,10 @@ function parseSseLine(line: string): string {
   }
 }
 
-export async function streamLearnChat(ai: Ai, input: LearnChatInput): Promise<ReadableStream<Uint8Array>> {
-  const history = (input.messages ?? [])
-    .filter((m): m is LearnChatMessage => (m.role === "user" || m.role === "assistant") && !!m.content?.trim())
-    .slice(-16)
-    .map((m) => ({ role: m.role, content: clip(m.content, 4000) }));
-
-  if (!history.length || history.at(-1)?.role !== "user") {
-    throw new Error("messages must end with a user turn");
-  }
-
-  const messages = [
-    { role: "system", content: `${SYSTEM}\n\n${buildContextBlock(input.context)}` },
-    ...history,
-  ];
-
-  const upstream = (await ai.run(LEARN_TEXT_MODEL, {
-    messages,
-    stream: true,
-    reasoning_effort: "low",
-    max_tokens: 1800,
-    temperature: 0.45,
-  } as never)) as unknown as ReadableStream<Uint8Array>;
-
+function textStreamFrom(upstream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let buffer = "";
-
   return upstream.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
@@ -161,4 +143,59 @@ export async function streamLearnChat(ai: Ai, input: LearnChatInput): Promise<Re
       },
     }),
   );
+}
+
+function onceText(text: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      if (text) controller.enqueue(encoder.encode(text));
+      controller.close();
+    },
+  });
+}
+
+type ChatEnv = Pick<LlmEnv, "AI" | "AI_GATEWAY_ID" | "AI_GATEWAY_TOKEN" | "ANTHROPIC_API_KEY" | "LEARN_MODEL_WORKER">;
+
+export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Promise<ReadableStream<Uint8Array>> {
+  const history = (input.messages ?? [])
+    .filter((m): m is LearnChatMessage => (m.role === "user" || m.role === "assistant") && !!m.content?.trim())
+    .slice(-16)
+    .map((m) => ({ role: m.role, content: clip(m.content, 4000) }));
+
+  if (!history.length || history.at(-1)?.role !== "user") {
+    throw new Error("messages must end with a user turn");
+  }
+
+  const system = `${SYSTEM}\n\n${buildContextBlock(input.context)}`;
+  const model = learnModelId(env, "worker");
+
+  if (model.startsWith("anthropic/")) {
+    const result = await callAnthropic(env, model, {
+      max_tokens: 1800,
+      stream: true,
+      system,
+      messages: history,
+    });
+    if (typeof Response !== "undefined" && result instanceof Response) {
+      if (!result.ok || !result.body) {
+        const detail = (await result.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 500);
+        throw new Error(`Anthropic via gateway: ${result.status}${detail ? ` ${detail}` : ""}`);
+      }
+      return textStreamFrom(result.body);
+    }
+    return onceText(await readAnthropicText(result));
+  }
+
+  const upstream = (await env.AI.run(
+    model as Parameters<Ai["run"]>[0],
+    {
+      messages: [{ role: "system", content: system }, ...history],
+      stream: true,
+      max_tokens: 1800,
+      temperature: 0.45,
+    } as never,
+  )) as unknown as ReadableStream<Uint8Array>;
+
+  return textStreamFrom(upstream);
 }

@@ -23,6 +23,6 @@ Clerk sign-in is offered alongside ChatGPT when `CLERK_SECRET_KEY` is set. The p
 
 `DEV_AUTH=1` enables a loopback-only “Continue on this computer” button. It is refused on every other host. Leave it unset in production.
 
-Learn paths call Workers AI (through the `study-buddy` AI Gateway when that gateway accepts the call). A stored ChatGPT plan token is used only if Workers AI fails. The fallback model is the plain var `LEARN_CHATGPT_MODEL` (`gpt-6-luna`). Exa search and page text go through that same gateway's custom provider `exa`, authenticated with `AI_GATEWAY_TOKEN`. `EXA_API_KEY` is optional and is not sent when unset.
+Learn path stages call Claude Haiku 5.5 through the `study-buddy` AI Gateway. The catalog id is `anthropic/claude-haiku-5.5`; the Anthropic messages call sends `claude-haiku-5-5` and authenticates with `AI_GATEWAY_TOKEN`. `LEARN_MODEL_PLANNER` and `LEARN_MODEL_WORKER` override that default when set. A stored ChatGPT plan token is used only if that call fails. The fallback model is the plain var `LEARN_CHATGPT_MODEL` (`gpt-6-luna`). Exa search and page text go through that same gateway's custom provider `exa`, authenticated with `AI_GATEWAY_TOKEN`. `EXA_API_KEY` is optional and is not sent when unset.
 
 Copy `.dev.vars.example` to `.dev.vars` and `.env.local.example` to `.env.local`. Never commit those files.

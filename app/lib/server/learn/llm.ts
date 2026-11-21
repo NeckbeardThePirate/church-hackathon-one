@@ -4,16 +4,22 @@
  *
  * Model per role comes from env, so the gateway config can change models
  * without code changes:
- *   LEARN_MODEL_PLANNER  (scope, plan, critic)   default: Workers AI glm
- *   LEARN_MODEL_WORKER   (teach, quiz, check)    default: Workers AI glm
- * Prefix "anthropic/" (e.g. "anthropic/claude-sonnet-5-5") routes to Anthropic
- * through the gateway's Anthropic provider; anything else is a Workers AI model id.
+ *   LEARN_MODEL_PLANNER  (scope, plan, critic)   default: Claude Haiku 5.5
+ *   LEARN_MODEL_WORKER   (teach, quiz, check)    default: Claude Haiku 5.5
+ * Prefix "anthropic/" (catalog id `anthropic/claude-haiku-5.5`) routes to
+ * Anthropic through the gateway's Anthropic provider. The provider-native
+ * messages name drops the prefix and turns dots into hyphens (`claude-haiku-5-5`).
+ * Anything else is a Workers AI model id.
  */
-import { parseWorkersAiText } from "../ocr";
-/** Default Workers AI text model for Learn stages and the tutor chat. */
-export const LEARN_TEXT_MODEL = "@cf/zai-org/glm-5.3-flash";
-import { extractJson } from "./json-text";
-import { mockModelText } from "./mock-llm";
+import { parseWorkersAiText } from "../ocr.ts";
+import { extractJson } from "./json-text.ts";
+import { mockModelText } from "./mock-llm.ts";
+
+/**
+ * AI Gateway catalog id for Claude Haiku 5.5.
+ * https://developers.cloudflare.com/ai/models/anthropic/claude-haiku-5.5/
+ */
+export const LEARN_TEXT_MODEL = "anthropic/claude-haiku-5.5";
 
 export type LlmRole = "planner" | "worker";
 
@@ -48,9 +54,19 @@ type JsonCall<T> = {
 
 const MAX_ATTEMPTS = 3;
 
-function modelFor(env: LlmEnv, role: LlmRole): string {
+/** Model id for a role. Empty or whitespace vars use {@link LEARN_TEXT_MODEL}. */
+export function learnModelId(env: Pick<LlmEnv, "LEARN_MODEL_PLANNER" | "LEARN_MODEL_WORKER">, role: LlmRole): string {
   const configured = role === "planner" ? env.LEARN_MODEL_PLANNER : env.LEARN_MODEL_WORKER;
   return configured?.trim() || LEARN_TEXT_MODEL;
+}
+
+/**
+ * Catalog id → Anthropic Messages model name.
+ * `anthropic/claude-haiku-5.5` becomes `claude-haiku-5-5`.
+ */
+export function anthropicProviderModel(model: string): string {
+  const slug = model.startsWith("anthropic/") ? model.slice("anthropic/".length) : model;
+  return slug.replaceAll(".", "-");
 }
 
 function gatewayOptions(env: LlmEnv, meta: LlmMeta, attempt: number): GatewayOptions | undefined {
@@ -118,29 +134,18 @@ async function complete(
   }
 
   if (model.startsWith("anthropic/")) {
-    if (!env.AI_GATEWAY_ID) throw new Error("Anthropic models require AI_GATEWAY_ID.");
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      "anthropic-version": "2023-06-01",
-    };
-    // Omit when the gateway stores the provider key (BYOK).
-    if (env.ANTHROPIC_API_KEY) headers["x-api-key"] = env.ANTHROPIC_API_KEY;
-    if (env.AI_GATEWAY_TOKEN) headers["cf-aig-authorization"] = `Bearer ${env.AI_GATEWAY_TOKEN}`;
-    const res = (await env.AI.gateway(env.AI_GATEWAY_ID).run({
-      provider: "anthropic",
-      endpoint: "v1/messages",
-      headers,
-      query: {
-        model: model.slice("anthropic/".length),
+    // Haiku 5.5's messages schema has no temperature (newer Claude models reject it).
+    const result = await callAnthropic(
+      env,
+      model,
+      {
         max_tokens: maxTokens,
-        temperature,
         system: `${system}\nReturn ONLY one JSON object. No prose, no code fences.`,
         messages: [{ role: "user", content: user }],
       },
-    })) as Response;
-    if (!res.ok) throw new Error(`Anthropic via gateway: ${res.status} ${await res.text().catch(() => "")}`);
-    const body = (await res.json()) as { content?: { type: string; text?: string }[] };
-    return (body.content ?? []).map((part) => part.text ?? "").join("").trim();
+      attempt > 1 ? { "cf-aig-skip-cache": "true" } : undefined,
+    );
+    return readAnthropicText(result);
   }
 
   const gateway = gatewayOptions(env, meta, attempt);
@@ -171,7 +176,7 @@ async function chatGptOrThrow(
   error: unknown,
 ): Promise<string> {
   if (!userId || !env.LEARN_CHATGPT_MODEL?.trim() || !env.USER_WORKSPACE) throw error;
-  const { chatGptText } = await import("../chatgpt-compute");
+  const { chatGptText } = await import("../chatgpt-compute.ts");
   const text = await chatGptText(env, userId, system, user, maxTokens);
   if (!text) throw error;
   return text;
@@ -179,9 +184,51 @@ async function chatGptOrThrow(
 
 export { extractJson };
 
+/** Anthropic Messages through AI Gateway (`provider: anthropic`, `v1/messages`). */
+export async function callAnthropic(
+  env: LlmEnv,
+  model: string,
+  query: Record<string, unknown>,
+  extraHeaders?: Record<string, string>,
+): Promise<unknown> {
+  const gatewayId = env.AI_GATEWAY_ID?.trim();
+  if (!gatewayId) throw new Error("Anthropic models require AI_GATEWAY_ID.");
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "anthropic-version": "2023-06-01",
+    ...extraHeaders,
+  };
+  // Omit when the gateway stores the provider key (BYOK) or uses Unified Billing.
+  const providerKey = env.ANTHROPIC_API_KEY?.trim();
+  if (providerKey) headers["x-api-key"] = providerKey;
+  const gatewayToken = env.AI_GATEWAY_TOKEN?.trim();
+  if (gatewayToken) headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
+  return env.AI.gateway(gatewayId).run({
+    provider: "anthropic",
+    endpoint: "v1/messages",
+    headers,
+    query: { ...query, model: anthropicProviderModel(model) },
+  });
+}
+
+export async function readAnthropicText(result: unknown): Promise<string> {
+  if (typeof Response !== "undefined" && result instanceof Response) {
+    if (!result.ok) {
+      const detail = (await result.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 500);
+      throw new Error(`Anthropic via gateway: ${result.status}${detail ? ` ${detail}` : ""}`);
+    }
+    const text = parseWorkersAiText(await result.json().catch(() => null));
+    if (!text) throw new Error("Anthropic via gateway returned no text.");
+    return text;
+  }
+  const text = parseWorkersAiText(result);
+  if (!text) throw new Error("Anthropic via gateway returned no text.");
+  return text;
+}
+
 /** JSON call with schema validation and up to 2 corrective retries (§3). */
 export async function llmJson<T>(env: LlmEnv, call: JsonCall<T>): Promise<T> {
-  const model = modelFor(env, call.role);
+  const model = learnModelId(env, call.role);
   let user = call.user;
   let lastError = "";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
