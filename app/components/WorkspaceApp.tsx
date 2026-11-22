@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createProject, defaultTitle, isEmptyLearnPath, isLegacyProject, type Project } from "../lib/projects";
 import { deleteRemoteProject, loadUserWorkspace, putProject } from "../lib/workspace-sync";
 import { awardLearning, emptyStats, lessonMasteryList, type StatsSnapshot } from "../lib/learn/learner-stats";
+import { claimLegacyProgress } from "../lib/learn/plan-progress";
+import { scopeFromProject } from "../lib/learn/progress-scope";
 import { parsePathUrl } from "../lib/learn/path-url";
 import { AppShell } from "./AppShell";
 import type { LearnPlan } from "../lib/learn/types";
@@ -31,6 +33,7 @@ export function WorkspaceApp() {
   const [view, setView] = useState<WorkspaceView>("start");
   const [draft, setDraft] = useState<Project>(() => createProject());
   const [stats, setStats] = useState<StatsSnapshot | null>(null);
+  const [statsReady, setStatsReady] = useState(false);
   const [liveProgress, setLiveProgress] = useState<LearnPlanProgress | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [missingPath, setMissingPath] = useState(false);
@@ -43,6 +46,7 @@ export function WorkspaceApp() {
     syncReadyRef.current = false;
     persistedRef.current.clear();
     writeGenRef.current.clear();
+    setStatsReady(false);
     setLoadError(null);
     loadUserWorkspace()
       .then((loaded) => {
@@ -51,7 +55,7 @@ export function WorkspaceApp() {
           persistedRef.current.set(project.id, JSON.stringify(project));
         }
         syncReadyRef.current = true;
-        setProjects(loaded.filter((project) => !isEmptyLearnPath(project)));
+        setProjects(claimLegacyProgress(loaded).filter((project) => !isEmptyLearnPath(project)));
         setHydrated(true);
       })
       .catch((error: unknown) => {
@@ -190,13 +194,23 @@ export function WorkspaceApp() {
   useEffect(() => {
     if (!hydrated) return;
     let cancelled = false;
+    const showBlank = () => {
+      if (statsRef.current) return;
+      const blank = emptyStats();
+      statsRef.current = blank;
+      setStats(blank);
+    };
     void fetch("/api/workspace/stats", { credentials: "same-origin" })
       .then(async (response) => {
         if (!response.ok) return null;
         return (await response.json()) as StatsSnapshot;
       })
       .then((loaded) => {
-        if (cancelled || !loaded || typeof loaded.xp !== "number") return;
+        if (cancelled) return;
+        if (!loaded || typeof loaded.xp !== "number" || typeof loaded.streak !== "number") {
+          showBlank();
+          return;
+        }
         const local = statsRef.current;
         const localNewer =
           local != null &&
@@ -205,7 +219,12 @@ export function WorkspaceApp() {
         statsRef.current = loaded;
         setStats(loaded);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) showBlank();
+      })
+      .finally(() => {
+        if (!cancelled) setStatsReady(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -254,10 +273,8 @@ export function WorkspaceApp() {
   }, []);
 
   const saveLearnProgress = useCallback(
-    (learnProgress: LearnPlanProgress) => {
-      const id = activeProjectRef.current?.id;
-      if (!id) return;
-      updateProject(id, { learnProgress });
+    (projectId: string, learnProgress: LearnPlanProgress) => {
+      updateProject(projectId, { learnProgress });
     },
     [updateProject],
   );
@@ -299,8 +316,9 @@ export function WorkspaceApp() {
   const pendingDelete = projects.find((project) => project.id === pendingDeleteId) ?? null;
   const mastery = useMemo(() => {
     if (!activeProject?.learnPlan || isLegacyProject(activeProject)) return [];
+    const scope = scopeFromProject(activeProject);
     const progress = liveProgress ?? activeProject.learnProgress;
-    if (!progress) return [];
+    if (!scope || !progress) return [];
     return lessonMasteryList(
       activeProject.learnPlan.lessons.map((lesson) => ({
         id: lesson.id,
@@ -309,6 +327,7 @@ export function WorkspaceApp() {
         quizCount: lesson.quiz.length,
       })),
       progress,
+      scope,
     );
   }, [activeProject, liveProgress]);
 
@@ -360,7 +379,7 @@ export function WorkspaceApp() {
         onSelectProject={openProject}
         onNewProject={showStart}
         sidebarCompact={view === "building"}
-        stats={{ xp: stats?.xp ?? 0, streak: stats?.streak ?? 0 }}
+        stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak } : null}
         mastery={mastery}
         onRequestDelete={setPendingDeleteId}
       >
@@ -397,7 +416,7 @@ export function WorkspaceApp() {
             onSaveProgress={saveLearnProgress}
             onProgress={setLiveProgress}
             onAward={award}
-            stats={{ xp: stats?.xp ?? 0, streak: stats?.streak ?? 0 }}
+            stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak } : null}
           />
         ) : (
           <ArchivedProjectView

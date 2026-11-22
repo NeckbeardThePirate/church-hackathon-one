@@ -1,4 +1,5 @@
 import type { LearnPlanProgress } from "./plan-progress.ts";
+import { lessonQuizFor, readDoneFor, readScrollFor, type ProgressScope } from "./progress-scope.ts";
 
 export type XpLogEntry = { at: number; amount: number; reason: string };
 
@@ -62,7 +63,9 @@ export function awardLearning(
   timeZone: string,
 ): StatsSnapshot {
   if (!event.reason || event.amount < 0 || !Number.isInteger(event.amount)) return current;
-  if (current.payload.xpLog.some((entry) => entry.reason === event.reason)) return current;
+  if (equivalentReasons(event.reason).some((reason) => current.payload.xpLog.some((entry) => entry.reason === reason))) {
+    return current;
+  }
   const today = ymdInTimeZone(now, timeZone);
   let streak = current.streak;
   if (current.last_goal_date === today) streak = Math.max(streak, 1);
@@ -84,19 +87,39 @@ export function awardLearning(
 
 export type LessonMastery = { id: string; order: number; title: string; percent: number };
 
+/** Header and sidebar numbers. A null snapshot is still loading, so the UI must not show 0. */
+export function statsFigures(stats: { xp: number; streak: number } | null): { xp: string; streak: string; busy: boolean } {
+  if (!stats) return { xp: "…", streak: "…", busy: true };
+  return { xp: String(stats.xp), streak: String(stats.streak), busy: false };
+}
+
 /**
- * Per-lesson mastery from quiz credit and reading.
+ * Reasons already awarded before plan id was part of the key.
+ * `read:project:plan:lesson` matches a stored `read:project:lesson`.
+ */
+function equivalentReasons(reason: string): string[] {
+  const reasons = [reason];
+  const read = /^read:([^:]+):([^:]+):([^:]+)$/.exec(reason);
+  if (read) reasons.push(`read:${read[1]}:${read[3]}`);
+  const quiz = /^quiz:([^:]+):([^:]+):([^:]+):(\d+):(correct|partial|wrong)$/.exec(reason);
+  if (quiz) reasons.push(`quiz:${quiz[1]}:${quiz[3]}:${quiz[4]}:${quiz[5]}`);
+  return reasons;
+}
+
+/**
+ * Per-lesson mastery from quiz credit and reading for one path.
  * A correct answer is full credit. Partial credit is half. Reading fills the rest, so marking a lesson read moves the number before the quiz.
  */
 export function lessonMasteryPercent(input: {
+  scope: ProgressScope;
   lessonId: string;
   quizCount: number;
   progress: LearnPlanProgress;
 }): number {
-  const { lessonId, quizCount, progress } = input;
-  const read = progress.lessonReadDone[lessonId] ? 100 : Math.min(100, Math.max(0, progress.lessonReadScroll[lessonId] ?? 0));
+  const { scope, lessonId, quizCount, progress } = input;
+  const read = readDoneFor(progress, scope, lessonId) ? 100 : Math.min(100, Math.max(0, readScrollFor(progress, scope, lessonId)));
   if (quizCount <= 0) return read;
-  const quiz = progress.lessonQuiz[lessonId];
+  const quiz = lessonQuizFor(progress, scope, lessonId);
   let points = 0;
   for (let i = 0; i < quizCount; i++) {
     const answer = quiz?.answers[i];
@@ -112,11 +135,12 @@ export function lessonMasteryPercent(input: {
 export function lessonMasteryList(
   lessons: { id: string; order: number; title: string; quizCount: number }[],
   progress: LearnPlanProgress,
+  scope: ProgressScope,
 ): LessonMastery[] {
   return lessons.map((lesson) => ({
     id: lesson.id,
     order: lesson.order,
     title: lesson.title,
-    percent: lessonMasteryPercent({ lessonId: lesson.id, quizCount: lesson.quizCount, progress }),
+    percent: lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quizCount, progress }),
   }));
 }

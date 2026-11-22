@@ -1,4 +1,13 @@
 import { newConceptMastery, normalizeLearnProgress, type ConceptMastery, type LearnPlanProgress, type PersistedQuiz } from "./plan-progress.ts";
+import {
+  adoptProgressForScope,
+  FINAL_LESSON_ID,
+  lessonQuizFor,
+  scopeConceptMastery,
+  withFinalQuiz,
+  withLessonQuiz,
+  type ProgressScope,
+} from "./progress-scope.ts";
 
 export type LearnAttemptTarget = "lesson" | "final" | "review";
 
@@ -22,6 +31,10 @@ export type StoredLearnAttempt = {
   at: number;
   target: LearnAttemptTarget;
   lessonId?: string;
+  /** Path that owns this attempt. Set by the server from the workspace project, not from the body. */
+  projectId?: string;
+  /** Plan id from the request URL. */
+  planId?: string;
   answers: LearnAttemptAnswer[];
 };
 
@@ -132,7 +145,11 @@ export function mergeQuizByIndex(existing: PersistedQuiz | null | undefined, inc
     const next = incoming[i];
     answers.push(next ? persistedAnswer(next) : previous[i]!);
   }
-  return { answers };
+  return {
+    answers,
+    ...(typeof existing?.bestCorrect === "number" ? { bestCorrect: existing.bestCorrect } : {}),
+    ...(existing?.settled === true ? { settled: true } : {}),
+  };
 }
 
 function highestMasteryRev(mastery: Record<string, ConceptMastery>): number {
@@ -213,17 +230,20 @@ export function mirrorAttemptOntoProgress(
   progress: unknown,
   attempt: LearnAttempt,
   planMastery: unknown,
+  scope: ProgressScope,
 ): LearnPlanProgress {
-  const next = normalizeLearnProgress(progress);
+  let next = adoptProgressForScope(normalizeLearnProgress(progress), scope);
   if (attempt.target === "lesson" && attempt.lessonId) {
-    next.lessonQuiz = {
-      ...next.lessonQuiz,
-      [attempt.lessonId]: mergeQuizByIndex(next.lessonQuiz[attempt.lessonId], attempt.answers),
-    };
+    next = withLessonQuiz(
+      next,
+      scope,
+      attempt.lessonId,
+      mergeQuizByIndex(lessonQuizFor(next, scope, attempt.lessonId), attempt.answers),
+    );
   } else if (attempt.target === "final") {
-    next.finalQuiz = mergeQuizByIndex(next.finalQuiz, attempt.answers);
+    next = withFinalQuiz(next, scope, mergeQuizByIndex(lessonQuizFor(next, scope, FINAL_LESSON_ID), attempt.answers));
   }
-  const incoming = normalizeLearnProgress({ conceptMastery: planMastery }).conceptMastery;
+  const incoming = scopeConceptMastery(normalizeLearnProgress({ conceptMastery: planMastery }).conceptMastery, scope);
   next.conceptMastery = mergeMasterySnapshots(next.conceptMastery, incoming);
   return next;
 }

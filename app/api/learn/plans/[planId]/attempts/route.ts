@@ -17,7 +17,12 @@ export async function POST(request: Request, context: { params: Promise<{ planId
     },
     recordPlanAttempt: async (record) => {
       if (owned instanceof Response) throw new Error("Sign in required.");
-      return owned.stub.recordLearnAttempt(record);
+      const scope = await userWorkspaceStub(owned.userId).learnScopeForPlan(planId);
+      return owned.stub.recordLearnAttempt({
+        ...record,
+        planId,
+        ...(scope ? { projectId: scope.projectId } : {}),
+      });
     },
     mirrorAttempt: async (input) => {
       if (owned instanceof Response) throw new Error("Sign in required.");

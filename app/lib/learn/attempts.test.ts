@@ -10,6 +10,7 @@ import {
   type LearnAttemptAnswer,
 } from "./attempts.ts";
 import { newConceptMastery, type ConceptMastery, type LearnPlanProgress } from "./plan-progress.ts";
+import { conceptProgressKey, lessonQuizFor, type ProgressScope } from "./progress-scope.ts";
 import { handleLearnAttempt } from "../server/learn/attempt-response.ts";
 import { unownedPlanResponse } from "../server/learn/access.ts";
 import type { Project } from "../projects.ts";
@@ -35,6 +36,8 @@ function scheduledFaith(): ConceptMastery {
     masteryRev: 1,
   };
 }
+
+const pathScope: ProgressScope = { projectId: "p1", planId: "plan-1" };
 
 function projectWith(progress?: unknown, lessonIds: string[] = ["l1"]): Project {
   return {
@@ -122,11 +125,15 @@ test("a shorter lesson submission keeps the stored quiz tail", () => {
         { mcChoice: "first", shortText: "", shortSubmitted: false, correct: true },
         { mcChoice: "tail", shortText: "", shortSubmitted: false, correct: false },
       ],
+      bestCorrect: 1,
+      settled: true,
     },
     [answer()],
   );
   assert.equal(merged.answers[0]?.mcChoice, "Faith");
   assert.equal(merged.answers[1]?.mcChoice, "tail");
+  assert.equal(merged.bestCorrect, 1);
+  assert.equal(merged.settled, true);
 });
 
 test("plan scheduling fields win and overlapping concepts are kept", () => {
@@ -209,7 +216,7 @@ test("the handler returns plan mastery and a review of final does not 400", asyn
       return planMastery;
     },
     mirrorAttempt: async (input) => {
-      project.learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery);
+      project.learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery, pathScope);
       return { ok: true };
     },
     now: 1_700_000_000_000,
@@ -220,9 +227,10 @@ test("the handler returns plan mastery and a review of final does not 400", asyn
   assert.equal(body.conceptMastery["l1-faith"]?.easiness, 2.1);
   assert.equal(body.conceptMastery["l1-faith"]?.repetitions, 3);
   assert.equal(body.conceptMastery["l1-faith"]?.dueAt, 9999);
-  assert.equal(project.learnProgress?.lessonQuiz.l1?.answers[0]?.mcChoice, "Faith");
-  assert.equal(project.learnProgress?.lessonQuiz.l1?.answers[1]?.mcChoice, "tail");
-  assert.equal(project.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
+  assert.equal(lessonQuizFor(project.learnProgress, pathScope, "l1")?.answers[0]?.mcChoice, "Faith");
+  assert.equal(lessonQuizFor(project.learnProgress, pathScope, "l1")?.answers[1]?.mcChoice, "tail");
+  assert.equal(project.learnProgress?.lessonQuiz.l1, undefined);
+  assert.equal(project.learnProgress?.conceptMastery[conceptProgressKey(pathScope, "l1-faith")]?.easiness, 2.1);
 
   const review = await handleLearnAttempt({
     owned: { userId: "user_1" },
@@ -240,13 +248,13 @@ test("the handler returns plan mastery and a review of final does not 400", asyn
       "final-hope": newConceptMastery({ conceptId: "final-hope", conceptLabel: "Hope", lessonId: "final" }),
     }),
     mirrorAttempt: async (input) => {
-      project.learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery);
+      project.learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery, pathScope);
       return { ok: true };
     },
   });
   assert.equal(review.status, 200);
-  assert.equal(project.learnProgress?.lessonQuiz.l1?.answers[0]?.mcChoice, "Faith");
-  assert.equal(project.learnProgress?.conceptMastery["final-hope"]?.lessonId, "final");
+  assert.equal(lessonQuizFor(project.learnProgress, pathScope, "l1")?.answers[0]?.mcChoice, "Faith");
+  assert.equal(project.learnProgress?.conceptMastery[conceptProgressKey(pathScope, "final-hope")]?.lessonId, "final");
 });
 
 test("an unknown lesson does not record and a missing project still stores the attempt", async () => {

@@ -335,6 +335,8 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       attempts.push({
         at: record.at,
         target: record.target,
+        ...(record.planId ? { planId: record.planId } : {}),
+        ...(record.projectId ? { projectId: record.projectId } : {}),
         ...(record.lessonId ? { lessonId: record.lessonId } : {}),
         answers: record.answers,
       });

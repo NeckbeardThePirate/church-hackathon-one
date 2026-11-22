@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { newConceptMastery, type ConceptMastery } from "../../learn/plan-progress.ts";
+import {
+  articleDoneFor,
+  conceptProgressKey,
+  lessonQuizFor,
+  readDoneFor,
+  readScrollFor,
+} from "../../learn/progress-scope.ts";
 import { SESSION_COOKIE, signSession } from "../session.ts";
 import { env as workersEnv } from "./cloudflare-workers-stub.ts";
 
@@ -202,15 +209,19 @@ test("a project save during the attempt await keeps the newer quiz, read, and ar
   assert.equal(body.conceptMastery["l1-faith"]?.repetitions, 3);
   assert.equal(body.conceptMastery["l1-faith"]?.dueAt, 9999);
   const stored = workspace.findProjectByLearnPlan(planId);
-  assert.equal(stored?.learnProgress?.lessonReadScroll.l1, 88);
-  assert.equal(stored?.learnProgress?.lessonReadDone.l2, true);
-  assert.equal(stored?.learnProgress?.articleDone["https://example.com/new"], true);
-  assert.equal(stored?.learnProgress?.lessonQuiz.l3?.answers[0]?.mcChoice, "fresh");
-  assert.equal(stored?.learnProgress?.lessonQuiz.l1?.answers[0]?.mcChoice, "Faith");
-  assert.equal(stored?.learnProgress?.lessonQuiz.l1?.answers[1]?.mcChoice, "tail");
-  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
-  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.repetitions, 3);
-  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.dueAt, 9999);
+  const scope = { projectId: "p1", planId };
+  const progress = stored?.learnProgress;
+  assert.ok(progress);
+  assert.equal(readScrollFor(progress, scope, "l1"), 88);
+  assert.equal(readDoneFor(progress, scope, "l2"), true);
+  assert.equal(articleDoneFor(progress, scope, "https://example.com/new"), true);
+  assert.equal(lessonQuizFor(progress, scope, "l3")?.answers[0]?.mcChoice, "fresh");
+  assert.equal(lessonQuizFor(progress, scope, "l1")?.answers[0]?.mcChoice, "Faith");
+  assert.equal(lessonQuizFor(progress, scope, "l1")?.answers[1]?.mcChoice, "tail");
+  assert.equal(progress.lessonQuiz.l1, undefined);
+  assert.equal(progress.conceptMastery[conceptProgressKey(scope, "l1-faith")]?.easiness, 2.1);
+  assert.equal(progress.conceptMastery[conceptProgressKey(scope, "l1-faith")]?.repetitions, 3);
+  assert.equal(progress.conceptMastery[conceptProgressKey(scope, "l1-faith")]?.dueAt, 9999);
   assert.equal(stored?.updatedAt, 600);
 });
 
@@ -346,20 +357,24 @@ test("out-of-order mastery snapshots keep every concept on the workspace project
   assert.equal(workspace.mirrorLearnAttempt("plan-a", { attempt: lawAttempt, conceptMastery: full, now: 500 }).ok, true);
   assert.equal(workspace.mirrorLearnAttempt("plan-a", { attempt: hopeAttempt, conceptMastery: older, now: 900 }).ok, true);
   const afterLateOlder = workspace.findProjectByLearnPlan("plan-a");
-  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-law"]?.conceptId, "l1-law");
-  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["final-hope"]?.lessonId, "final");
-  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
-  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-faith"]?.repetitions, 3);
-  assert.equal(afterLateOlder?.learnProgress?.conceptMastery["l1-faith"]?.dueAt, 9999);
+  const scopeA = { projectId: "p-a", planId: "plan-a" };
+  const olderMastery = afterLateOlder?.learnProgress?.conceptMastery;
+  assert.equal(olderMastery?.[conceptProgressKey(scopeA, "l1-law")]?.conceptId, "l1-law");
+  assert.equal(olderMastery?.[conceptProgressKey(scopeA, "final-hope")]?.lessonId, "final");
+  assert.equal(olderMastery?.[conceptProgressKey(scopeA, "l1-faith")]?.easiness, 2.1);
+  assert.equal(olderMastery?.[conceptProgressKey(scopeA, "l1-faith")]?.repetitions, 3);
+  assert.equal(olderMastery?.[conceptProgressKey(scopeA, "l1-faith")]?.dueAt, 9999);
   assert.equal(afterLateOlder?.updatedAt, 900);
 
   workspace.upsertProject(learnProject("plan-b", "p-b"));
   assert.equal(workspace.mirrorLearnAttempt("plan-b", { attempt: hopeAttempt, conceptMastery: older, now: 900 }).ok, true);
   assert.equal(workspace.mirrorLearnAttempt("plan-b", { attempt: lawAttempt, conceptMastery: full, now: 400 }).ok, true);
   const afterLateFuller = workspace.findProjectByLearnPlan("plan-b");
-  assert.equal(afterLateFuller?.learnProgress?.conceptMastery["l1-law"]?.masteryRev, 3);
-  assert.equal(afterLateFuller?.learnProgress?.conceptMastery["final-hope"]?.conceptId, "final-hope");
-  assert.equal(afterLateFuller?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
+  const scopeB = { projectId: "p-b", planId: "plan-b" };
+  const fullerMastery = afterLateFuller?.learnProgress?.conceptMastery;
+  assert.equal(fullerMastery?.[conceptProgressKey(scopeB, "l1-law")]?.masteryRev, 3);
+  assert.equal(fullerMastery?.[conceptProgressKey(scopeB, "final-hope")]?.conceptId, "final-hope");
+  assert.equal(fullerMastery?.[conceptProgressKey(scopeB, "l1-faith")]?.easiness, 2.1);
   assert.equal(afterLateFuller?.updatedAt, 900);
 
   const rolledBack = {
@@ -367,9 +382,10 @@ test("out-of-order mastery snapshots keep every concept on the workspace project
   };
   assert.equal(workspace.mirrorLearnAttempt("plan-a", { attempt: hopeAttempt, conceptMastery: rolledBack, now: 1200 }).ok, true);
   const still = workspace.findProjectByLearnPlan("plan-a");
-  assert.equal(still?.learnProgress?.conceptMastery["l1-law"]?.conceptId, "l1-law");
-  assert.equal(still?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
-  assert.equal(still?.learnProgress?.conceptMastery["l1-faith"]?.masteryRev, 1);
+  const stillMastery = still?.learnProgress?.conceptMastery;
+  assert.equal(stillMastery?.[conceptProgressKey(scopeA, "l1-law")]?.conceptId, "l1-law");
+  assert.equal(stillMastery?.[conceptProgressKey(scopeA, "l1-faith")]?.easiness, 2.1);
+  assert.equal(stillMastery?.[conceptProgressKey(scopeA, "l1-faith")]?.masteryRev, 1);
 });
 
 test("the real attempt route returns 200 for the plan owner", async () => {
@@ -448,8 +464,13 @@ test("the real attempt route returns 200 for the plan owner", async () => {
   assert.equal(body.conceptMastery["l1-faith"]?.dueAt, 9999);
   assert.ok((body.conceptMastery["l1-faith"]?.masteryRev ?? 0) >= 1);
   const stored = workspace.findProjectByLearnPlan(PLAN_ID);
-  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.easiness, 2.1);
-  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.repetitions, 3);
-  assert.equal(stored?.learnProgress?.conceptMastery["l1-faith"]?.dueAt, 9999);
-  assert.equal(stored?.learnProgress?.lessonQuiz.l1?.answers[0]?.mcChoice, "Faith");
+  const ownerScope = { projectId: "p-owner", planId: PLAN_ID };
+  assert.equal(stored?.learnProgress?.conceptMastery[conceptProgressKey(ownerScope, "l1-faith")]?.easiness, 2.1);
+  assert.equal(stored?.learnProgress?.conceptMastery[conceptProgressKey(ownerScope, "l1-faith")]?.repetitions, 3);
+  assert.equal(stored?.learnProgress?.conceptMastery[conceptProgressKey(ownerScope, "l1-faith")]?.dueAt, 9999);
+  assert.equal(lessonQuizFor(stored?.learnProgress, ownerScope, "l1")?.answers[0]?.mcChoice, "Faith");
+  const attempts = data.get("attempts") as { planId?: string; projectId?: string; lessonId?: string }[];
+  assert.equal(attempts[0]?.planId, PLAN_ID);
+  assert.equal(attempts[0]?.projectId, "p-owner");
+  assert.equal(attempts[0]?.lessonId, "l1");
 });

@@ -4,8 +4,8 @@ import { UserButton } from "@clerk/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
 import { defaultTitle, isLegacyProject, type Project } from "../lib/projects";
+import { statsFigures, type LessonMastery } from "../lib/learn/learner-stats";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
-import type { LessonMastery } from "../lib/learn/learner-stats";
 
 type AppShellProps = {
   children: ReactNode;
@@ -33,6 +33,7 @@ export function AppShell({
 }: AppShellProps) {
   const { key: clerkKey } = useClerkKey();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const figures = statsFigures(stats);
   const compactDesktop = sidebarCompact;
 
   const byRecent = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -142,11 +143,9 @@ export function AppShell({
           </span>
         </button>
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">StudyBuddy</p>
-        {stats ? (
-          <p className="shrink-0 text-[11px] tabular-nums text-[var(--ink-muted)]" aria-label="Learner stats">
-            {stats.xp} XP · {stats.streak}d
-          </p>
-        ) : null}
+        <p className="shrink-0 text-[11px] tabular-nums text-[var(--ink-muted)]" aria-label="Learner stats" aria-busy={figures.busy}>
+          {figures.busy ? "XP … · Streak …" : `${figures.xp} XP · ${figures.streak}d`}
+        </p>
         <button
           type="button"
           onClick={openNewProject}
@@ -208,9 +207,14 @@ export function AppShell({
             {sidebarInnerCompact ? "+" : "New path"}
           </button>
         </div>
-        {!sidebarInnerCompact && stats ? (
+        {!sidebarInnerCompact ? (
           <div className="px-2">
-            <LearnerStatsPanel xp={stats.xp} streak={stats.streak} lessons={mastery} />
+            <LearnerStatsPanel
+              pending={!stats}
+              xp={stats?.xp ?? 0}
+              streak={stats?.streak ?? 0}
+              lessons={mastery}
+            />
           </div>
         ) : null}
         <nav
