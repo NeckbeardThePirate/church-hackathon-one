@@ -25,6 +25,7 @@ import { fetchPassageFromD1 } from "../bible-db";
 import { exaAuthFrom, exaReady, exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId, youtubeOembed } from "./exa";
 import { citeLibrary } from "./library-cite";
 import { list, llmJson, num, obj, str, strList, type LlmMeta, type LlmRole } from "./llm";
+import { carryConceptTags, parseQuizItems, requireConceptTags, teachConceptRules } from "./quiz-items.ts";
 import { openSourceQueryOrder, searchOpenLibrary, searchWikipedia } from "./open-sources";
 import type { LearnPlanDO } from "./plan-do";
 import { enqueue, enqueueMany, type LearnEnv, type LearnMessage } from "./queues";
@@ -444,23 +445,6 @@ Never present the ${perspective} view as settled for all Christians.`;
 
 const TEACH_TYPES: TeachBlock["type"][] = ["paragraph", "heading1", "heading2", "bullet", "numbered", "quote", "divider"];
 
-function parseQuizItems(value: unknown, path: string, objectiveCount: number): QuizItem[] {
-  return list(value, path).flatMap((item, i): QuizItem[] => {
-    const o = obj(item, `${path}[${i}]`);
-    const kind = o.kind === "short" ? "short" : "mc";
-    const question = str(o.question, `${path}[${i}].question`);
-    const answer = str(o.answer, `${path}[${i}].answer`);
-    const rationale = str(o.rationale, `${path}[${i}].rationale`, { optional: true });
-    const objectiveIndex = clamp(num(o.objectiveIndex, 0), 0, Math.max(0, objectiveCount - 1));
-    if (kind === "mc") {
-      const choices = strList(o.choices, `${path}[${i}].choices`, { min: 2 }).slice(0, 5);
-      if (!choices.includes(answer)) throw new Error(`${path}[${i}]: answer must exactly equal one of the choices`);
-      return [{ kind, question, choices, answer, rationale, objectiveIndex }];
-    }
-    return [{ kind, question, answer, rationale, objectiveIndex }];
-  });
-}
-
 const QUIZ_RULES = `Quiz rules: multiple choice ("mc") items have 4 choices and "answer" must exactly equal one choice.
 Short-answer ("short") items have a one-sentence answer. Every item must be answerable from the lesson text alone.
 objectiveIndex is the 0-based index of the lesson objective the item tests.`;
@@ -477,15 +461,16 @@ export async function runTeach(ctx: Ctx): Promise<void> {
   const passages = await ctx.stub.getSourcePassages();
 
   const result = await llm(ctx, "worker", {
-    maxTokens: 6000,
+    maxTokens: 8000,
     system: `You write one lesson of a course for an adult learner.
 Return JSON:
 {"teaching":[{"type":"heading2"|"paragraph"|"bullet"|"numbered"|"quote"|"divider","text":""}],
- "quiz":[{"kind":"mc"|"short","question":"","choices":["",""],"answer":"","rationale":"","objectiveIndex":0}],
+ "quiz":[{"kind":"mc"|"short","question":"","choices":["",""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"l${lesson.order}-justification","conceptLabel":"Justification","alternate":{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"l${lesson.order}-justification","conceptLabel":"Justification"}}],
  "scriptureRefs":[{"reference":"Book C:V-V","note":"one sentence on why it connects"}]}
 teaching: 5-12 blocks. Cover every objective: explanation, key ideas, a worked example or illustration,
 and end with a heading2 "Discuss" followed by 2-3 bullet discussion questions. Keep each block short.
 quiz: ${band.quiz[0]}-${band.quiz[1]} items. ${QUIZ_RULES}
+${teachConceptRules(lesson.order)}
 scriptureRefs: ${scope.isFaithRelevant ? "1-3 passages central to this lesson" : "always an empty array"}.
 ${
   repair
@@ -522,8 +507,9 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
         if (type !== "divider" && !text) return [];
         return [{ type, text }];
       });
-      const quiz = parseQuizItems(o.quiz, "quiz", objectives.length).slice(0, band.quiz[1]);
+      const quiz = parseQuizItems(o.quiz, "quiz", objectives.length, { strictConcepts: true }).slice(0, band.quiz[1]);
       if (quiz.length < band.quiz[0]) throw new Error(`quiz needs at least ${band.quiz[0]} valid items`);
+      requireConceptTags(quiz);
       const refs = Array.isArray(o.scriptureRefs)
         ? o.scriptureRefs.flatMap((r) => {
             if (!r || typeof r !== "object") return [];
@@ -689,9 +675,11 @@ Return exactly ${bad.length} items. ${QUIZ_RULES}`,
         validate: (value) => parseQuizItems(obj(value).quiz, "quiz", lesson.objectives.length),
       });
       regenerated = replacements.length;
-      const stillFailed = replacements.length ? await checkQuiz(ctx, lesson, replacements) : new Set<number>();
+      // The rewrite asks for a new question, not a new concept. Keep the teach-time tag and alternate.
+      const repaired = replacements.map((item, index) => carryConceptTags(bad[index], item));
+      const stillFailed = repaired.length ? await checkQuiz(ctx, lesson, repaired) : new Set<number>();
       const kept = quiz.filter((_, i) => !failed.has(i));
-      const fixed = replacements.filter((_, i) => !stillFailed.has(i));
+      const fixed = repaired.filter((_, i) => !stillFailed.has(i));
       droppedCount = quiz.length - kept.length - fixed.length;
       quiz = [...kept, ...fixed];
     }

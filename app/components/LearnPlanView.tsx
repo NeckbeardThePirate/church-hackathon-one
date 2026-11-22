@@ -26,7 +26,13 @@ import {
   scrollDepthPercent,
   sectionVisibilityPercent,
 } from "../lib/learn/read-progress";
-import { mirrorAttemptOntoProgress, type LearnAttemptAnswer } from "../lib/learn/attempts";
+import {
+  applyPlanMastery,
+  mirrorAttemptOntoProgress,
+  submittedLessonAttempt,
+  type LearnAttempt,
+  type LearnAttemptAnswer,
+} from "../lib/learn/attempts";
 import {
   countPlanProgress,
   defaultLocation,
@@ -846,7 +852,45 @@ function attemptAnswers(quiz: PersistedQuiz, items: QuizItem[]): LearnAttemptAns
     shortText: answer.shortText,
     shortSubmitted: answer.shortSubmitted,
     correct: answer.correct,
+    ...(typeof answer.score === "number" ? { score: answer.score } : {}),
   }));
+}
+
+function quizStillMatches(quiz: PersistedQuiz | null | undefined, answers: LearnAttemptAnswer[]): boolean {
+  if (!quiz || quiz.answers.length !== answers.length) return false;
+  return answers.every((answer, index) => {
+    const current = quiz.answers[index];
+    return (
+      current?.mcChoice === answer.mcChoice &&
+      current.shortText === answer.shortText &&
+      current.shortSubmitted === answer.shortSubmitted &&
+      current.correct === answer.correct
+    );
+  });
+}
+
+/** One automatic retry. Local progress is saved before this runs and is not written again on failure. */
+async function postLearnAttempt(
+  planId: string,
+  attempt: LearnAttempt,
+): Promise<{ conceptMastery?: LearnPlanProgress["conceptMastery"] } | null> {
+  for (let attemptIndex = 0; attemptIndex < 2; attemptIndex++) {
+    try {
+      const response = await fetch(`/api/learn/plans/${planId}/attempts`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(attempt),
+      });
+      if (response.ok) {
+        return (await response.json()) as { conceptMastery?: LearnPlanProgress["conceptMastery"] };
+      }
+      if (response.status < 500) return null;
+    } catch {
+      /* Network or a body that is not JSON. Retry once, then keep the local quiz. */
+    }
+  }
+  return null;
 }
 
 function paintAnswerMastery(
@@ -1111,43 +1155,21 @@ export function LearnPlanView({
               );
         return paintAnswerMastery(withQuiz, scope, lessonKey, items);
       }, true);
+      const answers = attemptAnswers(stored, items);
+      const attempt = submittedLessonAttempt(target, lessonKey, answers);
+      if (!attempt) return;
       const changed = stored.answers.some((answer, index) => answer.correct !== (previous?.answers[index]?.correct ?? null));
       if (!changed) return;
-      const answers = attemptAnswers(stored, items);
-      if (!answers.length) return;
-      void fetch(`/api/learn/plans/${plan.id}/attempts`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          target,
-          ...(target === "lesson" ? { lessonId: lessonKey } : {}),
-          answers,
-        }),
-      })
-        .then(async (response) => {
-          if (!response.ok) return null;
-          return (await response.json()) as { conceptMastery?: LearnPlanProgress["conceptMastery"] };
-        })
-        .then((body) => {
-          if (!body?.conceptMastery) return;
-          commitProgress(
-            (prev) =>
-              paintAnswerMastery(
-                mirrorAttemptOntoProgress(
-                  prev,
-                  { target, ...(target === "lesson" ? { lessonId: lessonKey } : {}), answers },
-                  body.conceptMastery,
-                  scope,
-                ),
-                scope,
-                lessonKey,
-                items,
-              ),
-            true,
-          );
-        })
-        .catch(() => undefined);
+      void postLearnAttempt(plan.id, attempt).then((body) => {
+        if (!body?.conceptMastery) return;
+        commitProgress((prev) => {
+          const current = target === "final" ? finalQuizFor(prev, scope) : lessonQuizFor(prev, scope, lessonKey);
+          const merged = quizStillMatches(current, answers)
+            ? mirrorAttemptOntoProgress(prev, attempt, body.conceptMastery, scope)
+            : applyPlanMastery(prev, body.conceptMastery, scope);
+          return paintAnswerMastery(merged, scope, lessonKey, items);
+        }, true);
+      });
     },
     [commitProgress, plan.id, scope],
   );
