@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyPlanMastery,
   attemptLessonError,
   mergeConceptMastery,
   mergeMasterySnapshots,
   mergeQuizByIndex,
   mirrorAttemptOntoProgress,
+  missedConceptIds,
   parseLearnAttempt,
+  submittedLessonAttempt,
   type LearnAttemptAnswer,
 } from "./attempts.ts";
 import { newConceptMastery, type ConceptMastery, type LearnPlanProgress } from "./plan-progress.ts";
@@ -285,4 +288,100 @@ test("an unknown lesson does not record and a missing project still stores the a
     mirrorAttempt: async () => ({ ok: true }),
   });
   assert.equal(unlinked.status, 200);
+});
+
+test("a finished quiz posts concept ids and a partial quiz does not", () => {
+  const partial = submittedLessonAttempt("lesson", "l1", [
+    answer({ correct: false }),
+    { mcChoice: null, shortText: "", shortSubmitted: false, correct: null },
+  ]);
+  assert.equal(partial, null);
+
+  const finished = submittedLessonAttempt("lesson", "l1", [
+    answer({ correct: false }),
+    { mcChoice: null, shortText: "no", shortSubmitted: true, correct: false },
+  ]);
+  assert.equal(finished?.target, "lesson");
+  assert.equal(finished?.lessonId, "l1");
+  assert.deepEqual(missedConceptIds(finished!), ["l1-faith"]);
+  assert.equal(
+    submittedLessonAttempt("final", "final", [answer({ conceptId: "final-hope", conceptLabel: "Hope", correct: false })])
+      ?.lessonId,
+    undefined,
+  );
+});
+
+test("missed concept ids come from wrong tagged answers and untagged misses add no mastery", () => {
+  const answers = [
+    answer({ conceptId: "l1-faith", correct: false }),
+    answer({ conceptId: "l1-law", conceptLabel: "Law", correct: true }),
+    { mcChoice: "A", shortText: "", shortSubmitted: false, correct: false as boolean | null },
+    answer({ conceptId: "l1-faith", correct: false }),
+  ];
+  assert.deepEqual(missedConceptIds({ answers }), ["l1-faith"]);
+
+  const once = mergeConceptMastery({}, { target: "lesson", lessonId: "l1", answers });
+  assert.deepEqual(Object.keys(once), ["l1-faith", "l1-law"]);
+  const again = mergeConceptMastery(once, { target: "lesson", lessonId: "l1", answers });
+  assert.equal(Object.keys(again).length, 2);
+  assert.equal(again["l1-faith"]?.repetitions, once["l1-faith"]?.repetitions);
+  assert.equal(again["l1-faith"]?.lastQuality, once["l1-faith"]?.lastQuality);
+  assert.equal(again["l1-faith"]?.easiness, once["l1-faith"]?.easiness);
+
+  const untagged = mergeConceptMastery({}, {
+    target: "lesson",
+    lessonId: "l1",
+    answers: [{ mcChoice: "A", shortText: "", shortSubmitted: false, correct: false }],
+  });
+  assert.deepEqual(untagged, {});
+});
+
+test("a mirrored attempt keeps partial-credit score when the answer did not change", () => {
+  const kept = mergeQuizByIndex(
+    { answers: [{ mcChoice: "Faith", shortText: "", shortSubmitted: false, correct: true, score: 1 }], bestCorrect: 1, settled: true },
+    [answer()],
+  );
+  assert.equal(kept.answers[0]?.score, 1);
+  assert.equal(kept.bestCorrect, 1);
+  assert.equal(kept.settled, true);
+
+  const replaced = mergeQuizByIndex(
+    { answers: [{ mcChoice: "Law", shortText: "", shortSubmitted: false, correct: false, score: 0.2 }] },
+    [answer({ correct: true })],
+  );
+  assert.equal(replaced.answers[0]?.score, undefined);
+  assert.equal(replaced.answers[0]?.mcChoice, "Faith");
+
+  const parsed = parseLearnAttempt({
+    target: "lesson",
+    lessonId: "l1",
+    answers: [{ ...answer({ correct: false, score: 0.55 }) }],
+  });
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.attempt.answers[0]?.score, 0.55);
+  const badScore = parseLearnAttempt({
+    target: "lesson",
+    lessonId: "l1",
+    answers: [{ ...answer(), score: 2 }],
+  });
+  assert.equal(badScore.ok, false);
+});
+
+test("plan mastery can merge without rewriting a newer local quiz", () => {
+  const progress = {
+    v: 3,
+    lessonQuiz: {
+      [`${pathScope.projectId}\u001f${pathScope.planId}\u001fl1`]: {
+        answers: [{ mcChoice: "kept", shortText: "", shortSubmitted: false, correct: true }],
+      },
+    },
+    conceptMastery: {},
+  };
+  const next = applyPlanMastery(
+    progress,
+    { "l1-faith": newConceptMastery({ conceptId: "l1-faith", conceptLabel: "Faith", lessonId: "l1" }) },
+    pathScope,
+  );
+  assert.equal(lessonQuizFor(next, pathScope, "l1")?.answers[0]?.mcChoice, "kept");
+  assert.equal(next.conceptMastery[conceptProgressKey(pathScope, "l1-faith")]?.conceptLabel, "Faith");
 });

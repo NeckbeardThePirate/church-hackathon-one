@@ -1,4 +1,11 @@
-import { newConceptMastery, normalizeLearnProgress, type ConceptMastery, type LearnPlanProgress, type PersistedQuiz } from "./plan-progress.ts";
+import {
+  newConceptMastery,
+  normalizeLearnProgress,
+  type ConceptMastery,
+  type LearnPlanProgress,
+  type PersistedQuiz,
+  type PersistedQuizAnswer,
+} from "./plan-progress.ts";
 import {
   adoptProgressForScope,
   FINAL_LESSON_ID,
@@ -18,6 +25,8 @@ export type LearnAttemptAnswer = {
   shortText: string;
   shortSubmitted: boolean;
   correct: boolean | null;
+  /** Semantic score copied from the local quiz so a mirror does not drop partial credit. */
+  score?: number;
 };
 
 export type LearnAttempt = {
@@ -38,7 +47,8 @@ export type StoredLearnAttempt = {
   answers: LearnAttemptAnswer[];
 };
 
-const CONCEPT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
+/** Same slug rule the teach parser uses, so a tagged item can be submitted. */
+export const CONCEPT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 const TARGETS = new Set<LearnAttemptTarget>(["lesson", "final", "review"]);
 
 export type AttemptParseResult = { ok: true; attempt: LearnAttempt } | { ok: false; error: string };
@@ -111,6 +121,13 @@ function parseAnswer(value: unknown, index: number): { ok: true; answer: LearnAt
     const trimmed = raw.conceptLabel.trim();
     if (trimmed) conceptLabel = trimmed;
   }
+  let score: number | undefined;
+  if (raw.score !== undefined && raw.score !== null) {
+    if (typeof raw.score !== "number" || !Number.isFinite(raw.score) || raw.score < 0 || raw.score > 1) {
+      return { ok: false, error: `answers[${index}].score must be a number from 0 to 1.` };
+    }
+    score = raw.score;
+  }
   return {
     ok: true,
     answer: {
@@ -120,17 +137,55 @@ function parseAnswer(value: unknown, index: number): { ok: true; answer: LearnAt
       shortText: raw.shortText,
       shortSubmitted: raw.shortSubmitted,
       correct: raw.correct as boolean | null,
+      ...(score !== undefined ? { score } : {}),
     },
   };
 }
 
-function persistedAnswer(answer: LearnAttemptAnswer) {
-  return {
+/**
+ * A lesson or final quiz is submitted once every item has a right/wrong result.
+ * Partial progress stays local. Untagged answers are included and simply omit conceptId.
+ */
+export function submittedLessonAttempt(
+  target: "lesson" | "final",
+  lessonId: string,
+  answers: LearnAttemptAnswer[],
+): LearnAttempt | null {
+  if (answers.length < 1 || answers.some((answer) => answer.correct == null)) return null;
+  if (target === "lesson") return { target, lessonId, answers };
+  return { target, answers };
+}
+
+/** Concept ids the learner missed. Untagged wrong answers are skipped; repeats are listed once. */
+export function missedConceptIds(attempt: { answers: Pick<LearnAttemptAnswer, "conceptId" | "correct">[] }): string[] {
+  const ids: string[] = [];
+  for (const answer of attempt.answers) {
+    if (answer.correct !== false || !answer.conceptId || ids.includes(answer.conceptId)) continue;
+    ids.push(answer.conceptId);
+  }
+  return ids;
+}
+
+function persistedAnswer(answer: LearnAttemptAnswer, previous?: PersistedQuizAnswer): PersistedQuizAnswer {
+  const next: PersistedQuizAnswer = {
     mcChoice: answer.mcChoice,
     shortText: answer.shortText,
     shortSubmitted: answer.shortSubmitted,
     correct: answer.correct,
   };
+  if (typeof answer.score === "number" && Number.isFinite(answer.score)) {
+    next.score = answer.score;
+  } else if (
+    previous &&
+    typeof previous.score === "number" &&
+    previous.mcChoice === next.mcChoice &&
+    previous.shortText === next.shortText &&
+    previous.shortSubmitted === next.shortSubmitted &&
+    previous.correct === next.correct
+  ) {
+    next.score = previous.score;
+  }
+  return next;
 }
 
 /**
@@ -143,7 +198,7 @@ export function mergeQuizByIndex(existing: PersistedQuiz | null | undefined, inc
   const length = Math.max(previous.length, incoming.length);
   for (let i = 0; i < length; i++) {
     const next = incoming[i];
-    answers.push(next ? persistedAnswer(next) : previous[i]!);
+    answers.push(next ? persistedAnswer(next, previous[i]) : previous[i]!);
   }
   return {
     answers,
@@ -218,6 +273,17 @@ export function attemptLessonError(
   if (!project?.learnPlan || !Array.isArray(lessons) || lessons.length === 0) return null;
   if (attempt.lessonId && lessons.some((lesson) => lesson?.id === attempt.lessonId)) return null;
   return "Unknown lesson.";
+}
+
+/**
+ * Fold plan-DO mastery into local progress without rewriting quiz answers.
+ * Used when the learner has already changed the quiz since the POST left.
+ */
+export function applyPlanMastery(progress: unknown, planMastery: unknown, scope: ProgressScope): LearnPlanProgress {
+  const next = adoptProgressForScope(normalizeLearnProgress(progress), scope);
+  const incoming = scopeConceptMastery(normalizeLearnProgress({ conceptMastery: planMastery }).conceptMastery, scope);
+  next.conceptMastery = mergeMasterySnapshots(next.conceptMastery, incoming);
+  return next;
 }
 
 /**
