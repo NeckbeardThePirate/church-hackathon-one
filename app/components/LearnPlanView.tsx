@@ -41,13 +41,23 @@ import {
   type LearnAttempt,
   type LearnAttemptAnswer,
 } from "../lib/learn/attempts";
-import { missedGapConcepts, selectGapConcepts, type GapConcept, type GapReserveResult } from "../lib/learn/gaps";
+import {
+  groupMissesBySource,
+  missedFromQuiz,
+  missedGapConcepts,
+  practiceCards,
+  selectGapConcepts,
+  type GapConcept,
+  type GapReserveResult,
+  type PracticeCard,
+} from "../lib/learn/gaps";
 import {
   countPlanProgress,
   defaultLocation,
   emptyQuiz,
   isFinalStepComplete,
   isLessonStepComplete,
+  isQuizSettled,
   mainScrollElement,
   mergeLearnProgress,
   newConceptMastery,
@@ -476,39 +486,72 @@ function QuizQuestion({
   );
 }
 
-function GapPracticeNotice({
-  message,
-  error,
-  readyTitle,
+type GapWatch = { lessonId: string; message: string | null; error: string | null };
+
+function PracticeList({
+  cards,
+  watch,
+  onGenerate,
   onOpen,
 }: {
-  message: string | null;
-  error: string | null;
-  readyTitle?: string;
-  onOpen?: () => void;
+  cards: PracticeCard[];
+  watch: Record<string, GapWatch>;
+  onGenerate: (sourceLessonId: string, concepts: GapConcept[]) => void;
+  onOpen: (lessonId: string) => void;
 }) {
-  if (!message && !error && !onOpen) return null;
+  if (!cards.length) return null;
   return (
     <div className="mt-4 flex flex-col gap-2">
-      {message ? (
-        <p role="status" className="text-sm text-[var(--ink-muted)]">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p role="alert" className="text-sm text-[#c0533f]">
-          {error}
-        </p>
-      ) : null}
-      {onOpen ? (
-        <button
-          type="button"
-          onClick={onOpen}
-          className="w-fit rounded-md border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-3 py-1.5 text-sm font-medium text-[var(--ink)]"
-        >
-          Practice lesson ready{readyTitle ? `: ${readyTitle}` : ""}
-        </button>
-      ) : null}
+      {cards.map((card) => {
+        const status = watch[card.sourceLessonId];
+        const labels = card.concepts.map((concept) => concept.conceptLabel).filter(Boolean).join(", ");
+        return (
+          <div
+            key={card.key}
+            className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-4 py-3"
+          >
+            {card.gapLessonId ? (
+              <button
+                type="button"
+                onClick={() => onOpen(card.gapLessonId!)}
+                className="flex min-h-11 w-full flex-col items-start justify-center text-left"
+              >
+                <span className="text-sm font-medium text-[var(--ink)]">
+                  Practice lesson ready{card.title ? `: ${card.title}` : ""}
+                </span>
+                <span className="mt-1 text-xs text-[var(--ink-muted)]">Citations and a short quiz for what you missed.</span>
+              </button>
+            ) : status?.error ? (
+              <>
+                <p role="alert" className="text-sm text-[#c0533f]">
+                  {status.error}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onGenerate(card.sourceLessonId, card.concepts)}
+                  className="mt-2 flex min-h-11 w-full flex-col items-start justify-center text-left"
+                >
+                  <span className="text-sm font-medium text-[var(--ink)]">Generate gap lesson</span>
+                  {labels ? <span className="mt-1 text-xs text-[var(--ink-muted)]">{labels}</span> : null}
+                </button>
+              </>
+            ) : status ? (
+              <p role="status" className="text-sm text-[var(--ink-muted)]">
+                {status.message || `Building a short practice lesson${labels ? ` for ${labels}` : ""}…`}
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onGenerate(card.sourceLessonId, card.concepts)}
+                className="flex min-h-11 w-full flex-col items-start justify-center text-left"
+              >
+                <span className="text-sm font-medium text-[var(--ink)]">Generate gap lesson</span>
+                {labels ? <span className="mt-1 text-xs text-[var(--ink-muted)]">{labels}</span> : null}
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -571,7 +614,7 @@ function QuizSection({
         <button
           type="button"
           onClick={retryMissed}
-          className="mt-4 rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-3 py-1.5 text-xs font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
+          className="mt-4 flex min-h-11 w-full items-center rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-3 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] sm:w-fit"
         >
           Try again
         </button>
@@ -1116,11 +1159,7 @@ export function LearnPlanView({
   const onPlanRef = useRef(onPlan);
   onPlanRef.current = onPlan;
   const gapPostedRef = useRef<Set<string>>(new Set());
-  const [gapSourceId, setGapSourceId] = useState<string | null>(null);
-  const [gapLessonId, setGapLessonId] = useState<string | null>(null);
-  const [gapWatchId, setGapWatchId] = useState<string | null>(null);
-  const [gapMessage, setGapMessage] = useState<string | null>(null);
-  const [gapError, setGapError] = useState<string | null>(null);
+  const [gapWatch, setGapWatch] = useState<Record<string, GapWatch>>({});
   const urlAppliedRef = useRef(false);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
@@ -1277,42 +1316,78 @@ export function LearnPlanView({
   const gradeShort = useCallback((item: QuizItem, given: string) => gradeFreeText(plan.id, item, given), [plan.id]);
   const timeZone = learnerTimeZone(stats?.timezone);
 
-  const requestPractice = useCallback(
-    async (lessonKey: string, attempt: LearnAttempt) => {
-      const source = plan.lessons.find((lesson) => lesson.id === lessonKey);
-      if (!source || lessonKind(source) === "gap") return;
-      const missed = missedGapConcepts(attempt.answers);
-      if (!missed.length) return;
-      const selection = selectGapConcepts(plan.lessons, lessonKey, missed);
+  const queuePractice = useCallback(
+    async (sourceLessonId: string, concepts: GapConcept[], force = false) => {
+      const source = plan.lessons.find((lesson) => lesson.id === sourceLessonId);
+      if (!source || lessonKind(source) === "gap" || !concepts.length) return;
+      const selection = selectGapConcepts(plan.lessons, sourceLessonId, concepts);
       if (!selection.concepts.length) {
         if (selection.error) {
-          setGapSourceId(lessonKey);
-          setGapError(selection.error);
-          setGapMessage(null);
+          setGapWatch((prev) => ({
+            ...prev,
+            [sourceLessonId]: { lessonId: prev[sourceLessonId]?.lessonId ?? "", message: null, error: selection.error ?? null },
+          }));
         }
         return;
       }
-      const key = `${lessonKey}:${selection.concepts.map((concept) => concept.conceptId).sort().join(",")}`;
-      if (gapPostedRef.current.has(key)) return;
+      const key = `${sourceLessonId}:${selection.concepts.map((concept) => concept.conceptId).sort().join(",")}`;
+      if (!force && gapPostedRef.current.has(key)) return;
       gapPostedRef.current.add(key);
-      setGapSourceId(lessonKey);
-      setGapError(null);
-      setGapMessage("Building a short practice lesson for what you missed…");
-      const reserved = await postGapLesson(plan.id, lessonKey, selection.concepts);
-      if (!reserved.queued || !reserved.lessonId) {
-        if (reserved.error) {
-          gapPostedRef.current.delete(key);
-          setGapError(reserved.error);
-          setGapMessage(null);
-        } else {
-          setGapMessage(null);
-        }
+      const labels = selection.concepts.map((concept) => concept.conceptLabel).join(", ");
+      setGapWatch((prev) => ({
+        ...prev,
+        [sourceLessonId]: {
+          lessonId: prev[sourceLessonId]?.lessonId ?? "",
+          message: `Building a short practice lesson for ${labels}…`,
+          error: null,
+        },
+      }));
+      const reserved = await postGapLesson(plan.id, sourceLessonId, selection.concepts);
+      if (reserved.lessonId && plan.lessons.some((lesson) => lesson.id === reserved.lessonId)) {
+        setGapWatch((prev) => {
+          const next = { ...prev };
+          delete next[sourceLessonId];
+          return next;
+        });
         return;
       }
-      setGapLessonId(reserved.lessonId);
-      setGapWatchId(reserved.lessonId);
+      if (reserved.error && !reserved.lessonId) {
+        gapPostedRef.current.delete(key);
+        setGapWatch((prev) => ({
+          ...prev,
+          [sourceLessonId]: { lessonId: "", message: null, error: reserved.error ?? "Could not start the practice lesson." },
+        }));
+        return;
+      }
+      if (!reserved.lessonId) {
+        setGapWatch((prev) => {
+          const next = { ...prev };
+          delete next[sourceLessonId];
+          return next;
+        });
+        return;
+      }
+      setGapWatch((prev) => ({
+        ...prev,
+        [sourceLessonId]: {
+          lessonId: reserved.lessonId!,
+          message: prev[sourceLessonId]?.message ?? `Building a short practice lesson for ${labels}…`,
+          error: null,
+        },
+      }));
     },
     [plan.id, plan.lessons],
+  );
+
+  const requestPractice = useCallback(
+    (target: "lesson" | "final", lessonKey: string, attempt: LearnAttempt) => {
+      const missed = missedGapConcepts(attempt.answers);
+      if (!missed.length) return;
+      const requests =
+        target === "final" ? groupMissesBySource(plan.lessons, missed) : [{ sourceLessonId: lessonKey, concepts: missed }];
+      for (const request of requests) void queuePractice(request.sourceLessonId, request.concepts);
+    },
+    [plan.lessons, queuePractice],
   );
 
   const saveQuiz = useCallback(
@@ -1355,7 +1430,7 @@ export function LearnPlanView({
       };
       if (attempt && changed) {
         void postLearnAttempt(plan.id, { ...attempt, timeZone }).then(adoptMastery);
-        if (target === "lesson") void requestPractice(lessonKey, attempt);
+        requestPractice(target, lessonKey, attempt);
         return;
       }
       for (const update of updates) {
@@ -1370,68 +1445,122 @@ export function LearnPlanView({
     [commitProgress, plan.id, requestPractice, scope, timeZone],
   );
 
-  useEffect(() => {
-    if (gapLessonId && plan.lessons.some((lesson) => lesson.id === gapLessonId)) {
-      setGapMessage(null);
-      setGapError(null);
-    }
-  }, [gapLessonId, plan.lessons]);
+  const watchKey = Object.values(gapWatch)
+    .map((watch) => watch.lessonId)
+    .filter(Boolean)
+    .sort()
+    .join(",");
 
   useEffect(() => {
-    if (!gapWatchId) return;
+    if (!watchKey) return;
     let closed = false;
+    const ids = new Set(watchKey.split(","));
     const source = new EventSource(`/api/learn/plans/${plan.id}/events`);
     const applyPlan = (next: LearnPlan | undefined) => {
       if (next) onPlanRef.current?.(next);
     };
-    const finish = (next: LearnPlan | undefined, error?: string) => {
+    const absorb = (next: LearnPlan | undefined, error?: string, lessonId?: string) => {
       applyPlan(next);
-      const ready = next?.lessons.some((lesson) => lesson.id === gapWatchId) ?? false;
-      if (error && !ready) {
-        setGapError(error);
-        setGapMessage(null);
-      }
-      if (ready || error) {
-        closed = true;
-        source.close();
-        setGapWatchId(null);
-      }
+      const ready = new Set(next?.lessons.map((lesson) => lesson.id) ?? []);
+      setGapWatch((prev) => {
+        const updated = { ...prev };
+        let changed = false;
+        for (const [sourceId, watch] of Object.entries(updated)) {
+          if (!watch.lessonId || !ids.has(watch.lessonId)) continue;
+          if (lessonId && watch.lessonId !== lessonId) continue;
+          if (ready.has(watch.lessonId)) {
+            delete updated[sourceId];
+            changed = true;
+            continue;
+          }
+          if (error) {
+            updated[sourceId] = { ...watch, message: null, error };
+            changed = true;
+          }
+        }
+        return changed ? updated : prev;
+      });
     };
-    source.addEventListener("gap", (event) => {
-      const body = JSON.parse((event as MessageEvent).data) as GapJobEvent;
-      if (body.lessonId && body.lessonId !== gapWatchId) return;
-      finish(body.plan, body.error);
-    });
-    source.addEventListener("progress", (event) => {
-      const progressEvent = JSON.parse((event as MessageEvent).data) as ProgressEvent;
-      if (progressEvent.lessonId !== gapWatchId) return;
-      if (progressEvent.stage === "error") {
-        setGapError(progressEvent.message);
-        setGapMessage(null);
-        return;
-      }
-      setGapMessage(progressEvent.message);
-    });
-    source.addEventListener("done", (event) => {
-      const snap = JSON.parse((event as MessageEvent).data) as PlanSnapshot;
-      if (snap.plan?.lessons.some((lesson) => lesson.id === gapWatchId)) finish(snap.plan);
-    });
-    source.onerror = () => {
-      if (closed) return;
+    const pull = () => {
       void fetch(`/api/learn/plans/${plan.id}`, { credentials: "same-origin" })
         .then((response) => (response.ok ? response.json() : null))
         .then((body: unknown) => {
           const snap = body as PlanSnapshot | null;
           if (!snap?.plan || closed) return;
-          if (snap.plan.lessons.some((lesson) => lesson.id === gapWatchId)) finish(snap.plan);
+          if (snap.plan.lessons.some((lesson) => ids.has(lesson.id))) absorb(snap.plan);
         })
         .catch(() => undefined);
     };
+    source.addEventListener("gap", (event) => {
+      const body = JSON.parse((event as MessageEvent).data) as GapJobEvent;
+      if (body.lessonId && !ids.has(body.lessonId)) return;
+      absorb(body.plan, body.error, body.lessonId);
+    });
+    source.addEventListener("progress", (event) => {
+      const progressEvent = JSON.parse((event as MessageEvent).data) as ProgressEvent;
+      if (!progressEvent.lessonId || !ids.has(progressEvent.lessonId)) return;
+      setGapWatch((prev) => {
+        const updated = { ...prev };
+        let changed = false;
+        for (const [sourceId, watch] of Object.entries(updated)) {
+          if (watch.lessonId !== progressEvent.lessonId) continue;
+          updated[sourceId] =
+            progressEvent.stage === "error"
+              ? { ...watch, message: null, error: progressEvent.message }
+              : { ...watch, message: progressEvent.message, error: null };
+          changed = true;
+        }
+        return changed ? updated : prev;
+      });
+    });
+    source.addEventListener("done", (event) => {
+      const snap = JSON.parse((event as MessageEvent).data) as PlanSnapshot;
+      if (snap.plan?.lessons.some((lesson) => ids.has(lesson.id))) absorb(snap.plan);
+    });
+    source.onerror = () => {
+      if (!closed) pull();
+    };
+    const poll = window.setInterval(pull, 3000);
     return () => {
       closed = true;
       source.close();
+      window.clearInterval(poll);
     };
-  }, [gapWatchId, plan.id]);
+  }, [watchKey, plan.id]);
+
+  const practice = useMemo(() => {
+    const bySource = new Map<string, GapConcept[]>();
+    const add = (sourceLessonId: string, concepts: GapConcept[]) => {
+      const list = bySource.get(sourceLessonId) ?? [];
+      for (const concept of concepts) {
+        if (!list.some((item) => item.conceptId === concept.conceptId)) list.push(concept);
+      }
+      if (list.length) bySource.set(sourceLessonId, list);
+    };
+    for (const lesson of plan.lessons) {
+      if (lessonKind(lesson) === "gap") continue;
+      const saved = lessonQuizFor(progress, scope, lesson.id);
+      if (!saved || !isQuizSettled(saved)) continue;
+      add(lesson.id, missedFromQuiz(lesson.quiz, saved.answers));
+    }
+    const finalSaved = hasFinal ? finalQuizFor(progress, scope) : null;
+    const finalMisses =
+      finalSaved && isQuizSettled(finalSaved) ? missedFromQuiz(plan.finalAssessment, finalSaved.answers) : [];
+    for (const request of groupMissesBySource(plan.lessons, finalMisses)) add(request.sourceLessonId, request.concepts);
+    const cards = practiceCards(
+      plan.lessons,
+      [...bySource].map(([sourceLessonId, concepts]) => ({ sourceLessonId, concepts })),
+    );
+    return { cards, finalSources: new Set(groupMissesBySource(plan.lessons, finalMisses).map((request) => request.sourceLessonId)) };
+  }, [hasFinal, plan.finalAssessment, plan.lessons, progress, scope]);
+
+  const openPractice = useCallback((lessonId: string) => goLesson(lessonId, "top"), [goLesson]);
+  const generatePractice = useCallback(
+    (sourceLessonId: string, concepts: GapConcept[]) => {
+      void queuePractice(sourceLessonId, concepts, true);
+    },
+    [queuePractice],
+  );
 
   const sidebar = (
     <aside className="hidden w-52 shrink-0 lg:block" aria-label="Course progress and outline">
@@ -1543,6 +1672,13 @@ export function LearnPlanView({
               onCommit={(updater) => commitProgress(updater, true)}
               onAward={(reason, amount) => onAwardRef.current?.(reason, amount)}
             />
+
+            {practice.cards.length ? (
+              <section className="mt-8" aria-label="Practice lessons">
+                <h2 className="text-base font-semibold text-[var(--ink)]">Practice</h2>
+                <PracticeList cards={practice.cards} watch={gapWatch} onGenerate={generatePractice} onOpen={openPractice} />
+              </section>
+            ) : null}
 
             {plan.objectives.length ? (
               <section className="mt-10">
@@ -1699,20 +1835,12 @@ export function LearnPlanView({
               gradeShort={gradeShort}
               onSave={(quiz) => saveQuiz(activeLesson.id, activeLesson.quiz, quiz, "lesson")}
             />
-            {gapSourceId === activeLesson.id ? (
-              <GapPracticeNotice
-                message={gapMessage}
-                error={gapError}
-                readyTitle={
-                  gapLessonId ? plan.lessons.find((lesson) => lesson.id === gapLessonId)?.title : undefined
-                }
-                onOpen={
-                  gapLessonId && plan.lessons.some((lesson) => lesson.id === gapLessonId)
-                    ? () => goLesson(gapLessonId, "top")
-                    : undefined
-                }
-              />
-            ) : null}
+            <PracticeList
+              cards={practice.cards.filter((card) => card.sourceLessonId === activeLesson.id)}
+              watch={gapWatch}
+              onGenerate={generatePractice}
+              onOpen={openPractice}
+            />
             <LessonPager
               prev={prevLesson}
               onPrev={() => prevLesson && goLesson(prevLesson.id, "top")}
@@ -1735,6 +1863,12 @@ export function LearnPlanView({
               saved={normalizeQuiz(finalQuizFor(progress, scope), plan.finalAssessment.length)}
               gradeShort={gradeShort}
               onSave={(quiz) => saveQuiz("final", plan.finalAssessment, quiz, "final")}
+            />
+            <PracticeList
+              cards={practice.cards.filter((card) => practice.finalSources.has(card.sourceLessonId))}
+              watch={gapWatch}
+              onGenerate={generatePractice}
+              onOpen={openPractice}
             />
             <LessonPager
               prev={plan.lessons[plan.lessons.length - 1]}

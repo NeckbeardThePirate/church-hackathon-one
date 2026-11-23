@@ -2,11 +2,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  attachFinalConcepts,
+  gapTicketIsStale,
+  GAP_REQUEUE_AFTER_MS,
+  groupMissesBySource,
   insertGapLesson,
   lessonsForFinalMix,
   MAX_GAP_LESSONS_PER_CORE,
   missedGapConcepts,
   parseGapRequest,
+  practiceCards,
+  preserveGapLessons,
   selectGapConcepts,
   type GapLessonRef,
 } from "./gaps.ts";
@@ -101,6 +107,83 @@ test("missed concepts keep the first label and drop untagged or correct answers"
     ]),
     [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
   );
+});
+
+test("final misses map onto the core lesson that taught the concept", () => {
+  const lessons = [
+    {
+      id: "l1",
+      kind: "core",
+      title: "Line by line",
+      quiz: [{ conceptId: "l1-line", conceptLabel: "Line-by-line comparison" }],
+    },
+    {
+      id: "l2",
+      kind: "core",
+      quiz: [{ conceptId: "l2-kindness", conceptLabel: "Kindness" }],
+    },
+    { id: "gap-l1-1", kind: "gap", sourceLessonId: "l1", sourceConceptIds: ["l1-old"] },
+  ];
+  const requests = groupMissesBySource(lessons, [
+    { conceptId: "l1-line", conceptLabel: "Line-by-line comparison" },
+    { conceptId: "final-kindness", conceptLabel: "Kindness" },
+    { conceptId: "l1-line", conceptLabel: "Line-by-line comparison" },
+  ]);
+  assert.deepEqual(requests, [
+    { sourceLessonId: "l1", concepts: [{ conceptId: "l1-line", conceptLabel: "Line-by-line comparison" }] },
+    { sourceLessonId: "l2", concepts: [{ conceptId: "final-kindness", conceptLabel: "Kindness" }] },
+  ]);
+  const cards = practiceCards(lessons, requests);
+  assert.equal(cards.some((card) => card.gapLessonId === "gap-l1-1"), true);
+  assert.deepEqual(
+    cards.filter((card) => !card.gapLessonId).map((card) => card.sourceLessonId),
+    ["l1", "l2"],
+  );
+  const covered = practiceCards(
+    [...lessons, { id: "gap-l1-2", kind: "gap", sourceLessonId: "l1", sourceConceptIds: ["l1-line"] }],
+    requests,
+  );
+  assert.equal(covered.some((card) => !card.gapLessonId && card.concepts.some((concept) => concept.conceptId === "l1-line")), false);
+});
+
+test("a newer plan save keeps a gap lesson it left out", () => {
+  const stored = [
+    { id: "l1", kind: "core" },
+    { id: "gap-l1-1", kind: "gap", sourceLessonId: "l1", sourceConceptIds: ["l1-line"] },
+    { id: "l2", kind: "core" },
+  ];
+  const incoming = [
+    { id: "l1", kind: "core" },
+    { id: "l2", kind: "core" },
+  ];
+  assert.deepEqual(preserveGapLessons(incoming, stored).map((lesson) => lesson.id), ["l1", "gap-l1-1", "l2"]);
+});
+
+test("a reserved practice job with no timestamp can be queued again", () => {
+  assert.equal(gapTicketIsStale(undefined, 10_000), true);
+  assert.equal(gapTicketIsStale(10_000, 10_000 + GAP_REQUEUE_AFTER_MS - 1), false);
+  assert.equal(gapTicketIsStale(10_000, 10_000 + GAP_REQUEUE_AFTER_MS), true);
+});
+
+test("final items reuse a lesson concept id or label", () => {
+  const lessons = [
+    {
+      id: "l1",
+      quiz: [{ conceptId: "l1-line", conceptLabel: "Line-by-line comparison" }],
+    },
+  ];
+  const tagged = attachFinalConcepts(
+    [
+      { question: "Compare", conceptId: "l1-line", conceptLabel: "Wrong label" },
+      { question: "Again", conceptLabel: "Line-by-line comparison" },
+      { question: "Untagged" },
+    ],
+    lessons,
+  );
+  assert.equal(tagged[0]?.conceptId, "l1-line");
+  assert.equal(tagged[0]?.conceptLabel, "Line-by-line comparison");
+  assert.equal(tagged[1]?.conceptId, "l1-line");
+  assert.equal(tagged[2]?.conceptId, undefined);
 });
 
 test("gap requests reject a missing lesson id and accept one concept", () => {

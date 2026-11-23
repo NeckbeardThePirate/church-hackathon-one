@@ -7,6 +7,7 @@ import {
   mergeLearnProgress,
   normalizeLearnProgress,
   retryMissedQuiz,
+  writeLearnProgress,
   type ConceptMastery,
 } from "./plan-progress.ts";
 import { adoptProgressForScope, lessonQuizFor } from "./progress-scope.ts";
@@ -165,20 +166,20 @@ test("stored learn plans default missing lesson kind to core and still load quiz
   assert.deepEqual(next.learnProgress?.lessonQuiz, savedFields.lessonQuiz);
 });
 
-test("try again keeps correct answers and a finished lesson stays complete", () => {
+test("try again clears every answer, including one that was correct, and the lesson stays complete", () => {
   const quiz = {
     answers: [
       { mcChoice: "A", shortText: "", shortSubmitted: false, correct: true as boolean | null },
       { mcChoice: "B", shortText: "", shortSubmitted: false, correct: false as boolean | null },
       { mcChoice: null, shortText: "hesed", shortSubmitted: true, correct: false as boolean | null, score: 0.2 },
+      { mcChoice: "D", shortText: "", shortSubmitted: false, correct: true as boolean | null },
     ],
   };
   const retried = retryMissedQuiz(quiz);
-  assert.equal(retried.answers[0]?.mcChoice, "A");
-  assert.equal(retried.answers[0]?.correct, true);
-  assert.equal(retried.answers[1]?.correct, null);
-  assert.equal(retried.answers[2]?.shortText, "");
-  assert.equal(retried.bestCorrect, 1);
+  assert.equal(retried.answers.every((answer) => answer.correct === null && answer.mcChoice === null && answer.shortText === ""), true);
+  assert.equal(retried.answers[2]?.shortSubmitted, false);
+  assert.equal(retried.answers[2]?.score, undefined);
+  assert.equal(retried.bestCorrect, 2);
   assert.equal(retried.settled, true);
 
   const scope = { projectId: "path-ruth", planId: "plan-ruth" };
@@ -192,4 +193,57 @@ test("try again keeps correct answers and a finished lesson stays complete", () 
   );
   assert.equal(isLessonStepComplete(scope, "l1", true, progress), true);
   assert.equal(isLessonStepComplete({ projectId: "path-jonah", planId: "plan-jonah" }, "l1", true, progress), false);
+});
+
+test("a settled retry is not replaced by the correct answer stored earlier", () => {
+  const scope = { projectId: "path-retry", planId: "plan-retry" };
+  const remote = adoptProgressForScope(
+    normalizeLearnProgress({
+      v: 3,
+      lessonQuiz: {
+        l1: {
+          answers: [
+            { mcChoice: "A", shortText: "", shortSubmitted: false, correct: true },
+            { mcChoice: "B", shortText: "", shortSubmitted: false, correct: false },
+            { mcChoice: "C", shortText: "", shortSubmitted: false, correct: false },
+            { mcChoice: "D", shortText: "", shortSubmitted: false, correct: true },
+          ],
+          bestCorrect: 2,
+          settled: true,
+        },
+      },
+    }),
+    scope,
+  );
+  const saved = lessonQuizFor(remote, scope, "l1");
+  assert.ok(saved);
+  const local = {
+    ...remote,
+    lessonQuiz: { ...remote.lessonQuiz, [Object.keys(remote.lessonQuiz)[0]!]: retryMissedQuiz(saved) },
+  };
+  const store = new Map<string, string>();
+  const previous = globalThis.window;
+  globalThis.window = {
+    localStorage: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+    },
+  } as unknown as Window & typeof globalThis;
+  try {
+    writeLearnProgress(scope.projectId, local);
+    const merged = mergeLearnProgress(remote, scope);
+    const quiz = lessonQuizFor(merged, scope, "l1");
+    assert.equal(quiz?.answers[0]?.correct, null);
+    assert.equal(quiz?.answers[3]?.correct, null);
+    assert.equal(quiz?.answers[3]?.mcChoice, null);
+    assert.equal(quiz?.bestCorrect, 2);
+    assert.equal(quiz?.settled, true);
+  } finally {
+    globalThis.window = previous;
+  }
 });

@@ -11,7 +11,7 @@ import {
 import type { ConceptMastery } from "../learn/plan-progress.ts";
 import { claimLegacyProgress } from "../learn/plan-progress.ts";
 import { scopeFromProject } from "../learn/progress-scope.ts";
-import { insertGapLesson } from "../learn/gaps.ts";
+import { insertGapLesson, preserveGapLessons } from "../learn/gaps.ts";
 import type { LearnLesson } from "../learn/types.ts";
 import { normalizeStoredProject, type Project, type StoredProjectKind } from "../projects.ts";
 import type { ChatGptIdentity } from "./chatgpt-auth.ts";
@@ -30,6 +30,13 @@ type ProjectRow = {
   id: string;
   payload: string;
 };
+
+function withStoredGapLessons(project: Project, stored: Project | null): Project {
+  if (!project.learnPlan || !stored?.learnPlan || stored.learnPlan.id !== project.learnPlan.id) return project;
+  const lessons = preserveGapLessons(project.learnPlan.lessons, stored.learnPlan.lessons);
+  if (lessons.length === project.learnPlan.lessons.length) return project;
+  return { ...project, learnPlan: { ...project.learnPlan, lessons } };
+}
 
 function isProject(value: unknown): value is Project {
   if (!value || typeof value !== "object") return false;
@@ -190,9 +197,10 @@ export class UserWorkspaceDO extends DurableObject {
     if (!isProject(input)) {
       throw new Error("Invalid project.");
     }
-    const project = normalizeStoredProject(input);
+    const stored = this.getProject(typeof (input as { id?: unknown }).id === "string" ? (input as { id: string }).id : "");
+    const project = withStoredGapLessons(normalizeStoredProject(input), stored);
     const existing = this.ctx.storage.sql
-      .exec<{ updated_at: number }>("SELECT updated_at FROM projects WHERE id = ?", input.id)
+      .exec<{ updated_at: number }>("SELECT updated_at FROM projects WHERE id = ?", project.id)
       .toArray()[0];
     // A slower request must not overwrite a newer edit of the same note.
     if (existing && existing.updated_at > project.updatedAt) {
