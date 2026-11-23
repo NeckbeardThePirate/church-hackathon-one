@@ -5,6 +5,7 @@
  */
 import { learnerContext, passagesForLesson } from "@/app/lib/learn/intake";
 import { findBibleReferences } from "@/app/lib/bible/parse-reference";
+import { gapConceptLine, lessonsForFinalMix, type GapConcept } from "@/app/lib/learn/gaps";
 import {
   LESSON_BANDS,
   type ArticleResource,
@@ -449,7 +450,226 @@ const QUIZ_RULES = `Quiz rules: multiple choice ("mc") items have 4 choices and 
 Short-answer ("short") items have a one-sentence answer. Every item must be answerable from the lesson text alone.
 objectiveIndex is the 0-based index of the lesson objective the item tests.`;
 
+const GAP_FAIL = "The practice lesson could not be built. The rest of the path is unchanged.";
+const GAP_BUDGET = "The practice lesson stopped because the plan reached its model budget. The rest of the path is unchanged.";
+
+async function loadGapConcepts(ctx: Ctx, lesson: LearnLesson): Promise<GapConcept[]> {
+  const scratch = (await ctx.stub.getScratch(`gap-concepts:${lesson.id}`)) as unknown;
+  const fromScratch = Array.isArray(scratch)
+    ? scratch.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as { conceptId?: unknown; conceptLabel?: unknown };
+        if (typeof row.conceptId !== "string" || typeof row.conceptLabel !== "string") return [];
+        return [{ conceptId: row.conceptId, conceptLabel: row.conceptLabel }];
+      })
+    : [];
+  if (fromScratch.length) return fromScratch;
+  return (lesson.sourceConceptIds ?? []).map((conceptId, index) => ({
+    conceptId,
+    conceptLabel: lesson.objectives[index]?.replace(/^Review\s+/, "") || conceptId,
+  }));
+}
+
+/**
+ * Gap jobs enter through runTeach and stop after check.
+ * Same spend(), scripture lookup, and library citation as a core lesson. No research, critic, or re-assemble.
+ */
+async function runGapTeach(ctx: Ctx): Promise<void> {
+  const lessonId = requireLessonId(ctx);
+  const lesson = await ctx.stub.getLesson(lessonId);
+  if (!lesson || lesson.kind !== "gap") throw new Error(`Gap lesson ${lessonId} not found.`);
+  const info = await ctx.stub.info();
+  const scope = await requireScope(ctx);
+  const concepts = await loadGapConcepts(ctx, lesson);
+  if (!concepts.length) throw new Error("Gap lesson is missing concepts.");
+  const band = LESSON_BANDS.simple;
+  const parent = (await ctx.stub.getLessons()).find((item) => item.id === lesson.sourceLessonId);
+  const allowed = new Map(concepts.map((concept) => [concept.conceptId, concept.conceptLabel]));
+
+  const result = await llm(ctx, "worker", {
+    maxTokens: 5000,
+    system: `You write a short practice lesson for an adult learner who missed specific ideas.
+One sitting. Teach only the missed concepts named in the user message. Do not add new topics.
+Return JSON:
+{"teaching":[{"type":"heading2"|"paragraph"|"bullet"|"numbered"|"quote"|"divider","text":""}],
+ "quiz":[{"kind":"mc"|"short","question":"","choices":["",""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"","conceptLabel":"","alternate":{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"","conceptLabel":""}}],
+ "scriptureRefs":[{"reference":"Book C:V-V","note":"one sentence on why it connects"}]}
+teaching: 3-6 short blocks. End with a heading2 "Discuss" and 2 bullet questions.
+quiz: ${band.quiz[0]}-${band.quiz[1]} items, and every item is about those missed concepts only.
+${QUIZ_RULES}
+Each quiz item must copy conceptId and conceptLabel from the missed list. Do not invent concept ids.
+For each conceptId you use, put "alternate" on exactly one item for that concept. The alternate is a second question with the same conceptId, conceptLabel, and objectiveIndex, and it must not contain its own alternate.
+objectiveIndex is the 0-based index of that concept in the missed list.
+scriptureRefs: ${scope.isFaithRelevant ? "0-2 references, or an empty array" : "always an empty array"}.
+Never quote Bible verse text, confession text, or church father quotations. scriptureRefs are references only.
+${perspectiveRules(scope.isFaithRelevant, info.options.perspective)}`,
+    user: `Course: ${scope.title} (${scope.complexity})
+Practice after lesson ${parent?.order ?? lesson.order}: ${parent?.title ?? lesson.title}
+One sitting, about ${lesson.estimatedMinutes} minutes.
+Missed concepts (use these ids and labels only):
+${concepts.map((concept) => gapConceptLine(concept)).join("\n")}
+${parent ? `What the learner already read:\n"""\n${clip(lessonText(parent), 4000)}\n"""` : ""}`,
+    validate: (value) => {
+      const record = obj(value);
+      const teaching: TeachBlock[] = list(record.teaching, "teaching", { min: 3 }).flatMap((item, i) => {
+        const block = obj(item, `teaching[${i}]`);
+        const type = TEACH_TYPES.includes(block.type as TeachBlock["type"]) ? (block.type as TeachBlock["type"]) : "paragraph";
+        const text = typeof block.text === "string" ? block.text.trim() : "";
+        if (type !== "divider" && !text) return [];
+        return [{ type, text }];
+      });
+      if (teaching.length < 3) throw new Error("teaching needs at least 3 blocks");
+      const quiz = parseQuizItems(record.quiz, "quiz", concepts.length, { strictConcepts: true })
+        .slice(0, band.quiz[1])
+        .map((item) => {
+          const label = item.conceptId ? allowed.get(item.conceptId) : undefined;
+          if (!item.conceptId || !label) {
+            throw new Error(`quiz conceptId must be one of: ${[...allowed.keys()].join(", ")}`);
+          }
+          return {
+            ...item,
+            conceptLabel: label,
+            ...(item.alternate ? { alternate: { ...item.alternate, conceptId: item.conceptId, conceptLabel: label } } : {}),
+          };
+        });
+      if (quiz.length < band.quiz[0]) throw new Error(`quiz needs at least ${band.quiz[0]} valid items`);
+      requireConceptTags(quiz);
+      const refs = Array.isArray(record.scriptureRefs)
+        ? record.scriptureRefs.flatMap((ref) => {
+            if (!ref || typeof ref !== "object") return [];
+            const row = ref as Record<string, unknown>;
+            return typeof row.reference === "string"
+              ? [{ reference: row.reference, note: typeof row.note === "string" ? row.note : "" }]
+              : [];
+          })
+        : [];
+      return { teaching, quiz, refs };
+    },
+  });
+
+  const verified = scope.isFaithRelevant
+    ? await verifyScripture(ctx.env, result.refs.slice(0, 2))
+    : { readings: [] as ScriptureReading[], dropped: [] as string[] };
+  const library = scope.isFaithRelevant
+    ? await citeLibrary(
+        ctx.env,
+        `${lesson.title}. ${concepts.map((concept) => concept.conceptLabel).join(". ")}`,
+        verified.readings.map((reading) => reading.reference),
+        info.options.perspective,
+      )
+    : [];
+  const warnings = [
+    ...lesson.warnings,
+    ...verified.dropped.map((ref) => `Scripture reference dropped (did not resolve in BSB): ${ref}`),
+  ];
+  await ctx.stub.putLesson({
+    ...lesson,
+    teaching: result.teaching,
+    quiz: result.quiz,
+    scripture: verified.readings,
+    library,
+    warnings,
+    kind: "gap",
+    sourceLessonId: lesson.sourceLessonId,
+    sourceConceptIds: concepts.map((concept) => concept.conceptId),
+  });
+  await ctx.stub.event(
+    "teach",
+    `Practice: ${result.teaching.length} blocks, ${result.quiz.length} quiz items${
+      verified.dropped.length ? ` (${verified.dropped.length} scripture ref dropped)` : ""
+    }`,
+    lessonId,
+  );
+  await enqueue(ctx.env, { planId: ctx.msg.planId, stage: "check", lessonId, round: ctx.msg.round, job: "gap" });
+}
+
+async function mergeGapIntoWorkspace(ctx: Ctx, lesson: LearnLesson): Promise<void> {
+  if (!ctx.env.USER_WORKSPACE) return;
+  try {
+    const info = await ctx.stub.info();
+    const workspace = ctx.env.USER_WORKSPACE.getByName(info.userId) as unknown as {
+      mergeGapLesson(planId: string, lesson: LearnLesson, now: number): Promise<{ ok: boolean }>;
+    };
+    await workspace.mergeGapLesson(ctx.msg.planId, lesson, Date.now());
+  } catch (error) {
+    console.warn(
+      "[learn] gap lesson was saved on the plan but not the workspace:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+async function runGapCheck(ctx: Ctx): Promise<void> {
+  const lessonId = requireLessonId(ctx);
+  const lesson = await ctx.stub.getLesson(lessonId);
+  if (!lesson || lesson.kind !== "gap") throw new Error(`Gap lesson ${lessonId} not found.`);
+  const band = LESSON_BANDS.simple;
+  let quiz = lesson.quiz;
+  const warnings = [...lesson.warnings];
+  let droppedCount = 0;
+
+  try {
+    const failed = await checkQuiz(ctx, lesson, quiz);
+    if (failed.size) {
+      const bad = [...failed].map((index) => quiz[index]!);
+      const replacements = await llm(ctx, "worker", {
+        system: `Rewrite quiz items so each is clearly answerable from the lesson text alone.
+Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0}]}
+Return exactly ${bad.length} items. ${QUIZ_RULES}
+Do not quote Bible verse text, confession text, or church father quotations.`,
+        user: `Lesson:\n"""\n${clip(lessonText(lesson), 9000)}\n"""\n\nItems that failed:\n${bad
+          .map((item) => `- ${item.question} (key: ${item.answer})`)
+          .join("\n")}`,
+        validate: (value) => parseQuizItems(obj(value).quiz, "quiz", lesson.objectives.length),
+      });
+      const repaired = replacements.map((item, index) => carryConceptTags(bad[index], item));
+      const stillFailed = repaired.length ? await checkQuiz(ctx, lesson, repaired) : new Set<number>();
+      const kept = quiz.filter((_, index) => !failed.has(index));
+      const fixed = repaired.filter((_, index) => !stillFailed.has(index));
+      droppedCount = quiz.length - kept.length - fixed.length;
+      quiz = [...kept, ...fixed];
+    }
+  } catch (error) {
+    if (!(error instanceof BudgetExhausted)) throw error;
+    await ctx.stub.abandonGap(lessonId, GAP_BUDGET);
+    return;
+  }
+
+  if (droppedCount > 0) warnings.push(`${droppedCount} quiz item(s) dropped: not answerable from the lesson.`);
+  if (!quiz.length || !lesson.teaching.length) {
+    await ctx.stub.abandonGap(lessonId, GAP_FAIL);
+    return;
+  }
+  const status = quiz.length >= band.quiz[0] ? "ok" : "degraded";
+  if (status === "degraded") warnings.push(`Practice quiz has ${quiz.length} items; expected at least ${band.quiz[0]}.`);
+  const ready: LearnLesson = {
+    ...lesson,
+    quiz,
+    warnings,
+    status,
+    kind: "gap",
+    sourceLessonId: lesson.sourceLessonId,
+    sourceConceptIds: lesson.sourceConceptIds,
+  };
+  const plan = await ctx.stub.commitGapLesson(ready);
+  if (!plan) {
+    await ctx.stub.abandonGap(lessonId, GAP_FAIL);
+    return;
+  }
+  await mergeGapIntoWorkspace(ctx, ready);
+  const covered = ready.sourceConceptIds?.length ?? 0;
+  await ctx.stub.event(
+    "check",
+    `Practice lesson: ${quiz.length} quiz items on ${covered} missed idea${covered === 1 ? "" : "s"}`,
+    lessonId,
+  );
+}
+
 export async function runTeach(ctx: Ctx): Promise<void> {
+  if (ctx.msg.job === "gap") {
+    await runGapTeach(ctx);
+    return;
+  }
   const lessonId = requireLessonId(ctx);
   const info = await ctx.stub.info();
   const scope = await requireScope(ctx);
@@ -648,6 +868,10 @@ Return JSON: {"verdicts":[{"index":0,"correct":true}]}`,
 }
 
 export async function runCheck(ctx: Ctx): Promise<void> {
+  if (ctx.msg.job === "gap") {
+    await runGapCheck(ctx);
+    return;
+  }
   const lessonId = requireLessonId(ctx);
   const scope = await requireScope(ctx);
   const band = LESSON_BANDS[scope.complexity];
@@ -799,7 +1023,7 @@ export async function runAssemble(ctx: Ctx): Promise<void> {
   });
 
   let finalAssessment: QuizItem[] = [];
-  const ready = lessons.filter((l) => l.teaching.length);
+  const ready = lessonsForFinalMix(lessons);
   if (band.finalItems > 0 && ready.length && !info.deadlineHit) {
     try {
       finalAssessment = await llm(ctx, "worker", {

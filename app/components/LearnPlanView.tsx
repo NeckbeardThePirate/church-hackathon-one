@@ -33,6 +33,7 @@ import {
   type LearnAttempt,
   type LearnAttemptAnswer,
 } from "../lib/learn/attempts";
+import { missedGapConcepts, selectGapConcepts, type GapConcept, type GapReserveResult } from "../lib/learn/gaps";
 import {
   countPlanProgress,
   defaultLocation,
@@ -72,16 +73,20 @@ import {
   withReadState,
   type ProgressScope,
 } from "../lib/learn/progress-scope";
-import type {
-  ArticleResource,
-  BookResource,
-  LearnLesson,
-  LearnPlan,
-  QuizItem,
-  LibraryCitation,
-  ScriptureReading,
-  TeachBlock,
-  VideoResource,
+import {
+  lessonKind,
+  type ArticleResource,
+  type BookResource,
+  type GapJobEvent,
+  type LearnLesson,
+  type LearnPlan,
+  type PlanSnapshot,
+  type ProgressEvent,
+  type QuizItem,
+  type LibraryCitation,
+  type ScriptureReading,
+  type TeachBlock,
+  type VideoResource,
 } from "../lib/learn/types";
 import { ArticleReadWindow } from "./ArticleReadWindow";
 import { LearnAgentFloat } from "./LearnAgentFloat";
@@ -98,6 +103,7 @@ type Props = {
   onSaveProgress?: (projectId: string, progress: LearnPlanProgress) => void;
   onProgress?: (progress: LearnPlanProgress) => void;
   onAward?: (reason: string, amount: number) => void;
+  onPlan?: (plan: LearnPlan) => void;
   stats?: { xp: number; streak: number } | null;
 };
 
@@ -458,6 +464,43 @@ function QuizQuestion({
         />
       ) : null}
     </li>
+  );
+}
+
+function GapPracticeNotice({
+  message,
+  error,
+  readyTitle,
+  onOpen,
+}: {
+  message: string | null;
+  error: string | null;
+  readyTitle?: string;
+  onOpen?: () => void;
+}) {
+  if (!message && !error && !onOpen) return null;
+  return (
+    <div className="mt-4 flex flex-col gap-2">
+      {message ? (
+        <p role="status" className="text-sm text-[var(--ink-muted)]">
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-sm text-[#c0533f]">
+          {error}
+        </p>
+      ) : null}
+      {onOpen ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="w-fit rounded-md border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-3 py-1.5 text-sm font-medium text-[var(--ink)]"
+        >
+          Practice lesson ready{readyTitle ? `: ${readyTitle}` : ""}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -872,6 +915,36 @@ function quizStillMatches(quiz: PersistedQuiz | null | undefined, answers: Learn
   });
 }
 
+/** One automatic retry. A non-2xx body still returns so the caller can show it inline. */
+async function postGapLesson(planId: string, sourceLessonId: string, concepts: GapConcept[]): Promise<GapReserveResult> {
+  let lastError = "Could not start the practice lesson. The rest of the path is unchanged.";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(`/api/learn/plans/${planId}/gaps`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceLessonId, concepts }),
+      });
+      const body = (await response.json().catch(() => ({}))) as Partial<GapReserveResult> & { error?: string };
+      if (response.ok) {
+        return {
+          queued: body.queued === true,
+          ...(typeof body.lessonId === "string" ? { lessonId: body.lessonId } : {}),
+          conceptIds: Array.isArray(body.conceptIds) ? body.conceptIds : [],
+          skipped: Array.isArray(body.skipped) ? body.skipped : [],
+          ...(typeof body.error === "string" ? { error: body.error } : {}),
+        };
+      }
+      if (typeof body.error === "string" && body.error) lastError = body.error;
+      if (response.status < 500) break;
+    } catch {
+      /* Network failure. Retry once. */
+    }
+  }
+  return { queued: false, conceptIds: [], skipped: [], error: lastError };
+}
+
 /** One automatic retry. Local progress is saved before this runs and is not written again on failure. */
 async function postLearnAttempt(
   planId: string,
@@ -956,6 +1029,7 @@ export function LearnPlanView({
   onSaveProgress,
   onProgress,
   onAward,
+  onPlan,
   stats,
 }: Props) {
   const title = displayTitle?.trim() || plan.title.trim() || plan.topic;
@@ -983,6 +1057,14 @@ export function LearnPlanView({
   onProgressRef.current = onProgress;
   const onAwardRef = useRef(onAward);
   onAwardRef.current = onAward;
+  const onPlanRef = useRef(onPlan);
+  onPlanRef.current = onPlan;
+  const gapPostedRef = useRef<Set<string>>(new Set());
+  const [gapSourceId, setGapSourceId] = useState<string | null>(null);
+  const [gapLessonId, setGapLessonId] = useState<string | null>(null);
+  const [gapWatchId, setGapWatchId] = useState<string | null>(null);
+  const [gapMessage, setGapMessage] = useState<string | null>(null);
+  const [gapError, setGapError] = useState<string | null>(null);
   const urlAppliedRef = useRef(false);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
@@ -1138,6 +1220,44 @@ export function LearnPlanView({
 
   const gradeShort = useCallback((item: QuizItem, given: string) => gradeFreeText(plan.id, item, given), [plan.id]);
 
+  const requestPractice = useCallback(
+    async (lessonKey: string, attempt: LearnAttempt) => {
+      const source = plan.lessons.find((lesson) => lesson.id === lessonKey);
+      if (!source || lessonKind(source) === "gap") return;
+      const missed = missedGapConcepts(attempt.answers);
+      if (!missed.length) return;
+      const selection = selectGapConcepts(plan.lessons, lessonKey, missed);
+      if (!selection.concepts.length) {
+        if (selection.error) {
+          setGapSourceId(lessonKey);
+          setGapError(selection.error);
+          setGapMessage(null);
+        }
+        return;
+      }
+      const key = `${lessonKey}:${selection.concepts.map((concept) => concept.conceptId).sort().join(",")}`;
+      if (gapPostedRef.current.has(key)) return;
+      gapPostedRef.current.add(key);
+      setGapSourceId(lessonKey);
+      setGapError(null);
+      setGapMessage("Building a short practice lesson for what you missed…");
+      const reserved = await postGapLesson(plan.id, lessonKey, selection.concepts);
+      if (!reserved.queued || !reserved.lessonId) {
+        if (reserved.error) {
+          gapPostedRef.current.delete(key);
+          setGapError(reserved.error);
+          setGapMessage(null);
+        } else {
+          setGapMessage(null);
+        }
+        return;
+      }
+      setGapLessonId(reserved.lessonId);
+      setGapWatchId(reserved.lessonId);
+    },
+    [plan.id, plan.lessons],
+  );
+
   const saveQuiz = useCallback(
     (lessonKey: string, items: QuizItem[], quiz: PersistedQuiz, target: "lesson" | "final") => {
       const stored = rememberQuiz(quiz);
@@ -1165,18 +1285,83 @@ export function LearnPlanView({
       const changed = stored.answers.some((answer, index) => answer.correct !== (previous?.answers[index]?.correct ?? null));
       if (!changed) return;
       void postLearnAttempt(plan.id, attempt).then((body) => {
-        if (!body?.conceptMastery) return;
-        commitProgress((prev) => {
-          const current = target === "final" ? finalQuizFor(prev, scope) : lessonQuizFor(prev, scope, lessonKey);
-          const merged = quizStillMatches(current, answers)
-            ? mirrorAttemptOntoProgress(prev, attempt, body.conceptMastery, scope)
-            : applyPlanMastery(prev, body.conceptMastery, scope);
-          return paintAnswerMastery(merged, scope, lessonKey, items);
-        }, true);
+        if (body?.conceptMastery) {
+          commitProgress((prev) => {
+            const current = target === "final" ? finalQuizFor(prev, scope) : lessonQuizFor(prev, scope, lessonKey);
+            const merged = quizStillMatches(current, answers)
+              ? mirrorAttemptOntoProgress(prev, attempt, body.conceptMastery, scope)
+              : applyPlanMastery(prev, body.conceptMastery, scope);
+            return paintAnswerMastery(merged, scope, lessonKey, items);
+          }, true);
+        }
       });
+      if (target === "lesson") void requestPractice(lessonKey, attempt);
     },
-    [commitProgress, plan.id, scope],
+    [commitProgress, plan.id, requestPractice, scope],
   );
+
+  useEffect(() => {
+    if (gapLessonId && plan.lessons.some((lesson) => lesson.id === gapLessonId)) {
+      setGapMessage(null);
+      setGapError(null);
+    }
+  }, [gapLessonId, plan.lessons]);
+
+  useEffect(() => {
+    if (!gapWatchId) return;
+    let closed = false;
+    const source = new EventSource(`/api/learn/plans/${plan.id}/events`);
+    const applyPlan = (next: LearnPlan | undefined) => {
+      if (next) onPlanRef.current?.(next);
+    };
+    const finish = (next: LearnPlan | undefined, error?: string) => {
+      applyPlan(next);
+      const ready = next?.lessons.some((lesson) => lesson.id === gapWatchId) ?? false;
+      if (error && !ready) {
+        setGapError(error);
+        setGapMessage(null);
+      }
+      if (ready || error) {
+        closed = true;
+        source.close();
+        setGapWatchId(null);
+      }
+    };
+    source.addEventListener("gap", (event) => {
+      const body = JSON.parse((event as MessageEvent).data) as GapJobEvent;
+      if (body.lessonId && body.lessonId !== gapWatchId) return;
+      finish(body.plan, body.error);
+    });
+    source.addEventListener("progress", (event) => {
+      const progressEvent = JSON.parse((event as MessageEvent).data) as ProgressEvent;
+      if (progressEvent.lessonId !== gapWatchId) return;
+      if (progressEvent.stage === "error") {
+        setGapError(progressEvent.message);
+        setGapMessage(null);
+        return;
+      }
+      setGapMessage(progressEvent.message);
+    });
+    source.addEventListener("done", (event) => {
+      const snap = JSON.parse((event as MessageEvent).data) as PlanSnapshot;
+      if (snap.plan?.lessons.some((lesson) => lesson.id === gapWatchId)) finish(snap.plan);
+    });
+    source.onerror = () => {
+      if (closed) return;
+      void fetch(`/api/learn/plans/${plan.id}`, { credentials: "same-origin" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: unknown) => {
+          const snap = body as PlanSnapshot | null;
+          if (!snap?.plan || closed) return;
+          if (snap.plan.lessons.some((lesson) => lesson.id === gapWatchId)) finish(snap.plan);
+        })
+        .catch(() => undefined);
+    };
+    return () => {
+      closed = true;
+      source.close();
+    };
+  }, [gapWatchId, plan.id]);
 
   const sidebar = (
     <aside className="hidden w-52 shrink-0 lg:block" aria-label="Course progress and outline">
@@ -1434,6 +1619,20 @@ export function LearnPlanView({
               gradeShort={gradeShort}
               onSave={(quiz) => saveQuiz(activeLesson.id, activeLesson.quiz, quiz, "lesson")}
             />
+            {gapSourceId === activeLesson.id ? (
+              <GapPracticeNotice
+                message={gapMessage}
+                error={gapError}
+                readyTitle={
+                  gapLessonId ? plan.lessons.find((lesson) => lesson.id === gapLessonId)?.title : undefined
+                }
+                onOpen={
+                  gapLessonId && plan.lessons.some((lesson) => lesson.id === gapLessonId)
+                    ? () => goLesson(gapLessonId, "top")
+                    : undefined
+                }
+              />
+            ) : null}
             <LessonPager
               prev={prevLesson}
               onPrev={() => prevLesson && goLesson(prevLesson.id, "top")}

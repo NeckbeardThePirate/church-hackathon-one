@@ -5,18 +5,31 @@
  * - Deadline alarm forces a partial plan if the pipeline overruns.
  */
 import { DurableObject } from "cloudflare:workers";
-import type {
-  LearnLesson,
-  LearnOptions,
-  LearnPlan,
-  LearnStage,
-  LessonOutline,
-  Heartbeat,
-  PlanSnapshot,
-  PlanStatus,
-  ProgressEvent,
-  ScopeResult,
-  SourcePassage,
+import {
+  GAP_SITTING_MINUTES,
+  insertGapLesson,
+  nextGapLessonId,
+  practiceTitle,
+  selectGapConcepts,
+  type GapConcept,
+  type GapLessonRef,
+  type GapRequest,
+  type GapReserveResult,
+} from "@/app/lib/learn/gaps";
+import {
+  lessonKind,
+  type GapJobEvent,
+  type LearnLesson,
+  type LearnOptions,
+  type LearnPlan,
+  type LearnStage,
+  type LessonOutline,
+  type Heartbeat,
+  type PlanSnapshot,
+  type PlanStatus,
+  type ProgressEvent,
+  type ScopeResult,
+  type SourcePassage,
 } from "@/app/lib/learn/types";
 import type { PassageRef } from "@/app/lib/bible/parse-reference";
 import { mergeConceptMastery, type StoredLearnAttempt } from "../../learn/attempts.ts";
@@ -55,6 +68,12 @@ type Meta = {
 };
 
 type InitInput = { planId: string; userId: string; topic: string; notes: string; passages?: PassageRef[]; options: LearnOptions };
+
+type GapTicket = {
+  lessonId: string;
+  sourceLessonId: string;
+  sourceConceptIds: string[];
+};
 
 const encoder = new TextEncoder();
 
@@ -125,12 +144,17 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     };
   }
 
-  /** Idempotency: false if this unit of work already finished (at-least-once delivery). */
+  /**
+   * Idempotency: false if this unit of work already finished (at-least-once delivery).
+   * A finished core plan still accepts gap jobs. Those keys start with "gap:" and do not
+   * move the plan back to running.
+   */
   async begin(key: string): Promise<boolean> {
     const m = await this.meta();
-    if (m.status === "complete" || m.status === "partial" || m.status === "failed") return false;
+    const gap = key.startsWith("gap:");
+    if (!gap && (m.status === "complete" || m.status === "partial" || m.status === "failed")) return false;
     if (await this.ctx.storage.get(`done:${key}`)) return false;
-    if (m.status === "queued") {
+    if (!gap && m.status === "queued") {
       m.status = "running";
       await this.saveMeta(m);
     }
@@ -297,11 +321,154 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       const lesson = await this.ctx.storage.get<LearnLesson>(`lesson:${id}`);
       if (lesson) lessons.push(lesson);
     }
-    return lessons.sort((a, b) => a.order - b.order);
+    return lessons.sort((a, b) => a.order - b.order || gapRank(a) - gapRank(b));
   }
 
   async putLesson(lesson: LearnLesson): Promise<void> {
     await this.ctx.storage.put(`lesson:${lesson.id}`, lesson);
+  }
+
+  private async gapTickets(): Promise<GapTicket[]> {
+    return (await this.ctx.storage.get<GapTicket[]>("gapTickets")) ?? [];
+  }
+
+  private async saveGapTickets(tickets: GapTicket[]): Promise<void> {
+    await this.ctx.storage.put("gapTickets", tickets);
+  }
+
+  /** Merged lessons plus gap jobs that have been reserved but not saved onto the plan yet. */
+  private async lessonsForGapCaps(): Promise<GapLessonRef[]> {
+    const lessons = await this.getLessons();
+    const pending = await this.gapTickets();
+    return [
+      ...lessons,
+      ...pending.map((ticket) => ({
+        id: ticket.lessonId,
+        kind: "gap" as const,
+        sourceLessonId: ticket.sourceLessonId,
+        sourceConceptIds: ticket.sourceConceptIds,
+      })),
+    ];
+  }
+
+  /**
+   * Reserve one gap lesson for the concepts that are still uncovered.
+   * Does not change plan status. The lesson stays off the stored plan until check finishes.
+   */
+  async reserveGap(request: GapRequest): Promise<GapReserveResult> {
+    const m = await this.meta();
+    if (m.status === "queued" || m.status === "running") {
+      return { queued: false, conceptIds: [], skipped: [], error: "The path is still being built." };
+    }
+    if (m.status === "failed") {
+      return {
+        queued: false,
+        conceptIds: [],
+        skipped: [],
+        error: "This path did not finish, so a practice lesson cannot be added.",
+      };
+    }
+    const known = await this.lessonsForGapCaps();
+    const selected = selectGapConcepts(known, request.sourceLessonId, request.concepts);
+    if (selected.error) {
+      return { queued: false, conceptIds: [], skipped: selected.skipped, error: selected.error };
+    }
+    if (!selected.concepts.length) {
+      return { queued: false, conceptIds: [], skipped: selected.skipped };
+    }
+
+    const parent = (await this.getLessons()).find((lesson) => lesson.id === request.sourceLessonId);
+    if (!parent || lessonKind(parent) === "gap") {
+      return { queued: false, conceptIds: [], skipped: selected.skipped, error: "Unknown lesson." };
+    }
+    const used = [...m.lessonIds, ...(await this.gapTickets()).map((ticket) => ticket.lessonId)];
+    const lessonId = nextGapLessonId(parent.id, used);
+    const lesson: LearnLesson = {
+      id: lessonId,
+      order: parent.order,
+      title: practiceTitle(selected.concepts),
+      objectives: selected.concepts.map((concept) => `Review ${concept.conceptLabel}`),
+      prerequisiteLessonIds: [parent.id],
+      estimatedMinutes: GAP_SITTING_MINUTES,
+      searchHints: [],
+      status: "pending",
+      teaching: [],
+      videos: [],
+      articles: [],
+      books: [],
+      scripture: [],
+      library: [],
+      quiz: [],
+      warnings: [],
+      kind: "gap",
+      sourceLessonId: parent.id,
+      sourceConceptIds: selected.concepts.map((concept) => concept.conceptId),
+    };
+    await this.putLesson(lesson);
+    await this.putScratch(`gap-concepts:${lessonId}`, selected.concepts);
+    const tickets = await this.gapTickets();
+    tickets.push({
+      lessonId,
+      sourceLessonId: parent.id,
+      sourceConceptIds: lesson.sourceConceptIds ?? [],
+    });
+    await this.saveGapTickets(tickets);
+    await this.event("teach", `Practice queued for ${parent.title}: ${selected.concepts.map((concept) => concept.conceptLabel).join(", ")}`, lessonId);
+    return {
+      queued: true,
+      lessonId,
+      conceptIds: lesson.sourceConceptIds ?? [],
+      skipped: selected.skipped,
+    };
+  }
+
+  /**
+   * Save a finished gap lesson onto the stored plan, after its parent.
+   * Plan status stays complete or partial. Returns null when there is nothing to save.
+   */
+  async commitGapLesson(lesson: LearnLesson): Promise<LearnPlan | null> {
+    const m = await this.meta();
+    const tickets = await this.gapTickets();
+    const stored = await this.ctx.storage.get<LearnPlan>("plan");
+    if (!stored) return null;
+    const already = m.lessonIds.includes(lesson.id);
+    if (!tickets.some((ticket) => ticket.lessonId === lesson.id) && !already) return null;
+    if (already && !tickets.some((ticket) => ticket.lessonId === lesson.id)) {
+      this.broadcastGap({ lessonId: lesson.id, plan: stored });
+      return stored;
+    }
+
+    await this.putLesson(lesson);
+    const current = await this.getLessons();
+    const mergedLessons = insertGapLesson(current.some((item) => item.id === lesson.id) ? current : [...current, lesson], lesson);
+    m.lessonIds = mergedLessons.map((item) => item.id);
+    await this.saveMeta(m);
+    const plan: LearnPlan = { ...stored, lessons: insertGapLesson(stored.lessons, lesson) };
+    await this.ctx.storage.put("plan", plan);
+    await this.saveGapTickets(tickets.filter((ticket) => ticket.lessonId !== lesson.id));
+    await this.ctx.storage.delete(`scratch:gap-concepts:${lesson.id}`);
+    this.broadcastGap({ lessonId: lesson.id, plan });
+    return plan;
+  }
+
+  /** Drop an unfinished gap job. The stored core plan is left as it was. */
+  async abandonGap(lessonId: string, reason: string): Promise<void> {
+    const message = reason.trim() || "The practice lesson could not be built. The rest of the path is unchanged.";
+    const m = await this.meta();
+    const tickets = await this.gapTickets();
+    const committed = m.lessonIds.includes(lessonId);
+    if (!committed) {
+      await this.ctx.storage.delete(`lesson:${lessonId}`);
+      await this.ctx.storage.delete(`scratch:gap-concepts:${lessonId}`);
+    }
+    await this.saveGapTickets(tickets.filter((ticket) => ticket.lessonId !== lessonId));
+    await this.event("error", message, lessonId || undefined);
+    const plan = await this.ctx.storage.get<LearnPlan>("plan");
+    this.broadcastGap({ lessonId, error: message, ...(plan ? { plan } : {}) });
+  }
+
+  private broadcastGap(payload: GapJobEvent): void {
+    this.broadcast(`event: gap\ndata: ${JSON.stringify(payload)}\n\n`);
   }
 
   /** Mastery written by the attempt API. Empty until the first submitted attempt. */
@@ -434,13 +601,15 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     const writer = writable.getWriter();
 
     const snap = await this.snapshot();
+    const gapsOpen = (await this.gapTickets()).length > 0;
     const backlog = snap.events
       .filter((ev) => ev.seq > after)
       .map((ev) => `id: ${ev.seq}\nevent: progress\ndata: ${JSON.stringify(ev)}\n\n`)
       .join("");
     writer.write(encoder.encode(`retry: 3000\n\n${backlog}`)).catch(() => {});
 
-    if (snap.status === "complete" || snap.status === "partial" || snap.status === "failed") {
+    const terminal = snap.status === "complete" || snap.status === "partial" || snap.status === "failed";
+    if (terminal && !gapsOpen) {
       writer.write(encoder.encode(`event: done\ndata: ${JSON.stringify(snap)}\n\n`)).catch(() => {});
       writer.close().catch(() => {});
     } else {
@@ -461,4 +630,8 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       },
     });
   }
+}
+
+function gapRank(lesson: { kind?: string }): number {
+  return lessonKind(lesson) === "gap" ? 1 : 0;
 }

@@ -1,0 +1,374 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
+import { BudgetExhausted, runCheck, runTeach } from "./stages.ts";
+import { BUDGET, LearnPlanDO } from "./plan-do.ts";
+import { SESSION_COOKIE, signSession } from "../session.ts";
+import { env as workersEnv } from "./cloudflare-workers-stub.ts";
+import type { LearnLesson, LearnPlan, QuizItem } from "../../learn/types.ts";
+import type { LearnMessage } from "./queues.ts";
+
+const PLAN_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const SECRET = "gap-lesson-test-secret";
+
+function memoryStorage() {
+  const data = new Map<string, unknown>();
+  return {
+    data,
+    storage: {
+      get: async (key: string) => data.get(key),
+      put: async (key: string, value: unknown) => {
+        data.set(key, value);
+      },
+      delete: async (key: string) => {
+        data.delete(key);
+      },
+      setAlarm: async () => {},
+      deleteAlarm: async () => {},
+      transactionSync: <T>(fn: () => T) => fn(),
+      kv: {
+        get: (key: string) => data.get(key),
+        put: (key: string, value: unknown) => {
+          data.set(key, value);
+        },
+      },
+    },
+  };
+}
+
+function lesson(id: string, order: number, title: string, conceptId: string): LearnLesson {
+  return {
+    id,
+    order,
+    title,
+    objectives: ["Explain the main idea"],
+    prerequisiteLessonIds: [],
+    estimatedMinutes: 25,
+    searchHints: ["introduction"],
+    status: "ok",
+    teaching: [{ type: "paragraph", text: "Faith receives a gift." }],
+    videos: [],
+    articles: [],
+    books: [],
+    scripture: [],
+    library: [],
+    quiz: [
+      {
+        kind: "mc",
+        question: "What receives the gift?",
+        choices: ["Faith", "Works"],
+        answer: "Faith",
+        rationale: "The lesson says faith receives a gift.",
+        objectiveIndex: 0,
+        conceptId,
+        conceptLabel: "Faith",
+      },
+    ],
+    warnings: [],
+    kind: "core",
+  };
+}
+
+const sentinel: QuizItem = {
+  kind: "short",
+  question: "Final sentinel",
+  answer: "Keep",
+  rationale: "Left out of the gap job.",
+  objectiveIndex: 0,
+};
+
+function planBody(lessons: LearnLesson[]): LearnPlan {
+  return {
+    id: PLAN_ID,
+    topic: "Faith",
+    title: "Faith",
+    complexity: "complex",
+    perspective: "neutral",
+    status: "complete",
+    prerequisites: [],
+    objectives: ["Explain the main idea"],
+    lessons,
+    courseBooks: [],
+    finalAssessment: [sentinel],
+    warnings: [],
+    createdAt: 10,
+  };
+}
+
+async function bootPlan(): Promise<LearnPlanDO> {
+  const ctx = memoryStorage();
+  const plan = new LearnPlanDO(ctx as never, {} as never);
+  await plan.init({
+    planId: PLAN_ID,
+    userId: "user_a",
+    topic: "Faith",
+    notes: "",
+    passages: [],
+    options: { perspective: "neutral", includeScripture: "auto" },
+  });
+  await plan.setScope({
+    title: "Faith",
+    complexity: "complex",
+    lessonCount: 6,
+    prerequisites: [],
+    coreConcepts: ["Faith"],
+    objectives: ["Explain the main idea"],
+    isFaithRelevant: true,
+  });
+  const first = lesson("l1", 1, "The gift", "l1-faith");
+  const second = lesson("l2", 2, "The next idea", "l2-next");
+  await plan.setOutline([
+    {
+      id: "l1",
+      order: 1,
+      title: "The gift",
+      objectives: ["Explain the main idea"],
+      prerequisiteLessonIds: [],
+      estimatedMinutes: 25,
+      searchHints: ["introduction"],
+    },
+    {
+      id: "l2",
+      order: 2,
+      title: "The next idea",
+      objectives: ["Explain the main idea"],
+      prerequisiteLessonIds: ["l1"],
+      estimatedMinutes: 25,
+      searchHints: ["next"],
+    },
+  ]);
+  await plan.putLesson(first);
+  await plan.putLesson(second);
+  await plan.complete(planBody([first, second]));
+  return plan;
+}
+
+test("MOCK_AI builds one tagged gap lesson after its parent and ignores a second miss", async () => {
+  const plan = await bootPlan();
+  const sent: LearnMessage[] = [];
+  const env = {
+    MOCK_AI: "1",
+    AI: {},
+    LEARN_Q_CHECK: {
+      send: async (message: LearnMessage) => {
+        sent.push(message);
+      },
+    },
+  };
+  const reserved = await plan.reserveGap({
+    sourceLessonId: "l1",
+    concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
+  });
+  assert.equal(reserved.queued, true);
+  assert.equal(reserved.lessonId, "gap-l1-1");
+  assert.equal(await plan.begin("teach:l1:r0"), false);
+  assert.equal(await plan.begin(`gap:teach:${reserved.lessonId}:r0`), true);
+
+  const teach = { planId: PLAN_ID, stage: "teach" as const, lessonId: reserved.lessonId, round: 0, job: "gap" as const };
+  await runTeach({ env: env as never, msg: teach, stub: plan as never });
+  assert.deepEqual(sent.map((message) => message.stage), ["check"]);
+  assert.equal(sent[0]?.job, "gap");
+  assert.equal(sent.some((message) => message.stage === "research" || message.stage === "critic" || message.stage === "assemble"), false);
+
+  await runCheck({ env: env as never, msg: { ...teach, stage: "check" }, stub: plan as never });
+  assert.equal(sent.length, 1);
+
+  const snap = await plan.snapshot();
+  assert.equal(snap.status, "complete");
+  assert.deepEqual(snap.plan?.lessons.map((item) => item.id), ["l1", "gap-l1-1", "l2"]);
+  assert.equal(snap.plan?.finalAssessment[0]?.question, "Final sentinel");
+  const gap = snap.plan?.lessons[1];
+  assert.ok(gap);
+  assert.equal(gap.kind, "gap");
+  assert.equal(gap.sourceLessonId, "l1");
+  assert.deepEqual(gap.sourceConceptIds, ["l1-faith"]);
+  assert.equal(gap.estimatedMinutes, 20);
+  assert.equal(gap.objectives[0], "Review Faith");
+  assert.ok(gap.quiz.length >= 3 && gap.quiz.length <= 4);
+  for (const item of gap.quiz) {
+    assert.equal(item.conceptId, "l1-faith");
+    assert.equal(item.conceptLabel, "Faith");
+  }
+  assert.ok(gap.quiz.some((item) => item.alternate?.conceptId === "l1-faith"));
+  assert.deepEqual(gap.scripture, []);
+  assert.match(gap.warnings.join("\n"), /did not resolve in BSB/);
+  assert.equal(JSON.stringify(gap.teaching).includes("For all have sinned"), false);
+
+  const again = await plan.reserveGap({
+    sourceLessonId: "l1",
+    concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
+  });
+  assert.equal(again.queued, false);
+  assert.equal(again.error, undefined);
+  assert.deepEqual(again.skipped, [{ conceptId: "l1-faith", reason: "covered" }]);
+  assert.equal((await plan.snapshot()).plan?.lessons.length, 3);
+
+  assert.equal(
+    (
+      await plan.reserveGap({
+        sourceLessonId: "l1",
+        concepts: [{ conceptId: "l1-hope", conceptLabel: "Hope" }],
+      })
+    ).queued,
+    true,
+  );
+  assert.equal(
+    (
+      await plan.reserveGap({
+        sourceLessonId: "l1",
+        concepts: [{ conceptId: "l1-love", conceptLabel: "Love" }],
+      })
+    ).queued,
+    true,
+  );
+  const capped = await plan.reserveGap({
+    sourceLessonId: "l1",
+    concepts: [{ conceptId: "l1-peace", conceptLabel: "Peace" }],
+  });
+  assert.equal(capped.queued, false);
+  assert.equal(capped.error, "This lesson already has three practice lessons.");
+});
+
+test("a gap job that hits the model budget leaves the core plan usable", async () => {
+  const plan = await bootPlan();
+  for (let n = 0; n < BUDGET.llm; n++) assert.equal(await plan.spend("llm", 1), true);
+  const reserved = await plan.reserveGap({
+    sourceLessonId: "l1",
+    concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
+  });
+  assert.equal(reserved.queued, true);
+  const env = { MOCK_AI: "1", AI: {}, LEARN_Q_CHECK: { send: async () => {} } };
+  const msg = { planId: PLAN_ID, stage: "teach" as const, lessonId: reserved.lessonId!, round: 0, job: "gap" as const };
+  await assert.rejects(
+    () => runTeach({ env: env as never, msg, stub: plan as never }),
+    (error: unknown) => error instanceof BudgetExhausted,
+  );
+  await plan.abandonGap(reserved.lessonId!, "The practice lesson stopped because the plan reached its model budget. The rest of the path is unchanged.");
+  const snap = await plan.snapshot();
+  assert.equal(snap.status, "complete");
+  assert.deepEqual(snap.plan?.lessons.map((item) => item.id), ["l1", "l2"]);
+  assert.equal(snap.plan?.finalAssessment[0]?.question, "Final sentinel");
+  const retry = await plan.reserveGap({
+    sourceLessonId: "l1",
+    concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
+  });
+  assert.equal(retry.queued, true);
+});
+
+type SqlCursor = { one(): Record<string, unknown>; toArray(): Record<string, unknown>[] };
+
+function sqliteSql(db: DatabaseSync) {
+  return {
+    exec(query: string, ...bindings: unknown[]): SqlCursor {
+      const statement = db.prepare(query);
+      const read = /^\s*(select|with)\b/i.test(query);
+      const rows = (read ? statement.all(...(bindings as (string | number | null | bigint)[])) : []) as Record<string, unknown>[];
+      if (!read) statement.run(...(bindings as (string | number | null | bigint)[]));
+      return {
+        one: () => {
+          const row = rows[0];
+          if (!row) throw new Error(`Expected a row for: ${query}`);
+          return row;
+        },
+        toArray: () => rows,
+      };
+    },
+  };
+}
+
+test("the workspace plan inserts the gap lesson after its parent", async () => {
+  const { UserWorkspaceDO } = await import("../user-workspace-do.ts");
+  const db = new DatabaseSync(":memory:");
+  let ready = Promise.resolve();
+  const workspace = new UserWorkspaceDO(
+    {
+      storage: { sql: sqliteSql(db) },
+      blockConcurrencyWhile(task: () => Promise<void>) {
+        ready = task();
+      },
+    } as never,
+    {} as never,
+  );
+  await ready;
+  const first = lesson("l1", 1, "The gift", "l1-faith");
+  const second = lesson("l2", 2, "The next idea", "l2-next");
+  workspace.upsertProject({
+    id: "p1",
+    kind: "learn",
+    title: "Faith",
+    blocks: [],
+    updatedAt: 10,
+    importComplete: true,
+    learnPlan: planBody([first, second]),
+  });
+  const gap: LearnLesson = {
+    ...lesson("gap-l1-1", 1, "Practice: Faith", "l1-faith"),
+    kind: "gap",
+    sourceLessonId: "l1",
+    sourceConceptIds: ["l1-faith"],
+    estimatedMinutes: 20,
+  };
+  assert.equal(workspace.mergeGapLesson(PLAN_ID, gap, 50).ok, true);
+  const stored = workspace.getProject("p1");
+  assert.deepEqual(stored?.learnPlan?.lessons.map((item) => item.id), ["l1", "gap-l1-1", "l2"]);
+  assert.equal(stored?.learnPlan?.lessons[1]?.kind, "gap");
+  assert.equal(stored?.learnProgress, undefined);
+});
+
+async function signedRequest(path: string, userId: string, body: unknown): Promise<Request> {
+  const token = await signSession(
+    { userId, provider: "dev", compute: false, exp: Math.floor(Date.now() / 1000) + 3600 },
+    SECRET,
+  );
+  return new Request(`https://study.example${path}`, {
+    method: "POST",
+    headers: {
+      cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+test("the gap route rejects signed-out and non-owner callers and does not queue a duplicate concept", async () => {
+  for (const key of Object.keys(workersEnv)) delete workersEnv[key];
+  delete process.env.CLERK_SECRET_KEY;
+  delete process.env.CLERK_PUBLISHABLE_KEY;
+  const plan = await bootPlan();
+  let queued = 0;
+  workersEnv.SESSION_SECRET = SECRET;
+  workersEnv.AI = {};
+  workersEnv.LEARN_Q_INTAKE = {};
+  workersEnv.LEARN_Q_TEACH = { send: async () => { queued += 1; } };
+  workersEnv.LEARN_PLAN = {
+    idFromName: (id: string) => id,
+    get: () => plan,
+  };
+
+  const { POST } = await import("../../../api/learn/plans/[planId]/gaps/route.ts");
+  const params = { params: Promise.resolve({ planId: PLAN_ID }) };
+  const body = { sourceLessonId: "l1", concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }] };
+  const signedOut = await POST(new Request(`https://study.example/api/learn/plans/${PLAN_ID}/gaps`, { method: "POST" }), params);
+  assert.equal(signedOut.status, 401);
+  assert.equal(queued, 0);
+
+  const stranger = await POST(await signedRequest(`/api/learn/plans/${PLAN_ID}/gaps`, "user_b", body), params);
+  assert.equal(stranger.status, 404);
+  assert.equal(queued, 0);
+  assert.equal((await plan.snapshot()).plan?.lessons.length, 2);
+
+  const first = await POST(await signedRequest(`/api/learn/plans/${PLAN_ID}/gaps`, "user_a", body), params);
+  assert.equal(first.status, 200);
+  const firstBody = (await first.json()) as { queued?: boolean; lessonId?: string };
+  assert.equal(firstBody.queued, true);
+  assert.equal(firstBody.lessonId, "gap-l1-1");
+  assert.equal(queued, 1);
+
+  const second = await POST(await signedRequest(`/api/learn/plans/${PLAN_ID}/gaps`, "user_a", body), params);
+  assert.equal(second.status, 200);
+  const secondBody = (await second.json()) as { queued?: boolean; error?: string; skipped?: { reason: string }[] };
+  assert.equal(secondBody.queued, false);
+  assert.equal(secondBody.error, undefined);
+  assert.equal(secondBody.skipped?.[0]?.reason, "covered");
+  assert.equal(queued, 1);
+});

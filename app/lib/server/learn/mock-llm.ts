@@ -26,6 +26,7 @@ export function mockModelText(system: string, user: string, meta: LlmMeta): stri
     return JSON.stringify({ articles, videos: [] });
   }
   if (meta.stage === "critic") return JSON.stringify({ issues: [] });
+  if (/short practice lesson/i.test(system)) return mockGapTeach(user);
   if (meta.stage === "plan") {
     return JSON.stringify({
       lessons: [
@@ -123,6 +124,70 @@ export function mockModelText(system: string, user: string, meta: LlmMeta): stri
     ],
     scriptureRefs: FAITH.test(`${system}\n${user}`)
       ? [{ reference: "Romans 3:21-26", note: "Paul says righteousness is given through faith in Christ." }]
+      : [],
+  });
+}
+
+/** Tagged practice quiz. Answers match the check mock so MOCK_AI can finish a gap lesson. */
+function mockGapTeach(user: string): string {
+  const found = [...user.matchAll(/conceptId: ([A-Za-z0-9._:-]+) \| conceptLabel: ([^\n]+)/g)].map((match) => ({
+    id: match[1] ?? "l1-gap",
+    label: (match[2] ?? "The missed idea").trim(),
+  }));
+  const concepts = found.length ? found : [{ id: "l1-gap", label: "The missed idea" }];
+  const stems = [
+    {
+      kind: "mc" as const,
+      question: "What receives the gift?",
+      choices: ["Faith", "Works", "Law", "Pride"],
+      answer: "Faith",
+    },
+    {
+      kind: "mc" as const,
+      question: "Which book is cited?",
+      choices: ["Romans", "Acts", "Ruth", "Jonah"],
+      answer: "Romans",
+    },
+    {
+      kind: "short" as const,
+      question: "In one sentence, what is the main idea?",
+      answer: "Faith receives a gift.",
+    },
+  ];
+  const quiz = stems.map((stem, index) => {
+    const concept = concepts[index] ?? concepts[index % concepts.length]!;
+    const objectiveIndex = Math.max(0, concepts.findIndex((item) => item.id === concept.id));
+    const item: Record<string, unknown> = {
+      ...stem,
+      rationale: "The practice lesson states this.",
+      objectiveIndex,
+      conceptId: concept.id,
+      conceptLabel: concept.label,
+    };
+    if (index < concepts.length) {
+      item.alternate = {
+        kind: "short",
+        question: "Restate the idea in a few words.",
+        answer: "Faith receives a gift.",
+        rationale: "The practice lesson states this.",
+        objectiveIndex,
+        conceptId: concept.id,
+        conceptLabel: concept.label,
+      };
+    }
+    return item;
+  });
+  return JSON.stringify({
+    teaching: [
+      { type: "paragraph", text: "This practice stays with the ideas that were missed." },
+      { type: "heading2", text: "Key idea" },
+      { type: "bullet", text: "Faith receives a gift." },
+      { type: "heading2", text: "Discuss" },
+      { type: "bullet", text: "Which idea was hardest?" },
+    ],
+    quiz,
+    scriptureRefs: FAITH.test(user)
+      ? [{ reference: "Romans 3:21-26", note: "Cited for this practice lesson." }]
       : [],
   });
 }
