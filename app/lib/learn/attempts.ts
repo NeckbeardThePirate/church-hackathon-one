@@ -27,6 +27,17 @@ export type LearnAttemptAnswer = {
   correct: boolean | null;
   /** Semantic score copied from the local quiz so a mirror does not drop partial credit. */
   score?: number;
+  /** Set when the learner skipped the card or left it blank. Quality 0. */
+  skipped?: boolean;
+  /** False when this correct answer follows a miss. Omitted answers are graded from the stored row. */
+  firstTry?: boolean;
+  /**
+   * lastReviewedAt before this answer was applied locally.
+   * The server keeps a row that is already newer than this and has the same grade.
+   */
+  previousReviewedAt?: number | null;
+  /** False on a lesson mirror that must not schedule again. Omitted answers are scheduled. */
+  applySchedule?: boolean;
 };
 
 export type LearnAttempt = {
@@ -44,6 +55,10 @@ export type StoredLearnAttempt = {
   projectId?: string;
   /** Plan id from the request URL. */
   planId?: string;
+  /** Learner zone when stats do not have one yet. The route prefers the stored zone. */
+  timeZone?: string;
+  /** Workspace mastery, bare or scoped. A newer review wins over the plan row before SM-2 runs. */
+  workspaceMastery?: Record<string, ConceptMastery>;
   answers: LearnAttemptAnswer[];
 };
 
@@ -51,7 +66,9 @@ export type StoredLearnAttempt = {
 export const CONCEPT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 const TARGETS = new Set<LearnAttemptTarget>(["lesson", "final", "review"]);
 
-export type AttemptParseResult = { ok: true; attempt: LearnAttempt } | { ok: false; error: string };
+export type AttemptParseResult =
+  | { ok: true; attempt: LearnAttempt; timeZone?: string }
+  | { ok: false; error: string };
 
 export function parseLearnAttempt(body: unknown): AttemptParseResult {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -83,7 +100,15 @@ export function parseLearnAttempt(body: unknown): AttemptParseResult {
     if (!parsed.ok) return parsed;
     answers.push(parsed.answer);
   }
-  return { ok: true, attempt: { target, ...(lessonId ? { lessonId } : {}), answers } };
+  let timeZone: string | undefined;
+  if (raw.timeZone !== undefined && raw.timeZone !== null) {
+    if (typeof raw.timeZone !== "string" || raw.timeZone.length > 100) {
+      return { ok: false, error: "timeZone must be an IANA name." };
+    }
+    const trimmed = raw.timeZone.trim();
+    if (trimmed) timeZone = trimmed;
+  }
+  return { ok: true, attempt: { target, ...(lessonId ? { lessonId } : {}), answers }, ...(timeZone ? { timeZone } : {}) };
 }
 
 function parseAnswer(value: unknown, index: number): { ok: true; answer: LearnAttemptAnswer } | { ok: false; error: string } {
@@ -128,6 +153,28 @@ function parseAnswer(value: unknown, index: number): { ok: true; answer: LearnAt
     }
     score = raw.score;
   }
+  if (raw.skipped !== undefined && typeof raw.skipped !== "boolean") {
+    return { ok: false, error: `answers[${index}].skipped must be a boolean.` };
+  }
+  if (raw.firstTry !== undefined && typeof raw.firstTry !== "boolean") {
+    return { ok: false, error: `answers[${index}].firstTry must be a boolean.` };
+  }
+  if (raw.applySchedule !== undefined && typeof raw.applySchedule !== "boolean") {
+    return { ok: false, error: `answers[${index}].applySchedule must be a boolean.` };
+  }
+  let previousReviewedAt: number | null | undefined;
+  if (raw.previousReviewedAt !== undefined) {
+    if (raw.previousReviewedAt === null) previousReviewedAt = null;
+    else if (
+      typeof raw.previousReviewedAt === "number" &&
+      Number.isInteger(raw.previousReviewedAt) &&
+      raw.previousReviewedAt >= 0
+    ) {
+      previousReviewedAt = raw.previousReviewedAt;
+    } else {
+      return { ok: false, error: `answers[${index}].previousReviewedAt must be a timestamp or null.` };
+    }
+  }
   return {
     ok: true,
     answer: {
@@ -138,6 +185,10 @@ function parseAnswer(value: unknown, index: number): { ok: true; answer: LearnAt
       shortSubmitted: raw.shortSubmitted,
       correct: raw.correct as boolean | null,
       ...(score !== undefined ? { score } : {}),
+      ...(raw.skipped === true ? { skipped: true } : {}),
+      ...(raw.firstTry === true || raw.firstTry === false ? { firstTry: raw.firstTry } : {}),
+      ...(previousReviewedAt !== undefined ? { previousReviewedAt } : {}),
+      ...(raw.applySchedule === true || raw.applySchedule === false ? { applySchedule: raw.applySchedule } : {}),
     },
   };
 }

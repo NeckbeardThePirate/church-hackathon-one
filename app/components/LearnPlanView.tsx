@@ -19,6 +19,14 @@ import {
   XP_READ_LESSON,
   lessonMasteryPercent,
 } from "../lib/learn/learner-stats";
+import { postLearnAttempt } from "../lib/learn/post-attempt";
+import {
+  keepFresherConceptMastery,
+  learnerTimeZone,
+  reviewQuality,
+  scheduleConcept,
+  type ReviewQuality,
+} from "../lib/learn/sm2";
 import { locationForPlan, parsePathUrl, pathSearch } from "../lib/learn/path-url";
 import {
   combineReadPercent,
@@ -91,6 +99,7 @@ import {
 import { ArticleReadWindow } from "./ArticleReadWindow";
 import { LearnAgentFloat } from "./LearnAgentFloat";
 import { LearnPathMap } from "./LearnPathMap";
+import { LearnReviewPanel } from "./LearnReviewPanel";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
 import { LessonVideoPlayer } from "./LessonVideoPlayer";
 import { PROJECT_KIND_LABEL } from "../lib/projects";
@@ -104,7 +113,7 @@ type Props = {
   onProgress?: (progress: LearnPlanProgress) => void;
   onAward?: (reason: string, amount: number) => void;
   onPlan?: (plan: LearnPlan) => void;
-  stats?: { xp: number; streak: number } | null;
+  stats?: { xp: number; streak: number; timezone?: string | null } | null;
 };
 
 function esc(text: string): string {
@@ -890,16 +899,124 @@ function awardQuizDelta(
   });
 }
 
-function attemptAnswers(quiz: PersistedQuiz, items: QuizItem[]): LearnAttemptAnswer[] {
-  return quiz.answers.map((answer, index) => ({
-    ...(items[index]?.conceptId ? { conceptId: items[index]!.conceptId } : {}),
-    ...(items[index]?.conceptLabel ? { conceptLabel: items[index]!.conceptLabel } : {}),
-    mcChoice: answer.mcChoice,
-    shortText: answer.shortText,
-    shortSubmitted: answer.shortSubmitted,
-    correct: answer.correct,
-    ...(typeof answer.score === "number" ? { score: answer.score } : {}),
-  }));
+type ConceptUpdate = {
+  index: number;
+  conceptId: string;
+  conceptLabel: string;
+  lessonId: string;
+  quality: ReviewQuality;
+  answer: LearnAttemptAnswer;
+};
+
+/**
+ * One lesson post carries every answer. Only a concept whose grade just changed is scheduled.
+ * The other answers stay on the quiz mirror and do not take another SM-2 step.
+ */
+function attemptAnswers(quiz: PersistedQuiz, items: QuizItem[], updates: ConceptUpdate[]): LearnAttemptAnswer[] {
+  const updateByIndex = new Map(updates.map((update) => [update.index, update]));
+  return quiz.answers.map((answer, index) => {
+    const update = updateByIndex.get(index);
+    return {
+      ...(items[index]?.conceptId ? { conceptId: items[index]!.conceptId } : {}),
+      ...(items[index]?.conceptLabel ? { conceptLabel: items[index]!.conceptLabel } : {}),
+      mcChoice: answer.mcChoice,
+      shortText: answer.shortText,
+      shortSubmitted: answer.shortSubmitted,
+      correct: answer.correct,
+      ...(typeof answer.score === "number" ? { score: answer.score } : {}),
+      ...(update
+        ? {
+            ...(update.answer.firstTry === true || update.answer.firstTry === false ? { firstTry: update.answer.firstTry } : {}),
+            previousReviewedAt: update.answer.previousReviewedAt,
+          }
+        : { applySchedule: false }),
+    };
+  });
+}
+
+/** One SM-2 step per concept whose grade just changed. */
+function conceptUpdatesForQuiz(
+  progress: LearnPlanProgress,
+  scope: ProgressScope,
+  lessonId: string,
+  items: QuizItem[],
+  previous: PersistedQuiz | undefined,
+  next: PersistedQuiz,
+): ConceptUpdate[] {
+  const storedLesson = lessonId === "final" ? "final" : lessonId;
+  const byId = new Map<string, ConceptUpdate>();
+  items.forEach((item, index) => {
+    if (!item.conceptId) return;
+    const answer = next.answers[index];
+    const before = previous?.answers[index];
+    if (!answer || answer.correct == null) return;
+    if (before && before.correct === answer.correct && (before.score ?? null) === (answer.score ?? null)) return;
+    const key = conceptProgressKey(scope, item.conceptId);
+    const row =
+      progress.conceptMastery[key] ??
+      newConceptMastery({
+        conceptId: item.conceptId,
+        conceptLabel: item.conceptLabel || item.conceptId,
+        lessonId: storedLesson,
+      });
+    const firstTry = answer.correct === true ? !(row.lastQuality != null && row.lastQuality < 3) : undefined;
+    const quality = reviewQuality({
+      correct: answer.correct,
+      firstTry,
+      previousQuality: row.lastQuality,
+    });
+    byId.set(item.conceptId, {
+      index,
+      conceptId: item.conceptId,
+      conceptLabel: item.conceptLabel || row.conceptLabel,
+      lessonId: storedLesson,
+      quality,
+      answer: {
+        conceptId: item.conceptId,
+        conceptLabel: item.conceptLabel || row.conceptLabel,
+        mcChoice: answer.mcChoice,
+        shortText: answer.shortText,
+        shortSubmitted: answer.shortSubmitted,
+        correct: answer.correct,
+        ...(typeof answer.score === "number" ? { score: answer.score } : {}),
+        ...(firstTry === true || firstTry === false ? { firstTry } : {}),
+        previousReviewedAt: row.lastReviewedAt,
+      },
+    });
+  });
+  return [...byId.values()];
+}
+
+function applyConceptUpdates(
+  progress: LearnPlanProgress,
+  scope: ProgressScope,
+  updates: ConceptUpdate[],
+  now: number,
+  timeZone: string,
+): LearnPlanProgress {
+  let next = progress;
+  for (const update of updates) {
+    const key = conceptProgressKey(scope, update.conceptId);
+    const row =
+      next.conceptMastery[key] ??
+      newConceptMastery({
+        conceptId: update.conceptId,
+        conceptLabel: update.conceptLabel,
+        lessonId: update.lessonId,
+      });
+    next = withConceptMastery(
+      next,
+      scope,
+      update.conceptId,
+      scheduleConcept(
+        { ...row, conceptLabel: update.conceptLabel, lessonId: update.lessonId },
+        update.quality,
+        now,
+        timeZone,
+      ),
+    );
+  }
+  return next;
 }
 
 function quizStillMatches(quiz: PersistedQuiz | null | undefined, answers: LearnAttemptAnswer[]): boolean {
@@ -943,67 +1060,6 @@ async function postGapLesson(planId: string, sourceLessonId: string, concepts: G
     }
   }
   return { queued: false, conceptIds: [], skipped: [], error: lastError };
-}
-
-/** One automatic retry. Local progress is saved before this runs and is not written again on failure. */
-async function postLearnAttempt(
-  planId: string,
-  attempt: LearnAttempt,
-): Promise<{ conceptMastery?: LearnPlanProgress["conceptMastery"] } | null> {
-  for (let attemptIndex = 0; attemptIndex < 2; attemptIndex++) {
-    try {
-      const response = await fetch(`/api/learn/plans/${planId}/attempts`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(attempt),
-      });
-      if (response.ok) {
-        return (await response.json()) as { conceptMastery?: LearnPlanProgress["conceptMastery"] };
-      }
-      if (response.status < 500) return null;
-    } catch {
-      /* Network or a body that is not JSON. Retry once, then keep the local quiz. */
-    }
-  }
-  return null;
-}
-
-function paintAnswerMastery(
-  progress: LearnPlanProgress,
-  scope: ProgressScope,
-  lessonId: string,
-  items: QuizItem[],
-): LearnPlanProgress {
-  const quiz = lessonId === "final" ? finalQuizFor(progress, scope) : lessonQuizFor(progress, scope, lessonId);
-  if (!quiz) return progress;
-  let next = progress;
-  const storedLesson = lessonId === "final" ? "final" : lessonId;
-  items.forEach((item, index) => {
-    if (!item.conceptId) return;
-    const answer = quiz.answers[index];
-    if (!answer || answer.correct == null) return;
-    const quality = answer.correct ? 5 : (answer.score ?? 0) >= 0.4 ? 3 : 1;
-    const key = conceptProgressKey(scope, item.conceptId);
-    const prev =
-      next.conceptMastery[key] ??
-      newConceptMastery({
-        conceptId: item.conceptId,
-        conceptLabel: item.conceptLabel || item.conceptId,
-        lessonId: storedLesson,
-      });
-    if (prev.lastQuality === quality && prev.repetitions >= 1 && prev.lessonId === storedLesson) return;
-    next = withConceptMastery(next, scope, item.conceptId, {
-      ...prev,
-      conceptLabel: item.conceptLabel || prev.conceptLabel,
-      lessonId: storedLesson,
-      lastQuality: quality,
-      lastReviewedAt: Date.now(),
-      repetitions: Math.max(prev.repetitions, 1),
-      correctStreak: quality >= 4 ? Math.max(1, prev.correctStreak) : 0,
-    });
-  });
-  return next;
 }
 
 function applyRead(
@@ -1219,6 +1275,7 @@ export function LearnPlanView({
   const resume = resumeLabel(scope, plan, progress, hasFinal);
 
   const gradeShort = useCallback((item: QuizItem, given: string) => gradeFreeText(plan.id, item, given), [plan.id]);
+  const timeZone = learnerTimeZone(stats?.timezone);
 
   const requestPractice = useCallback(
     async (lessonKey: string, attempt: LearnAttempt) => {
@@ -1265,7 +1322,9 @@ export function LearnPlanView({
         target === "final"
           ? (finalQuizFor(progressRef.current, scope) ?? undefined)
           : lessonQuizFor(progressRef.current, scope, lessonKey);
+      const updates = conceptUpdatesForQuiz(progressRef.current, scope, lessonKey, items, previous, stored);
       awardQuizDelta(scope, lessonKey, previous, stored, onAwardRef.current);
+      const reviewedAt = Date.now();
       commitProgress((prev) => {
         const withQuiz =
           target === "final"
@@ -1277,27 +1336,38 @@ export function LearnPlanView({
                 readScrollFor(prev, scope, lessonKey),
                 stored.settled ? true : readDoneFor(prev, scope, lessonKey),
               );
-        return paintAnswerMastery(withQuiz, scope, lessonKey, items);
+        return applyConceptUpdates(withQuiz, scope, updates, reviewedAt, timeZone);
       }, true);
-      const answers = attemptAnswers(stored, items);
+      const answers = attemptAnswers(stored, items, updates);
       const attempt = submittedLessonAttempt(target, lessonKey, answers);
-      if (!attempt) return;
       const changed = stored.answers.some((answer, index) => answer.correct !== (previous?.answers[index]?.correct ?? null));
-      if (!changed) return;
-      void postLearnAttempt(plan.id, attempt).then((body) => {
-        if (body?.conceptMastery) {
-          commitProgress((prev) => {
-            const current = target === "final" ? finalQuizFor(prev, scope) : lessonQuizFor(prev, scope, lessonKey);
-            const merged = quizStillMatches(current, answers)
-              ? mirrorAttemptOntoProgress(prev, attempt, body.conceptMastery, scope)
-              : applyPlanMastery(prev, body.conceptMastery, scope);
-            return paintAnswerMastery(merged, scope, lessonKey, items);
-          }, true);
-        }
-      });
-      if (target === "lesson") void requestPractice(lessonKey, attempt);
+      const adoptMastery = (body: { conceptMastery?: LearnPlanProgress["conceptMastery"] } | null) => {
+        const mastery = body?.conceptMastery;
+        if (!mastery) return;
+        commitProgress((prev) => {
+          const current = target === "final" ? finalQuizFor(prev, scope) : lessonQuizFor(prev, scope, lessonKey);
+          const merged =
+            attempt && quizStillMatches(current, answers)
+              ? mirrorAttemptOntoProgress(prev, attempt, mastery, scope)
+              : applyPlanMastery(prev, mastery, scope);
+          return keepFresherConceptMastery(prev, merged);
+        }, true);
+      };
+      if (attempt && changed) {
+        void postLearnAttempt(plan.id, { ...attempt, timeZone }).then(adoptMastery);
+        if (target === "lesson") void requestPractice(lessonKey, attempt);
+        return;
+      }
+      for (const update of updates) {
+        void postLearnAttempt(plan.id, {
+          target: "review",
+          lessonId: update.lessonId,
+          timeZone,
+          answers: [update.answer],
+        }).then(adoptMastery);
+      }
     },
-    [commitProgress, plan.id, requestPractice, scope],
+    [commitProgress, plan.id, requestPractice, scope, timeZone],
   );
 
   useEffect(() => {
@@ -1463,6 +1533,16 @@ export function LearnPlanView({
                 <span className="text-sm font-medium text-[var(--ink)]">{resume}</span>
               </button>
             ) : null}
+
+            <LearnReviewPanel
+              plan={plan}
+              scope={scope}
+              progress={progress}
+              timeZone={timeZone}
+              gradeShort={gradeShort}
+              onCommit={(updater) => commitProgress(updater, true)}
+              onAward={(reason, amount) => onAwardRef.current?.(reason, amount)}
+            />
 
             {plan.objectives.length ? (
               <section className="mt-10">

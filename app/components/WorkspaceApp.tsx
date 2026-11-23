@@ -440,7 +440,7 @@ export function WorkspaceApp() {
             onProgress={setLiveProgress}
             onAward={award}
             onPlan={(plan) => updateProject(activeProject.id, { learnPlan: plan })}
-            stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak } : null}
+            stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak, timezone: stats.timezone } : null}
           />
         ) : (
           <ArchivedProjectView
