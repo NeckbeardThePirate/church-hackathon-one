@@ -36,7 +36,7 @@ export type PersistedQuiz = {
   answers: PersistedQuizAnswer[];
   /** Highest number of correct answers kept across retries. */
   bestCorrect?: number;
-  /** True once every question has been answered. Retrying misses does not clear it. */
+  /** True once every question has been answered. Trying the quiz again does not clear it. */
   settled?: boolean;
 };
 
@@ -322,12 +322,12 @@ function quizFlags(saved: PersistedQuiz | undefined | null): Pick<PersistedQuiz,
   };
 }
 
-/** Drop missed questions and keep correct ones. A finished quiz stays finished. */
+/** Clear every answer so the quiz can be taken again. A finished quiz stays finished. */
 export function retryMissedQuiz(quiz: PersistedQuiz): PersistedQuiz {
   const bestCorrect = Math.max(quiz.bestCorrect ?? 0, quizCorrectCount(quiz));
   const settled = quiz.settled === true || quizAllAnswered(quiz);
   return {
-    answers: quiz.answers.map((answer) => (answer.correct === true ? answer : emptyQuizAnswer())),
+    answers: quiz.answers.map(() => emptyQuizAnswer()),
     bestCorrect,
     ...(settled ? { settled: true } : {}),
   };
@@ -413,6 +413,11 @@ function unionQuizSlot(remote: PersistedQuiz | null, local: PersistedQuiz | null
       if (saved) answers.push(saved);
       continue;
     }
+    // Try again clears every item, including ones that were correct. Keep that clear.
+    if (local.settled && browser.correct == null) {
+      answers.push(browser);
+      continue;
+    }
     if (!saved || browser.correct === true) {
       answers.push(browser);
       continue;
@@ -421,9 +426,7 @@ function unionQuizSlot(remote: PersistedQuiz | null, local: PersistedQuiz | null
       answers.push(saved);
       continue;
     }
-    // A settled quiz on this browser has cleared a miss for retry. Keep that clear.
-    if (local.settled && browser.correct == null) answers.push(browser);
-    else if (browser.correct != null) answers.push(browser);
+    if (browser.correct != null) answers.push(browser);
     else answers.push(saved);
   }
   const bests = [remote.bestCorrect, local.bestCorrect].filter((value): value is number => typeof value === "number");

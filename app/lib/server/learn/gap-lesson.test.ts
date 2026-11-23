@@ -313,6 +313,20 @@ test("the workspace plan inserts the gap lesson after its parent", async () => {
   assert.deepEqual(stored?.learnPlan?.lessons.map((item) => item.id), ["l1", "gap-l1-1", "l2"]);
   assert.equal(stored?.learnPlan?.lessons[1]?.kind, "gap");
   assert.equal(stored?.learnProgress, undefined);
+
+  workspace.upsertProject({
+    id: "p1",
+    kind: "learn",
+    title: "Faith",
+    blocks: [],
+    updatedAt: 80,
+    importComplete: true,
+    learnPlan: planBody([first, second]),
+    learnProgress: { v: 3 },
+  });
+  const kept = workspace.getProject("p1");
+  assert.deepEqual(kept?.learnPlan?.lessons.map((item) => item.id), ["l1", "gap-l1-1", "l2"]);
+  assert.equal(kept?.learnProgress?.v, 3);
 });
 
 async function signedRequest(path: string, userId: string, body: unknown): Promise<Request> {

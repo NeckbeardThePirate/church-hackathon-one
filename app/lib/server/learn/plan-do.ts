@@ -6,6 +6,7 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import {
+  gapTicketIsStale,
   GAP_SITTING_MINUTES,
   insertGapLesson,
   nextGapLessonId,
@@ -74,6 +75,7 @@ type GapTicket = {
   lessonId: string;
   sourceLessonId: string;
   sourceConceptIds: string[];
+  queuedAt?: number;
 };
 
 const encoder = new TextEncoder();
@@ -375,6 +377,36 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       return { queued: false, conceptIds: [], skipped: selected.skipped, error: selected.error };
     }
     if (!selected.concepts.length) {
+      const tickets = await this.gapTickets();
+      const wanted = new Set(request.concepts.map((concept) => concept.conceptId));
+      const ticket = tickets.find(
+        (item) => item.sourceLessonId === request.sourceLessonId && item.sourceConceptIds.some((id) => wanted.has(id)),
+      );
+      if (ticket && !m.lessonIds.includes(ticket.lessonId)) {
+        const pending = await this.getLesson(ticket.lessonId);
+        if (!pending?.teaching.length && gapTicketIsStale(ticket.queuedAt, Date.now())) {
+          ticket.queuedAt = Date.now();
+          await this.saveGapTickets(tickets);
+          const parent = (await this.getLessons()).find((lesson) => lesson.id === request.sourceLessonId);
+          const labels = request.concepts
+            .filter((concept) => ticket.sourceConceptIds.includes(concept.conceptId))
+            .map((concept) => concept.conceptLabel)
+            .join(", ");
+          await this.event("teach", `Practice queued for ${parent?.title ?? "this lesson"}: ${labels}`, ticket.lessonId);
+          return {
+            queued: true,
+            lessonId: ticket.lessonId,
+            conceptIds: ticket.sourceConceptIds,
+            skipped: selected.skipped,
+          };
+        }
+        return {
+          queued: false,
+          lessonId: ticket.lessonId,
+          conceptIds: ticket.sourceConceptIds,
+          skipped: selected.skipped,
+        };
+      }
       return { queued: false, conceptIds: [], skipped: selected.skipped };
     }
 
@@ -412,6 +444,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       lessonId,
       sourceLessonId: parent.id,
       sourceConceptIds: lesson.sourceConceptIds ?? [],
+      queuedAt: Date.now(),
     });
     await this.saveGapTickets(tickets);
     await this.event("teach", `Practice queued for ${parent.title}: ${selected.concepts.map((concept) => concept.conceptLabel).join(", ")}`, lessonId);

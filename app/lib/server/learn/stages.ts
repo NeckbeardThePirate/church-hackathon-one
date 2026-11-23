@@ -5,7 +5,7 @@
  */
 import { learnerContext, passagesForLesson } from "@/app/lib/learn/intake";
 import { findBibleReferences } from "@/app/lib/bible/parse-reference";
-import { gapConceptLine, lessonsForFinalMix, type GapConcept } from "@/app/lib/learn/gaps";
+import { attachFinalConcepts, gapConceptLine, lessonsForFinalMix, type GapConcept } from "@/app/lib/learn/gaps";
 import {
   LESSON_BANDS,
   type ArticleResource,
@@ -1024,19 +1024,32 @@ export async function runAssemble(ctx: Ctx): Promise<void> {
 
   let finalAssessment: QuizItem[] = [];
   const ready = lessonsForFinalMix(lessons);
+  const conceptLines = ready.flatMap((lesson) =>
+    lesson.quiz.flatMap((item) =>
+      item.conceptId ? [`- conceptId: ${item.conceptId} | conceptLabel: ${item.conceptLabel ?? item.conceptId}`] : [],
+    ),
+  );
   if (band.finalItems > 0 && ready.length && !info.deadlineHit) {
     try {
-      finalAssessment = await llm(ctx, "worker", {
-        maxTokens: 5000,
-        system: `Write a final assessment for a course. Mix items across all lessons, favoring questions that connect lessons.
-Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0}]}
-Return exactly ${band.finalItems} items. ${QUIZ_RULES} objectiveIndex refers to the course objectives.`,
-        user: `Course objectives:\n${scope.objectives.map((o, i) => `${i}. ${o}`).join("\n")}\n\n${ready
-          .map((l) => `Lesson ${l.order}: ${l.title}\n${clip(lessonText(l), 1500)}`)
-          .join("\n\n")}`,
-        validate: (value) =>
-          parseQuizItems(obj(value).quiz, "quiz", scope.objectives.length).slice(0, band.finalItems),
-      });
+      finalAssessment = attachFinalConcepts(
+        await llm(ctx, "worker", {
+          maxTokens: 5000,
+          system: `Write a final assessment for a course. Mix items across all lessons, favoring questions that connect lessons.
+Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"","conceptLabel":""}]}
+Return exactly ${band.finalItems} items. ${QUIZ_RULES} objectiveIndex refers to the course objectives.
+${
+  conceptLines.length
+    ? `Each item must copy conceptId and conceptLabel from the lesson concepts in the user message. Do not invent concept ids.`
+    : ""
+}`,
+          user: `Course objectives:\n${scope.objectives.map((o, i) => `${i}. ${o}`).join("\n")}
+${conceptLines.length ? `\nLesson concepts:\n${conceptLines.join("\n")}\n` : ""}
+${ready.map((l) => `Lesson ${l.order}: ${l.title}\n${clip(lessonText(l), 1500)}`).join("\n\n")}`,
+          validate: (value) =>
+            parseQuizItems(obj(value).quiz, "quiz", scope.objectives.length).slice(0, band.finalItems),
+        }),
+        ready,
+      );
     } catch (error) {
       if (!(error instanceof BudgetExhausted)) throw error;
       warnings.push("Final assessment skipped: LLM budget reached.");
