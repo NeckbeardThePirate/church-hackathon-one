@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gradeShortAnswerLocal, parseGradeModel } from "./grade-answer.ts";
+import { GRADE_SYSTEM, gradeShortAnswerLocal, gradeUserPrompt, parseGradeModel } from "./grade-answer.ts";
 import { handleGrade } from "./grade-request.ts";
 import { gradeWithLearnModel } from "../server/learn/grade-short.ts";
 
@@ -19,6 +19,27 @@ test("the expected wording and an empty answer", () => {
   assert.equal(gradeShortAnswerLocal("   ", HESED_KEY).correct, false);
   assert.equal(gradeShortAnswerLocal("the sky is blue", HESED_KEY).correct, false);
   assert.equal(gradeShortAnswerLocal("the sky is blue", HESED_KEY).score, 0);
+});
+
+test("a paraphrase that hits both Lord's Prayer key points is correct", () => {
+  const expected =
+    "Both address God as Father and ask for daily bread; Matthew is longer, with extra petitions Luke omits.";
+  const given =
+    "both start by calling God Father and ask for daily food; Matthew's is longer, with extra lines Luke leaves out";
+  const grade = gradeShortAnswerLocal(given, expected);
+  assert.equal(grade.correct, true);
+  assert.equal(grade.partial, false);
+  assert.ok(grade.score >= 0.8);
+  assert.match(GRADE_SYSTEM, /Do not require the lesson's terms/);
+  assert.match(GRADE_SYSTEM, /contradicts the lesson/);
+  const prompt = gradeUserPrompt({
+    question: "Name one shared and one varying feature of Matthew's and Luke's Lord's Prayer.",
+    expected,
+    given,
+    rationale: "Both open by calling God Father and ask for daily bread. Matthew keeps lines Luke leaves out.",
+  });
+  assert.match(prompt, /match their meaning, not these words/);
+  assert.match(prompt, /do not require this wording/);
 });
 
 test("one shared concept is partial credit, not a full mark", () => {

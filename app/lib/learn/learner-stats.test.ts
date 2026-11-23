@@ -3,6 +3,7 @@ import test from "node:test";
 import { awardLearning, emptyStats, lessonMasteryPercent, statsFigures, ymdInTimeZone } from "./learner-stats.ts";
 import { emptyLearnProgress, normalizeLearnProgress, type LearnPlanProgress } from "./plan-progress.ts";
 import { adoptProgressForScope } from "./progress-scope.ts";
+import { parseLearnerStatsPut } from "../server/user-workspace-schema.ts";
 
 test("awarding XP once per reason advances the streak on a new local day", () => {
   const zone = "UTC";
@@ -73,4 +74,57 @@ test("a plan-scoped award does not pay again for the same lesson reason", () => 
   const first = awardLearning(emptyStats(), { reason: "read:path-ruth:l1", amount: 15 }, Date.parse("2026-11-16T15:00:00Z"), "UTC");
   const again = awardLearning(first, { reason: "read:path-ruth:plan-ruth:l1", amount: 15 }, Date.parse("2026-11-16T16:00:00Z"), "UTC");
   assert.equal(again, first);
+});
+
+test("the real client stats payload, with uuid path ids, passes validation", () => {
+  const projectId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const planId = "11111111-2222-4333-8444-555555555555";
+  const now = Date.parse("2026-11-23T15:00:00Z");
+  const readReason = `read:${projectId}:${planId}:l1`;
+  const quizReason = `quiz:${projectId}:${planId}:l1:0:correct`;
+  assert.ok(readReason.length > 80);
+  assert.ok(quizReason.length > 80);
+
+  const read = awardLearning(emptyStats(), { reason: readReason, amount: 15 }, now, "America/Los_Angeles");
+  const again = awardLearning(read, { reason: readReason, amount: 15 }, now + 1_000, "America/Los_Angeles");
+  assert.equal(again, read);
+  const quiz = awardLearning(read, { reason: quizReason, amount: 10 }, now + 2_000, "America/Los_Angeles");
+  const otherLesson = awardLearning(
+    quiz,
+    { reason: `read:${projectId}:${planId}:l2`, amount: 15 },
+    now + 3_000,
+    "America/Los_Angeles",
+  );
+  assert.equal(otherLesson.xp, 40);
+  assert.equal(otherLesson.payload.xpLog.length, 3);
+  const reasons = otherLesson.payload.xpLog.map((entry) => entry.reason);
+  assert.equal(new Set(reasons).size, 3);
+  for (const reason of reasons) {
+    assert.ok(reason.length <= 80);
+    assert.equal(reason.includes(projectId), false);
+  }
+
+  const parsed = parseLearnerStatsPut(otherLesson);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) {
+    assert.equal(parsed.patch.xp, 40);
+    assert.equal(parsed.patch.timezone, "America/Los_Angeles");
+    assert.deepEqual(parsed.patch.payload?.dailyGoalMet, otherLesson.payload.dailyGoalMet);
+    assert.deepEqual(parsed.patch.payload?.xpLog, otherLesson.payload.xpLog);
+  }
+
+  const rejected = parseLearnerStatsPut({
+    ...otherLesson,
+    payload: {
+      ...otherLesson.payload,
+      xpLog: [{ at: now, amount: 15, reason: readReason }],
+    },
+  });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.match(rejected.error, /payload\.xpLog reason must be a short string/);
+
+  const legacy = awardLearning(emptyStats(), { reason: `read:${projectId}:l1`, amount: 15 }, now, "UTC");
+  assert.equal(legacy.payload.xpLog[0]?.reason, `read:${projectId}:l1`);
+  const scoped = awardLearning(legacy, { reason: readReason, amount: 15 }, now + 1_000, "UTC");
+  assert.equal(scoped, legacy);
 });

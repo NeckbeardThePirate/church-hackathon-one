@@ -34,6 +34,7 @@ export function WorkspaceApp() {
   const [draft, setDraft] = useState<Project>(() => createProject());
   const [stats, setStats] = useState<StatsSnapshot | null>(null);
   const [statsReady, setStatsReady] = useState(false);
+  const [statsSaveError, setStatsSaveError] = useState<string | null>(null);
   const [liveProgress, setLiveProgress] = useState<LearnPlanProgress | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [missingPath, setMissingPath] = useState(false);
@@ -116,6 +117,7 @@ export function WorkspaceApp() {
   const statsRef = useRef(stats);
   statsRef.current = stats;
   const statsTimerRef = useRef<number | null>(null);
+  const statsSaveGenRef = useRef(0);
 
   const writePathUrl = useCallback((pathId: string | null, mode: "push" | "replace") => {
     const params = new URLSearchParams(window.location.search);
@@ -240,12 +242,21 @@ export function WorkspaceApp() {
     statsTimerRef.current = window.setTimeout(() => {
       const snapshot = statsRef.current;
       if (!snapshot) return;
+      const gen = ++statsSaveGenRef.current;
       void fetch("/api/workspace/stats", {
         method: "PUT",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(snapshot),
-      }).catch(() => undefined);
+      })
+        .then((response) => {
+          if (statsSaveGenRef.current !== gen) return;
+          setStatsSaveError(response.ok ? null : "Couldn't save XP. Reloading will drop the points you just earned.");
+        })
+        .catch(() => {
+          if (statsSaveGenRef.current !== gen) return;
+          setStatsSaveError("Couldn't save XP. Reloading will drop the points you just earned.");
+        });
     }, 300);
   }, []);
 
@@ -365,12 +376,24 @@ export function WorkspaceApp() {
 
   return (
     <>
-      {syncError ? (
-        <div
-          role="status"
-          className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-50 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-4 py-2.5 text-sm text-[var(--ink)] safe-area-x"
-        >
-          {syncError}
+      {syncError || statsSaveError ? (
+        <div className="fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-50 mx-auto flex w-fit max-w-[calc(100vw-2rem)] flex-col gap-2 safe-area-x">
+          {statsSaveError ? (
+            <p
+              role="status"
+              className="rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-4 py-2.5 text-sm text-[var(--ink)]"
+            >
+              {statsSaveError}
+            </p>
+          ) : null}
+          {syncError ? (
+            <p
+              role="status"
+              className="rounded-md border border-[var(--line)] bg-[var(--sidebar)] px-4 py-2.5 text-sm text-[var(--ink)]"
+            >
+              {syncError}
+            </p>
+          ) : null}
         </div>
       ) : null}
       <AppShell
