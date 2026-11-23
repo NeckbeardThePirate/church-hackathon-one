@@ -54,10 +54,12 @@ import {
   type PersistedQuiz,
   type PersistedQuizAnswer,
 } from "../lib/learn/plan-progress";
+import { derivePathMap } from "../lib/learn/path-map";
 import {
   articleDoneFor,
   articleScrollFor,
   conceptProgressKey,
+  FINAL_LESSON_ID,
   finalQuizFor,
   lessonQuizFor,
   readDoneFor,
@@ -83,6 +85,7 @@ import type {
 } from "../lib/learn/types";
 import { ArticleReadWindow } from "./ArticleReadWindow";
 import { LearnAgentFloat } from "./LearnAgentFloat";
+import { LearnPathMap } from "./LearnPathMap";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
 import { LessonVideoPlayer } from "./LessonVideoPlayer";
 import { PROJECT_KIND_LABEL } from "../lib/projects";
@@ -968,6 +971,7 @@ export function LearnPlanView({
 
   const [progress, setProgress] = useState<LearnPlanProgress>(hydrated);
   const [location, setLocation] = useState<LearnLocation>(() => resolveLocation(plan.lessons, hydrated.location));
+  const [homeView, setHomeView] = useState<"map" | "list">("map");
 
   const saveTimerRef = useRef<number | null>(null);
   const lessonScrollIntentRef = useRef<LessonScrollIntent>("restore");
@@ -1298,41 +1302,85 @@ export function LearnPlanView({
             ) : null}
 
             <section className="mt-10">
-              <h2 className="text-base font-semibold text-[var(--ink)]">Lessons</h2>
-              <ul className="mt-4 space-y-2">
-                {plan.lessons.map((lesson) => {
-                  const done = isLessonStepComplete(scope, lesson.id, lesson.quiz.length > 0, progress);
-                  const readPct = readScrollFor(progress, scope, lesson.id);
-                  const quiz = normalizeQuiz(lessonQuizFor(progress, scope, lesson.id), lesson.quiz.length);
-                  const quizAnswered = lesson.quiz.length ? quiz.answers.filter((a) => a.correct !== null).length : 0;
-                  return (
-                    <li key={lesson.id}>
-                      <button
-                        type="button"
-                        onClick={() => goLesson(lesson.id)}
-                        className="flex w-full items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))]"
-                      >
-                        <StepMark done={done} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium text-[var(--ink)]">
-                            Lesson {lesson.order}: {lesson.title}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-base font-semibold text-[var(--ink)]">Lessons</h2>
+                <div className="flex rounded-lg border border-[var(--line)] p-0.5" role="group" aria-label="Lesson view">
+                  <button
+                    type="button"
+                    aria-pressed={homeView === "map"}
+                    onClick={() => setHomeView("map")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                      homeView === "map"
+                        ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
+                        : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
+                    }`}
+                  >
+                    Path
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={homeView === "list"}
+                    onClick={() => setHomeView("list")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                      homeView === "list"
+                        ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
+                        : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
+                    }`}
+                  >
+                    List
+                  </button>
+                </div>
+              </div>
+              {homeView === "map" ? (
+                <LearnPathMap
+                  nodes={derivePathMap({
+                    lessons: plan.lessons,
+                    finalAssessment: plan.finalAssessment,
+                    progress,
+                    scope,
+                    now: Date.now(),
+                  })}
+                  onOpen={(nodeId) => {
+                    if (nodeId === FINAL_LESSON_ID) goFinal();
+                    else goLesson(nodeId);
+                  }}
+                />
+              ) : (
+                <ul className="mt-4 space-y-2">
+                  {plan.lessons.map((lesson) => {
+                    const done = isLessonStepComplete(scope, lesson.id, lesson.quiz.length > 0, progress);
+                    const readPct = readScrollFor(progress, scope, lesson.id);
+                    const quiz = normalizeQuiz(lessonQuizFor(progress, scope, lesson.id), lesson.quiz.length);
+                    const quizAnswered = lesson.quiz.length ? quiz.answers.filter((a) => a.correct !== null).length : 0;
+                    return (
+                      <li key={lesson.id}>
+                        <button
+                          type="button"
+                          onClick={() => goLesson(lesson.id)}
+                          className="flex w-full items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))]"
+                        >
+                          <StepMark done={done} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-[var(--ink)]">
+                              Lesson {lesson.order}: {lesson.title}
+                            </span>
+                            <span className="mt-1 block text-xs text-[var(--ink-muted)]">
+                              {done
+                                ? "Complete"
+                                : readPct > 0
+                                  ? `${readPct}% read${lesson.quiz.length ? ` · quiz ${quizAnswered}/${lesson.quiz.length}` : ""}`
+                                  : `${lesson.estimatedMinutes} min${lesson.quiz.length ? ` · ${lesson.quiz.length} quiz questions` : ""}`}
+                            </span>
                           </span>
-                          <span className="mt-1 block text-xs text-[var(--ink-muted)]">
-                            {done
-                              ? "Complete"
-                              : readPct > 0
-                                ? `${readPct}% read${lesson.quiz.length ? ` · quiz ${quizAnswered}/${lesson.quiz.length}` : ""}`
-                                : `${lesson.estimatedMinutes} min${lesson.quiz.length ? ` · ${lesson.quiz.length} quiz questions` : ""}`}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </section>
 
-            {hasFinal ? (
+            {homeView === "list" && hasFinal ? (
               <section className="mt-8">
                 <button
                   type="button"
