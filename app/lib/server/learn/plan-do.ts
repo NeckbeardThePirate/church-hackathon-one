@@ -34,6 +34,7 @@ import {
 import type { PassageRef } from "@/app/lib/bible/parse-reference";
 import { mergeConceptMastery, type StoredLearnAttempt } from "../../learn/attempts.ts";
 import { normalizeLearnProgress, type ConceptMastery } from "../../learn/plan-progress.ts";
+import { applyAttemptSchedule, indexMasteryByConcept, preferMasteryRows } from "../../learn/sm2.ts";
 import type { LearnEnv, LearnMessage } from "./queues";
 
 export const BUDGET = {
@@ -478,9 +479,10 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   }
 
   /**
-   * Append the attempt and merge concept rows in one storage transaction.
-   * Existing plan-DO rows keep their scheduling fields. Only missing concept ids are created.
-   * The caller's object is not written over the stored map.
+   * Append the attempt and schedule every answered concept in one transaction.
+   * SM-2 here is the source of truth. A workspace row reviewed later than the plan row
+   * is the base, so an offline review is not applied a second time.
+   * Concepts that are not in the attempt keep their scheduling fields.
    */
   async recordLearnAttempt(record: StoredLearnAttempt): Promise<Record<string, ConceptMastery>> {
     if (record.target !== "lesson" && record.target !== "final" && record.target !== "review") {
@@ -494,9 +496,13 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       ...(record.lessonId ? { lessonId: record.lessonId } : {}),
       answers: record.answers,
     };
+    const timeZone = record.timeZone && record.timeZone.length <= 100 ? record.timeZone : "UTC";
     return this.ctx.storage.transactionSync(() => {
       const stored = this.ctx.storage.kv.get<unknown>("conceptMastery");
-      const merged = mergeConceptMastery(stored ?? {}, attempt);
+      const planRows = normalizeLearnProgress({ conceptMastery: stored ?? {} }).conceptMastery;
+      const base = preferMasteryRows(planRows, indexMasteryByConcept(record.workspaceMastery));
+      const merged = mergeConceptMastery(base, attempt);
+      const scheduled = applyAttemptSchedule(merged, attempt, record.at, timeZone);
       const prev = this.ctx.storage.kv.get<unknown>("attempts");
       const attempts = Array.isArray(prev) ? prev : [];
       attempts.push({
@@ -508,8 +514,8 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
         answers: record.answers,
       });
       this.ctx.storage.kv.put("attempts", attempts.slice(-100));
-      this.ctx.storage.kv.put("conceptMastery", merged);
-      return merged;
+      this.ctx.storage.kv.put("conceptMastery", scheduled);
+      return scheduled;
     });
   }
 

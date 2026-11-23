@@ -58,6 +58,7 @@ export async function handleLearnAttempt(deps: LearnAttemptDeps): Promise<Respon
       at: now,
       target: attempt.target,
       ...(attempt.lessonId ? { lessonId: attempt.lessonId } : {}),
+      ...(parsed.timeZone ? { timeZone: parsed.timeZone } : {}),
       answers: attempt.answers,
     });
     const mirrored = await deps.mirrorAttempt({ attempt, conceptMastery, now });

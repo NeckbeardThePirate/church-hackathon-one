@@ -40,7 +40,7 @@ export type PersistedQuiz = {
   settled?: boolean;
 };
 
-/** SM-2 row for one concept. Scheduling fields stay at defaults until the review card. */
+/** SM-2 row for one concept. dueAt 0 means unscheduled and is not due. */
 export type ConceptMastery = {
   conceptId: string;
   conceptLabel: string;
@@ -459,6 +459,11 @@ function unionUnsyncedProgress(remote: LearnPlanProgress, local: LearnPlanProgre
     const quiz = unionQuizSlot(remote.lessonQuiz[id] ?? null, local.lessonQuiz[id] ?? null);
     if (quiz) lessonQuiz[id] = quiz;
   }
+  const conceptMastery = { ...remote.conceptMastery };
+  for (const [key, row] of Object.entries(local.conceptMastery)) {
+    const saved = conceptMastery[key];
+    if (!saved || (row.lastReviewedAt ?? 0) > (saved.lastReviewedAt ?? 0)) conceptMastery[key] = row;
+  }
   return {
     ...remote,
     lessonReadScroll,
@@ -466,6 +471,7 @@ function unionUnsyncedProgress(remote: LearnPlanProgress, local: LearnPlanProgre
     articleScroll,
     articleDone,
     lessonQuiz,
+    conceptMastery,
     finalQuiz: unionQuizSlot(remote.finalQuiz, local.finalQuiz),
   };
 }

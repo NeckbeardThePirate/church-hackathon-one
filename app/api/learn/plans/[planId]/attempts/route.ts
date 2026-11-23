@@ -17,10 +17,16 @@ export async function POST(request: Request, context: { params: Promise<{ planId
     },
     recordPlanAttempt: async (record) => {
       if (owned instanceof Response) throw new Error("Sign in required.");
-      const scope = await userWorkspaceStub(owned.userId).learnScopeForPlan(planId);
+      const workspace = userWorkspaceStub(owned.userId);
+      const scope = await workspace.learnScopeForPlan(planId);
+      const project = scope ? await workspace.getProject(scope.projectId) : null;
+      const stats = await workspace.getLearnerStats();
+      const timeZone = stats.timezone || record.timeZone || "UTC";
       return owned.stub.recordLearnAttempt({
         ...record,
         planId,
+        timeZone,
+        ...(project?.learnProgress?.conceptMastery ? { workspaceMastery: project.learnProgress.conceptMastery } : {}),
         ...(scope ? { projectId: scope.projectId } : {}),
       });
     },
