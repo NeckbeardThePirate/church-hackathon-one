@@ -188,6 +188,13 @@ export type PlanSnapshot = {
   error?: string;
 };
 
+/** SSE `gap` event. A finished job includes the plan; a failure includes `error` and leaves the core plan usable. */
+export type GapJobEvent = {
+  lessonId?: string;
+  error?: string;
+  plan?: LearnPlan;
+};
+
 /** Sent every few seconds over SSE while a plan is live: proof that work is happening. */
 export type Heartbeat = {
   at: number;

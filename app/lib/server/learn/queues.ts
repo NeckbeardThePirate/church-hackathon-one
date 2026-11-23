@@ -28,10 +28,16 @@ export type LearnMessage = {
   lessonId?: string;
   /** Critic repair round. Part of the idempotency key so repairs re-run stages. */
   round: number;
+  /**
+   * Gap practice lesson. Teach then check only.
+   * The idempotency key is prefixed so a finished core lesson can run this later.
+   */
+  job?: "gap";
 };
 
 export function idempotencyKey(msg: LearnMessage): string {
-  return `${msg.stage}:${msg.lessonId ?? "-"}:r${msg.round}`;
+  const core = `${msg.stage}:${msg.lessonId ?? "-"}:r${msg.round}`;
+  return msg.job === "gap" ? `gap:${core}` : core;
 }
 
 /** Producer binding name in env for each stage, e.g. LEARN_Q_TEACH. */

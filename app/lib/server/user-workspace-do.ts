@@ -11,6 +11,8 @@ import {
 import type { ConceptMastery } from "../learn/plan-progress.ts";
 import { claimLegacyProgress } from "../learn/plan-progress.ts";
 import { scopeFromProject } from "../learn/progress-scope.ts";
+import { insertGapLesson } from "../learn/gaps.ts";
+import type { LearnLesson } from "../learn/types.ts";
 import { normalizeStoredProject, type Project, type StoredProjectKind } from "../projects.ts";
 import type { ChatGptIdentity } from "./chatgpt-auth.ts";
 import {
@@ -167,6 +169,20 @@ export class UserWorkspaceDO extends DurableObject {
     const learnProgress = mirrorAttemptOntoProgress(project.learnProgress, input.attempt, input.conceptMastery, scope);
     const updatedAt = Math.max(project.updatedAt, input.now);
     this.upsertProject({ ...project, learnProgress, updatedAt });
+    return { ok: true };
+  }
+
+  /**
+   * Insert one gap lesson into the project plan, after its parent.
+   * Re-reads the row first so a progress save is kept. A missing project is not an error:
+   * the plan DO still holds the lesson and the browser save can persist it.
+   */
+  mergeGapLesson(planId: string, lesson: LearnLesson, now: number): { ok: true } | { ok: false; error: string } {
+    const project = this.findProjectByLearnPlan(planId);
+    if (!project?.learnPlan) return { ok: true };
+    const learnPlan = { ...project.learnPlan, lessons: insertGapLesson(project.learnPlan.lessons, lesson) };
+    const updatedAt = Math.max(project.updatedAt, now);
+    this.upsertProject({ ...project, learnPlan, updatedAt });
     return { ok: true };
   }
 

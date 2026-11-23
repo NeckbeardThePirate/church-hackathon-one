@@ -102,6 +102,11 @@ async function degradeOrFail(env: LearnEnv, msg: LearnMessage, reason: string): 
   const stub = planStub(env, msg.planId);
   const ctx = { env, msg, stub };
 
+  if (msg.job === "gap") {
+    await stub.abandonGap(msg.lessonId ?? "", reason);
+    return;
+  }
+
   if (LESSON_STAGES.has(msg.stage) && msg.lessonId) {
     const lesson = await stub.getLesson(msg.lessonId);
     if (lesson) {

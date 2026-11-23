@@ -439,6 +439,7 @@ export function WorkspaceApp() {
             onSaveProgress={saveLearnProgress}
             onProgress={setLiveProgress}
             onAward={award}
+            onPlan={(plan) => updateProject(activeProject.id, { learnPlan: plan })}
             stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak } : null}
           />
         ) : (
