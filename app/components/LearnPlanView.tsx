@@ -12,13 +12,7 @@ import {
 } from "react";
 import { bibleGatewayEsvUrl } from "../lib/bible/bible-gateway";
 import { gradeShortAnswerLocal, type GradeResult } from "../lib/learn/grade-answer";
-import {
-  XP_QUIZ_ATTEMPT,
-  XP_QUIZ_CORRECT,
-  XP_QUIZ_PARTIAL,
-  XP_READ_LESSON,
-  lessonMasteryPercent,
-} from "../lib/learn/learner-stats";
+import { lessonMasteryPercent, xpReason, type DailyGoalStatus, type XpEventKind } from "../lib/learn/learner-stats";
 import { postLearnAttempt } from "../lib/learn/post-attempt";
 import {
   keepFresherConceptMastery,
@@ -73,7 +67,7 @@ import {
   type PersistedQuiz,
   type PersistedQuizAnswer,
 } from "../lib/learn/plan-progress";
-import { derivePathMap } from "../lib/learn/path-map";
+import { attemptPassed, derivePathMap } from "../lib/learn/path-map";
 import {
   articleDoneFor,
   articleScrollFor,
@@ -121,9 +115,11 @@ type Props = {
   savedProgress?: LearnPlanProgress;
   onSaveProgress?: (projectId: string, progress: LearnPlanProgress) => void;
   onProgress?: (progress: LearnPlanProgress) => void;
-  onAward?: (reason: string, amount: number) => void;
+  onAward?: (reason: string, kind: XpEventKind) => void;
   onPlan?: (plan: LearnPlan) => void;
   stats?: { xp: number; streak: number; timezone?: string | null } | null;
+  goal?: DailyGoalStatus | null;
+  focusRequest?: { nonce: number; location: LearnLocation; review: boolean } | null;
 };
 
 function esc(text: string): string {
@@ -923,23 +919,37 @@ function rememberQuiz(quiz: PersistedQuiz): PersistedQuiz {
   return { ...quiz, bestCorrect, ...(settled ? { settled: true } : {}) };
 }
 
+function wasGraded(answer: PersistedQuizAnswer | undefined): boolean {
+  if (!answer) return false;
+  if (answer.correct != null) return true;
+  if ((answer.score ?? 0) > 0) return true;
+  if (answer.shortSubmitted) return true;
+  return Boolean(answer.mcChoice);
+}
+
 function awardQuizDelta(
   scope: ProgressScope,
   lessonKey: string,
   previous: PersistedQuiz | undefined,
   next: PersistedQuiz,
-  award: ((reason: string, amount: number) => void) | undefined,
+  award: ((reason: string, kind: XpEventKind) => void) | undefined,
+  gap: boolean,
 ) {
   if (!award) return;
-  next.answers.forEach((answer, index) => {
-    if (answer.correct == null && (answer.score ?? 0) < 0.4) return;
-    const before = previous?.answers[index];
-    if (before?.correct === true && answer.correct === true) return;
-    if (before && before.correct === answer.correct && (before.score ?? null) === (answer.score ?? null)) return;
-    const outcome = answer.correct ? "correct" : (answer.score ?? 0) >= 0.4 ? "partial" : "wrong";
-    const amount = outcome === "correct" ? XP_QUIZ_CORRECT : outcome === "partial" ? XP_QUIZ_PARTIAL : XP_QUIZ_ATTEMPT;
-    award(`quiz:${scope.projectId}:${scope.planId}:${lessonKey}:${index}:${outcome}`, amount);
-  });
+  const retry = isQuizSettled(previous);
+  if (!retry) {
+    next.answers.forEach((answer, index) => {
+      if (answer.correct !== true || wasGraded(previous?.answers[index])) return;
+      award(xpReason("first", [scope.projectId, scope.planId, lessonKey, String(index)]), "first");
+    });
+  }
+  if (!retry && isQuizSettled(next)) {
+    if (lessonKey === "final") award(xpReason("final", [scope.projectId, scope.planId]), "final");
+    else award(xpReason("quiz", [scope.projectId, scope.planId, lessonKey]), "quiz");
+  }
+  if (gap && isQuizSettled(next) && attemptPassed(quizCorrectCount(next), next.answers.length)) {
+    award(xpReason("gap", [scope.projectId, scope.planId, lessonKey]), "gap");
+  }
 }
 
 type ConceptUpdate = {
@@ -1130,6 +1140,8 @@ export function LearnPlanView({
   onAward,
   onPlan,
   stats,
+  goal = null,
+  focusRequest = null,
 }: Props) {
   const title = displayTitle?.trim() || plan.title.trim() || plan.topic;
   const totalMin = plan.lessons.reduce((n, l) => n + l.estimatedMinutes, 0);
@@ -1193,7 +1205,10 @@ export function LearnPlanView({
       onProgressRef.current?.(next);
       for (const lesson of plan.lessons) {
         if (readDoneFor(next, scope, lesson.id) && !readDoneFor(prev, scope, lesson.id)) {
-          onAwardRef.current?.(`read:${projectId}:${plan.id}:${lesson.id}`, XP_READ_LESSON);
+          onAwardRef.current?.(xpReason("read", [projectId, plan.id, lesson.id]), "read");
+          if (lessonKind(lesson) === "gap" && lesson.quiz.length === 0) {
+            onAwardRef.current?.(xpReason("gap", [projectId, plan.id, lesson.id]), "gap");
+          }
         }
       }
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
@@ -1398,7 +1413,8 @@ export function LearnPlanView({
           ? (finalQuizFor(progressRef.current, scope) ?? undefined)
           : lessonQuizFor(progressRef.current, scope, lessonKey);
       const updates = conceptUpdatesForQuiz(progressRef.current, scope, lessonKey, items, previous, stored);
-      awardQuizDelta(scope, lessonKey, previous, stored, onAwardRef.current);
+      const source = plan.lessons.find((lesson) => lesson.id === lessonKey);
+      awardQuizDelta(scope, lessonKey, previous, stored, onAwardRef.current, source ? lessonKind(source) === "gap" : false);
       const reviewedAt = Date.now();
       commitProgress((prev) => {
         const withQuiz =
@@ -1442,7 +1458,7 @@ export function LearnPlanView({
         }).then(adoptMastery);
       }
     },
-    [commitProgress, plan.id, requestPractice, scope, timeZone],
+    [commitProgress, plan.id, plan.lessons, requestPractice, scope, timeZone],
   );
 
   const watchKey = Object.values(gapWatch)
@@ -1450,6 +1466,26 @@ export function LearnPlanView({
     .filter(Boolean)
     .sort()
     .join(",");
+
+  const focusNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!focusRequest || focusNonceRef.current === focusRequest.nonce) return;
+    focusNonceRef.current = focusRequest.nonce;
+    navigate(focusRequest.location, "top");
+    if (!focusRequest.review) return;
+    const timer = window.setTimeout(() => document.getElementById("learn-review")?.scrollIntoView({ block: "start" }), 60);
+    return () => window.clearTimeout(timer);
+  }, [focusRequest, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("review") !== "1" || location.screen !== "overview") return;
+    const timer = window.setTimeout(() => document.getElementById("learn-review")?.scrollIntoView({ block: "start" }), 60);
+    params.delete("review");
+    const text = params.toString();
+    window.history.replaceState(null, "", text ? `/?${text}` : "/");
+    return () => window.clearTimeout(timer);
+  }, [location.screen]);
 
   useEffect(() => {
     if (!watchKey) return;
@@ -1616,6 +1652,7 @@ export function LearnPlanView({
               ? lessonMasteryPercent({ scope, lessonId: activeLesson.id, quizCount: activeLesson.quiz.length, progress })
               : null
           }
+          goal={goal}
         />
         {location.screen !== "overview" ? (
           <button
@@ -1670,7 +1707,7 @@ export function LearnPlanView({
               timeZone={timeZone}
               gradeShort={gradeShort}
               onCommit={(updater) => commitProgress(updater, true)}
-              onAward={(reason, amount) => onAwardRef.current?.(reason, amount)}
+              onAward={(reason, kind) => onAwardRef.current?.(reason, kind)}
             />
 
             {practice.cards.length ? (

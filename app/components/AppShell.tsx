@@ -4,7 +4,7 @@ import { UserButton } from "@clerk/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
 import { defaultTitle, isLegacyProject, type Project } from "../lib/projects";
-import { statsFigures, type LessonMastery } from "../lib/learn/learner-stats";
+import { statsFigures, type DailyGoalStatus, type LessonMastery } from "../lib/learn/learner-stats";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
 
 type AppShellProps = {
@@ -17,6 +17,10 @@ type AppShellProps = {
   sidebarCompact?: boolean;
   stats?: { xp: number; streak: number } | null;
   mastery?: LessonMastery[];
+  goal?: DailyGoalStatus | null;
+  nextLabel?: string | null;
+  onNext?: () => void;
+  onShowProgress?: () => void;
   onRequestDelete?: (id: string) => void;
 };
 
@@ -29,6 +33,10 @@ export function AppShell({
   sidebarCompact = false,
   stats = null,
   mastery = [],
+  goal = null,
+  nextLabel = null,
+  onNext,
+  onShowProgress,
   onRequestDelete,
 }: AppShellProps) {
   const { key: clerkKey } = useClerkKey();
@@ -128,7 +136,7 @@ export function AppShell({
 
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
-      <header className="safe-area-top safe-area-x fixed inset-x-0 top-0 z-50 flex h-12 items-center gap-2 border-b border-[var(--line)] bg-[var(--sidebar)] px-3 md:hidden">
+      <header className="safe-area-top fixed inset-x-0 top-0 z-50 flex h-12 items-center gap-2 border-b border-[var(--line)] bg-[var(--sidebar)] pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] md:hidden">
         <button
           type="button"
           onClick={() => setMobileNavOpen(true)}
@@ -166,8 +174,8 @@ export function AppShell({
       ) : null}
 
       <aside
-        className={`safe-area-top safe-area-bottom fixed inset-y-0 left-0 z-[60] flex w-[min(100vw-2.5rem,280px)] shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] py-4 transition-transform duration-300 ease-out max-md:pointer-events-none md:static md:z-auto md:min-h-0 md:w-[240px] md:overflow-hidden md:translate-x-0 md:pointer-events-auto md:px-3 ${
-          mobileNavOpen ? "max-md:translate-x-0 max-md:pointer-events-auto px-3" : "-translate-x-full px-3 md:translate-x-0"
+        className={`safe-area-top safe-area-bottom fixed inset-y-0 left-0 z-[60] flex w-[min(100vw-2.5rem,280px)] shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] py-4 transition-transform duration-300 ease-out md:static md:z-auto md:min-h-0 md:w-[240px] md:overflow-hidden md:translate-x-0 md:pointer-events-auto md:px-3 ${
+          mobileNavOpen ? "max-md:translate-x-0 max-md:pointer-events-auto px-3" : "max-md:pointer-events-none -translate-x-full px-3 md:translate-x-0"
         } ${
           compactDesktop
             ? "md:w-[56px] md:px-1.5"
@@ -214,7 +222,29 @@ export function AppShell({
               xp={stats?.xp ?? 0}
               streak={stats?.streak ?? 0}
               lessons={mastery}
+              goal={stats ? goal : null}
+              nextLabel={nextLabel}
+              onNext={
+                onNext
+                  ? () => {
+                      onNext();
+                      setMobileNavOpen(false);
+                    }
+                  : undefined
+              }
             />
+            {onShowProgress ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onShowProgress();
+                  setMobileNavOpen(false);
+                }}
+                className="mt-1 flex min-h-11 w-full items-center rounded-md px-2 text-left text-sm text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]"
+              >
+                Progress
+              </button>
+            ) : null}
           </div>
         ) : null}
         <nav

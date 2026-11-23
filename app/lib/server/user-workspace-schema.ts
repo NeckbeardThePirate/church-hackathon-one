@@ -2,6 +2,14 @@
  * UserWorkspaceDO SQLite schema and the single learner_stats row.
  * Kept free of cloudflare:workers so migrations can run under node:sqlite.
  */
+import {
+  applyXpAwards,
+  emptyStats,
+  parseXpAwardRequest,
+  type StatsPayload,
+  type StatsSnapshot,
+  type XpLogEntry,
+} from "../learn/learner-stats.ts";
 
 export const WORKSPACE_SCHEMA_VERSION = 3;
 
@@ -25,26 +33,11 @@ export type WorkspaceSql = {
   ): { one(): Record<string, unknown>; toArray(): Record<string, unknown>[] };
 };
 
-export type XpLogEntry = {
-  at: number;
-  amount: number;
-  reason: string;
-};
+export type { XpLogEntry };
 
-export type LearnerStatsPayload = {
-  dailyGoalMet: string[];
-  xpLog: XpLogEntry[];
-};
+export type LearnerStatsPayload = StatsPayload;
 
-export type LearnerStats = {
-  xp: number;
-  streak: number;
-  /** Null until the client sends an IANA zone. Never invented here. */
-  timezone: string | null;
-  last_goal_date: string | null;
-  last_activity_at: number | null;
-  payload: LearnerStatsPayload;
-};
+export type LearnerStats = StatsSnapshot;
 
 export class StatsInputError extends Error {
   constructor(message: string) {
@@ -57,6 +50,7 @@ const MAX_XP = 1_000_000_000;
 const MAX_STREAK = 100_000;
 const MAX_LOG = 100;
 const MAX_GOAL_DATES = 800;
+const MAX_AWARDED = 4000;
 const MAX_ACTIVITY_AT = 10_000_000_000_000;
 
 /** Fields present on a PUT replace stored values. Omitted fields stay as stored. */
@@ -69,18 +63,14 @@ export type LearnerStatsPatch = {
   payload?: {
     dailyGoalMet?: string[];
     xpLog?: XpLogEntry[];
+    awarded?: string[];
+    todayXp?: number;
+    todayYmd?: string | null;
   };
 };
 
 export function emptyLearnerStats(): LearnerStats {
-  return {
-    xp: 0,
-    streak: 0,
-    timezone: null,
-    last_goal_date: null,
-    last_activity_at: null,
-    payload: { dailyGoalMet: [], xpLog: [] },
-  };
+  return emptyStats();
 }
 
 export function isIanaTimeZone(value: string): boolean {
@@ -162,21 +152,26 @@ export function applyLearnerStatsPatch(current: LearnerStats, patch: LearnerStat
     payload: {
       dailyGoalMet: patch.payload?.dailyGoalMet !== undefined ? patch.payload.dailyGoalMet : current.payload.dailyGoalMet,
       xpLog: patch.payload?.xpLog !== undefined ? patch.payload.xpLog : current.payload.xpLog,
+      awarded: patch.payload?.awarded !== undefined ? patch.payload.awarded : current.payload.awarded,
+      todayXp: patch.payload?.todayXp !== undefined ? patch.payload.todayXp : current.payload.todayXp,
+      todayYmd: patch.payload?.todayYmd !== undefined ? patch.payload.todayYmd : current.payload.todayYmd,
     },
   };
 }
 
 function parsePayloadPatch(
   value: unknown,
-): { ok: true; payload: { dailyGoalMet?: string[]; xpLog?: XpLogEntry[] } } | { ok: false; error: string } {
+): { ok: true; payload: LearnerStatsPatch["payload"] } | { ok: false; error: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, error: "payload must be an object." };
   }
   const raw = value as Record<string, unknown>;
-  const payload: { dailyGoalMet?: string[]; xpLog?: XpLogEntry[] } = {};
+  const payload: NonNullable<LearnerStatsPatch["payload"]> = {};
   const daily = "dailyGoalMet" in raw ? raw.dailyGoalMet : undefined;
   const log = "xpLog" in raw ? raw.xpLog : undefined;
-  if (daily === undefined && log === undefined) return { ok: true, payload };
+  const awarded = "awarded" in raw ? raw.awarded : undefined;
+  const todayXp = "todayXp" in raw ? raw.todayXp : undefined;
+  const todayYmd = "todayYmd" in raw ? raw.todayYmd : undefined;
   if (daily !== undefined) {
     if (!Array.isArray(daily) || daily.length > MAX_GOAL_DATES || daily.some((item) => typeof item !== "string" || !isYmdDate(item))) {
       return { ok: false, error: "payload.dailyGoalMet must be a list of YYYY-MM-DD dates." };
@@ -204,6 +199,27 @@ function parsePayloadPatch(
     }
     payload.xpLog = xpLog;
   }
+  if (awarded !== undefined) {
+    if (
+      !Array.isArray(awarded) ||
+      awarded.length > MAX_AWARDED ||
+      awarded.some((item) => typeof item !== "string" || item.length > 80)
+    ) {
+      return { ok: false, error: "payload.awarded must be a list of short reasons." };
+    }
+    payload.awarded = awarded as string[];
+  }
+  if (todayXp !== undefined) {
+    if (typeof todayXp !== "number" || !Number.isInteger(todayXp) || todayXp < 0 || todayXp > MAX_XP) {
+      return { ok: false, error: "payload.todayXp must be a whole number from 0 up." };
+    }
+    payload.todayXp = todayXp;
+  }
+  if (todayYmd !== undefined) {
+    if (todayYmd === null) payload.todayYmd = null;
+    else if (typeof todayYmd === "string" && isYmdDate(todayYmd)) payload.todayYmd = todayYmd;
+    else return { ok: false, error: "payload.todayYmd must be YYYY-MM-DD, or null." };
+  }
   return { ok: true, payload };
 }
 
@@ -226,10 +242,14 @@ function rowToStats(row: StatsRow): LearnerStats {
   let payload = emptyLearnerStats().payload;
   try {
     const parsed = parsePayloadPatch(JSON.parse(row.payload));
-    if (parsed.ok) {
+    if (parsed.ok && parsed.payload) {
+      const xpLog = parsed.payload.xpLog ?? [];
       payload = {
         dailyGoalMet: parsed.payload.dailyGoalMet ?? [],
-        xpLog: parsed.payload.xpLog ?? [],
+        xpLog,
+        awarded: parsed.payload.awarded ?? xpLog.map((entry) => entry.reason),
+        todayXp: parsed.payload.todayXp ?? 0,
+        todayYmd: parsed.payload.todayYmd ?? null,
       };
     }
   } catch {
@@ -329,5 +349,20 @@ export function setLearnerStats(sql: WorkspaceSql, input: unknown): LearnerStats
   const parsed = parseLearnerStatsPut(input);
   if (!parsed.ok) throw new StatsInputError(parsed.error);
   writeLearnerStats(sql, applyLearnerStatsPatch(readLearnerStats(sql), parsed.patch));
+  return readLearnerStats(sql);
+}
+
+/**
+ * Add XP for learning events. The stored row is the source of truth:
+ * client amounts are ignored, a repeated reason does not pay again, and a
+ * later save cannot drop awards already stored.
+ */
+export function awardStoredLearnerStats(sql: WorkspaceSql, input: unknown, now: number): LearnerStats {
+  const parsed = parseXpAwardRequest(input);
+  if (!parsed.ok) throw new StatsInputError(parsed.error);
+  const current = readLearnerStats(sql);
+  const result = applyXpAwards(current, parsed.events, now, parsed.timezone);
+  if (result.error) throw new StatsInputError(result.error);
+  if (result.stats !== current) writeLearnerStats(sql, result.stats);
   return readLearnerStats(sql);
 }

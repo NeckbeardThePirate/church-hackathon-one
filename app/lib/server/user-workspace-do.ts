@@ -17,6 +17,7 @@ import { normalizeStoredProject, type Project, type StoredProjectKind } from "..
 import type { ChatGptIdentity } from "./chatgpt-auth.ts";
 import {
   applyWorkspaceMigrations,
+  awardStoredLearnerStats,
   readLearnerStats,
   setLearnerStats as persistLearnerStats,
   type LearnerStats,
@@ -245,6 +246,11 @@ export class UserWorkspaceDO extends DurableObject {
 
   setLearnerStats(input: unknown): LearnerStats {
     return persistLearnerStats(workspaceSql(this.ctx.storage.sql), input);
+  }
+
+  /** Server-owned XP. `now` is the worker clock, not a client timestamp. */
+  awardLearnerStats(input: unknown, now = Date.now()): LearnerStats {
+    return awardStoredLearnerStats(workspaceSql(this.ctx.storage.sql), input, now);
   }
 
   setPref(key: string, value: string): void {

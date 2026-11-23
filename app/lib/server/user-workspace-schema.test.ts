@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { handleStatsGet, handleStatsPut } from "./workspace-stats.ts";
+import { handleStatsAward, handleStatsGet, handleStatsPut } from "./workspace-stats.ts";
 import {
   applyLearnerStatsPatch,
   applyWorkspaceMigrations,
+  awardStoredLearnerStats,
   readLearnerStats,
   WORKSPACE_SCHEMA_VERSION,
   writeLearnerStats,
@@ -42,7 +43,13 @@ const roundTrip = {
   timezone: "America/Los_Angeles",
   last_goal_date: "2026-11-17",
   last_activity_at: 1_700_000_000_000,
-  payload: { dailyGoalMet: ["2026-11-17"], xpLog: [{ at: 1_700_000_000_000, amount: 10, reason: "lesson" }] },
+  payload: {
+    dailyGoalMet: ["2026-11-17"],
+    xpLog: [{ at: 1_700_000_000_000, amount: 10, reason: "lesson" }],
+    awarded: ["lesson"],
+    todayXp: 0,
+    todayYmd: null,
+  },
 };
 
 test("schema v3 migrates an existing v2 workspace once and get/set keeps a single stats row", () => {
@@ -134,10 +141,10 @@ test("stats routes require sign-in and round-trip xp, streak, timezone, and last
   const saved = await handleStatsPut(auth, roundTrip, save);
   assert.equal(saved.status, 200);
   const body = (await saved.json()) as LearnerStats;
-  assert.equal(body.xp, 35);
-  assert.equal(body.streak, 4);
+  assert.equal(body.xp, 0);
+  assert.equal(body.streak, 0);
   assert.equal(body.timezone, "America/Los_Angeles");
-  assert.equal(body.last_goal_date, "2026-11-17");
+  assert.equal(body.last_goal_date, null);
 
   const again = await handleStatsGet(auth, () => readLearnerStats(sql));
   assert.deepEqual(await again.json(), body);
@@ -146,27 +153,54 @@ test("stats routes require sign-in and round-trip xp, streak, timezone, and last
   const cleared = (await unset.json()) as LearnerStats;
   assert.equal(cleared.timezone, null);
   assert.equal(cleared.last_goal_date, null);
-  assert.equal(cleared.xp, 35);
+  assert.equal(cleared.xp, 0);
   const row = db.prepare("SELECT timezone FROM learner_stats WHERE id = 1").get() as { timezone: string };
   assert.equal(row.timezone, "");
   assert.equal(count(db, "learner_stats"), 1);
 
-  const { payload: _payload, ...withoutPayload } = roundTrip;
-  const omitted = await handleStatsPut(auth, { ...withoutPayload, xp: 41 }, save);
-  const kept = (await omitted.json()) as LearnerStats;
-  assert.equal(kept.xp, 41);
-  assert.equal(kept.streak, 4);
+  const kept = (await (await handleStatsPut(auth, { xp: 999, streak: 9, timezone: "America/Los_Angeles" }, save)).json()) as LearnerStats;
+  assert.equal(kept.xp, 0);
+  assert.equal(kept.streak, 0);
   assert.equal(kept.timezone, "America/Los_Angeles");
-  assert.equal(kept.last_goal_date, "2026-11-17");
-  assert.equal(kept.payload.dailyGoalMet[0], "2026-11-17");
-  assert.equal(kept.payload.xpLog[0]?.amount, 10);
+});
 
-  const onlyXp = await handleStatsPut(auth, { xp: 42 }, save);
-  const still = (await onlyXp.json()) as LearnerStats;
-  assert.equal(still.xp, 42);
-  assert.equal(still.streak, 4);
-  assert.equal(still.payload.xpLog[0]?.amount, 10);
-  assert.equal(still.payload.dailyGoalMet[0], "2026-11-17");
+test("awarding XP is idempotent, ignores a client amount, and a later stats put cannot drop it", async () => {
+  const { sql } = open();
+  applyWorkspaceMigrations(sql);
+  const auth = { userId: "user_1" };
+  const now = Date.parse("2026-11-16T20:00:00Z");
+  const request = {
+    timezone: "America/Los_Angeles",
+    events: [{ kind: "read", reason: "read:p:l1", amount: 999 }],
+  };
+  const award = (input: unknown, at: number) => awardStoredLearnerStats(sql, input, at);
+  const first = await handleStatsAward(auth, request, now, award);
+  assert.equal(first.status, 200);
+  const body = (await first.json()) as LearnerStats;
+  assert.equal(body.xp, 10);
+  assert.equal(body.streak, 1);
+  assert.equal(body.timezone, "America/Los_Angeles");
+  assert.equal(body.payload.xpLog[0]?.amount, 10);
+
+  const reload = await handleStatsAward(auth, request, now + 5_000, award);
+  const reloaded = (await reload.json()) as LearnerStats;
+  assert.equal(reloaded.xp, 10);
+  assert.equal(reloaded.payload.xpLog.length, 1);
+
+  const wiped = await handleStatsPut(auth, { xp: 0, streak: 0, payload: { dailyGoalMet: [], xpLog: [] } }, (patch) => {
+    writeLearnerStats(sql, applyLearnerStatsPatch(readLearnerStats(sql), patch));
+    return readLearnerStats(sql);
+  });
+  assert.equal(wiped.status, 200);
+  const still = (await wiped.json()) as LearnerStats;
+  assert.equal(still.xp, 10);
+  assert.equal(still.streak, 1);
+  assert.equal(still.payload.xpLog[0]?.reason, "read:p:l1");
+
+  const denied = await handleStatsAward(Response.json({ error: "Sign in required." }, { status: 401 }), request, now, () => {
+    throw new Error("award should not run");
+  });
+  assert.equal(denied.status, 401);
 });
 
 test("schema 1 migrates to learner stats without dropping projects or prefs", () => {

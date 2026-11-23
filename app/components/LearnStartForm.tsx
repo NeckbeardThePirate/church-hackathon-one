@@ -185,6 +185,7 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
 
   return (
     <section
+      id="learn-start"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes("Files")) {
           e.preventDefault();
@@ -195,7 +196,7 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={onDrop}
-      className={`mx-auto flex w-full max-w-[640px] flex-col gap-6 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-8 sm:px-10 sm:pt-20 ${
+      className={`mx-auto flex w-full max-w-[640px] flex-col gap-6 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-4 sm:px-10 sm:pt-8 ${
         dragging ? "rounded-2xl outline-dashed outline-2 outline-offset-[-8px] outline-[var(--accent)]" : ""
       }`}
     >

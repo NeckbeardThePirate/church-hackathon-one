@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { applyPlanMastery, type LearnAttemptAnswer } from "../lib/learn/attempts";
 import type { GradeResult } from "../lib/learn/grade-answer";
-import { XP_QUIZ_ATTEMPT, XP_QUIZ_CORRECT, XP_QUIZ_PARTIAL } from "../lib/learn/learner-stats";
+import { xpReason, type XpEventKind } from "../lib/learn/learner-stats";
 import { newConceptMastery, type ConceptMastery, type LearnPlanProgress } from "../lib/learn/plan-progress";
 import { postLearnAttempt } from "../lib/learn/post-attempt";
 import { conceptProgressKey, withConceptMastery, type ProgressScope } from "../lib/learn/progress-scope";
@@ -25,7 +25,7 @@ type Props = {
   timeZone: string;
   gradeShort: (item: QuizItem, given: string) => Promise<GradeResult>;
   onCommit: (updater: (prev: LearnPlanProgress) => LearnPlanProgress) => void;
-  onAward?: (reason: string, amount: number) => void;
+  onAward?: (reason: string, kind: XpEventKind) => void;
 };
 
 type GradeState = { correct: boolean; partial: boolean; skipped: boolean };
@@ -62,6 +62,8 @@ export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, 
   const onAwardRef = useRef(onAward);
   onAwardRef.current = onAward;
   const frozenRef = useRef<ShownCard | null>(null);
+  const sessionKeyRef = useRef<string | null>(null);
+  const paidSessionRef = useRef<string | null>(null);
 
   const currentId = queueIds && index < queueIds.length ? queueIds[index]! : null;
   const liveCard = useMemo(() => {
@@ -79,11 +81,13 @@ export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, 
   if (phase === "prompt" && liveCard) frozenRef.current = liveCard;
   const card = phase === "feedback" ? frozenRef.current : liveCard;
 
-  if (bank.size === 0) return null;
-
   const start = (conceptId?: string) => {
     const ids = queue.map((entry) => entry.concept.conceptId);
     if (!ids.length) return;
+    sessionKeyRef.current = queue
+      .map((entry) => `${entry.concept.conceptId}:${entry.concept.dueAt}`)
+      .sort()
+      .join(",");
     const at = conceptId ? Math.max(0, ids.indexOf(conceptId)) : 0;
     setQueueIds([...ids.slice(at), ...ids.slice(0, at)]);
     setIndex(0);
@@ -145,12 +149,10 @@ export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, 
         ),
       );
     });
-    if (!result.skipped) {
-      const outcome = result.correct ? "correct" : result.partial ? "partial" : "wrong";
-      const amount = result.correct ? XP_QUIZ_CORRECT : result.partial ? XP_QUIZ_PARTIAL : XP_QUIZ_ATTEMPT;
+    if (firstTry) {
       onAwardRef.current?.(
-        `review:${scope.projectId}:${scope.planId}:${card.concept.conceptId}:${row.dueAt}:${row.lastReviewedAt ?? 0}:${outcome}`,
-        amount,
+        xpReason("first", [scope.projectId, scope.planId, "rev", card.concept.conceptId]),
+        "first",
       );
     }
     void postLearnAttempt(plan.id, {
@@ -187,6 +189,16 @@ export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, 
   const sessionOpen = queueIds !== null;
   const finished = sessionOpen && currentId === null;
   const position = queueIds ? Math.min(index + 1, queueIds.length) : 0;
+
+  useEffect(() => {
+    if (!finished || !sessionKeyRef.current) return;
+    const stamp = sessionKeyRef.current;
+    if (paidSessionRef.current === stamp) return;
+    paidSessionRef.current = stamp;
+    onAwardRef.current?.(xpReason("reviews", [scope.projectId, scope.planId, stamp]), "reviews");
+  }, [finished, scope.planId, scope.projectId]);
+
+  if (bank.size === 0) return null;
 
   return (
     <section id="learn-review" className="mt-8 min-w-0" aria-label="Review">

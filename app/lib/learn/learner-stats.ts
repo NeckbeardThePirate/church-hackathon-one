@@ -3,24 +3,60 @@ import { lessonQuizFor, readDoneFor, readScrollFor, type ProgressScope } from ".
 
 export type XpLogEntry = { at: number; amount: number; reason: string };
 
+/**
+ * Base learning events. The server assigns the amount from the kind.
+ * Goal and streak bonuses are added by the award function, not by the client.
+ */
+export const XP_AMOUNTS = {
+  read: 10,
+  first: 5,
+  quiz: 20,
+  gap: 40,
+  final: 25,
+  reviews: 15,
+} as const;
+
+export type XpEventKind = keyof typeof XP_AMOUNTS;
+
+export const XP_READ_LESSON = XP_AMOUNTS.read;
+export const XP_FIRST_TRY = XP_AMOUNTS.first;
+export const XP_QUIZ_SUBMIT = XP_AMOUNTS.quiz;
+export const XP_GAP_COMPLETE = XP_AMOUNTS.gap;
+export const XP_FINAL = XP_AMOUNTS.final;
+export const XP_REVIEWS = XP_AMOUNTS.reviews;
+export const XP_DAILY_GOAL = 10;
+export const XP_STREAK_PER_DAY = 5;
+export const XP_STREAK_CAP = 50;
+/** Base XP, not counting the goal bonus or the streak bonus, that meets the daily goal. */
+export const DAILY_GOAL_XP = 30;
+
+export type XpEvent = { reason: string; kind: XpEventKind };
+
+export type StatsPayload = {
+  dailyGoalMet: string[];
+  xpLog: XpLogEntry[];
+  /** Every reason ever awarded. Survives xpLog trimming so a reload cannot pay twice. */
+  awarded: string[];
+  /** Base XP on todayYmd. Bonuses are not included. */
+  todayXp: number;
+  todayYmd: string | null;
+};
+
 export type StatsSnapshot = {
   xp: number;
   streak: number;
   timezone: string | null;
   last_goal_date: string | null;
   last_activity_at: number | null;
-  payload: { dailyGoalMet: string[]; xpLog: XpLogEntry[] };
+  payload: StatsPayload;
 };
-
-export const XP_READ_LESSON = 15;
-export const XP_QUIZ_CORRECT = 10;
-export const XP_QUIZ_PARTIAL = 5;
-export const XP_QUIZ_ATTEMPT = 2;
 
 const MAX_LOG = 100;
 const MAX_GOALS = 800;
+const MAX_AWARDED = 4000;
 /** Matches the workspace stats validator. Longer reasons are rejected and the whole save fails. */
 const XP_REASON_MAX = 80;
+const MAX_EVENTS = 40;
 
 export function emptyStats(): StatsSnapshot {
   return {
@@ -29,8 +65,18 @@ export function emptyStats(): StatsSnapshot {
     timezone: null,
     last_goal_date: null,
     last_activity_at: null,
-    payload: { dailyGoalMet: [], xpLog: [] },
+    payload: { dailyGoalMet: [], xpLog: [], awarded: [], todayXp: 0, todayYmd: null },
   };
+}
+
+export function isIanaTimeZone(value: string): boolean {
+  if (!value || value.length > 100) return false;
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function ymdInTimeZone(now: number, timeZone: string): string {
@@ -54,6 +100,14 @@ export function shiftYmd(ymd: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Idempotency key for one award. UUIDs are shortened so the key fits the server limit. */
+export function xpReason(kind: XpEventKind, parts: readonly string[]): string {
+  const body = parts.map((part) => compactId(part)).filter(Boolean).join(":");
+  const reason = body ? `${kind}:${body}` : `${kind}:`;
+  if (reason.length <= XP_REASON_MAX) return reason;
+  return `${kind}:${fnv1a32(parts.join("\u001f"))}`;
+}
+
 /**
  * Reason stored in xpLog and sent with the stats snapshot.
  * Path and plan ids are UUIDs, so `read:<project>:<plan>:<lesson>` is longer than the server allows.
@@ -75,11 +129,11 @@ export function xpLogReason(reason: string): string {
   return `x:${fnv1a32(reason)}`;
 }
 
-/** First 8 hex digits of a UUID. Other ids are kept, then capped so the code still fits. */
+/** First 8 hex digits of a UUID. Other ids stay whole so a long review stamp is not cut down to a colliding prefix. */
 function compactId(id: string): string {
   const hex = id.replace(/-/g, "");
   if (/^[0-9a-f]{32}$/i.test(hex)) return hex.slice(0, 8).toLowerCase();
-  return id.length > 24 ? id.slice(0, 24) : id;
+  return id;
 }
 
 function fnv1a32(text: string): string {
@@ -91,43 +145,211 @@ function fnv1a32(text: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+export type XpAwardResult = {
+  stats: StatsSnapshot;
+  accepted: { reason: string; amount: number; kind: XpEventKind | "goal" | "streak" }[];
+  error?: string;
+};
+
 /**
- * Add XP for one learning event and advance the streak when the local day changes.
- * The same reason is ignored, so a reload cannot award a lesson twice.
+ * Apply learning events. Amounts come from the kind, never from the caller.
+ * A reason that was already awarded is skipped, including after the visible log is trimmed.
+ * The day boundary is the stored timezone once one has been saved.
  */
-export function awardLearning(
+export function applyXpAwards(
   current: StatsSnapshot,
-  event: { reason: string; amount: number },
+  events: readonly XpEvent[],
   now: number,
-  timeZone: string,
-): StatsSnapshot {
-  if (!event.reason || event.amount < 0 || !Number.isInteger(event.amount)) return current;
-  const code = xpLogReason(event.reason);
-  const aliases = new Set<string>([code, event.reason]);
-  for (const reason of equivalentReasons(event.reason)) {
-    aliases.add(reason);
-    aliases.add(xpLogReason(reason));
+  timeZone: string | null,
+): XpAwardResult {
+  const storedZone = current.timezone && isIanaTimeZone(current.timezone) ? current.timezone : null;
+  const incomingZone = timeZone && isIanaTimeZone(timeZone) ? timeZone : null;
+  const zone = storedZone ?? incomingZone;
+  if (!zone) {
+    return { stats: current, accepted: [], error: "A time zone is required before XP can be saved." };
   }
-  if ([...aliases].some((reason) => current.payload.xpLog.some((entry) => entry.reason === reason))) {
-    return current;
+  const ready = normalizeSnapshot(current);
+  let stats: StatsSnapshot = storedZone ? ready : { ...ready, timezone: zone };
+  const accepted: XpAwardResult["accepted"] = [];
+  const known = awardedSet(stats);
+  let todayXp = baseToday(stats, ymdInTimeZone(now, zone), zone);
+  let streak = stats.streak;
+  let lastActivityDay = stats.last_goal_date;
+  let moved = stats.timezone !== current.timezone;
+
+  for (const event of events) {
+    if (!event || !isXpEventKind(event.kind)) continue;
+    const reason = xpLogReason(event.reason);
+    if (!reason.startsWith(`${event.kind}:`) || reason.length > XP_REASON_MAX) continue;
+    if (seen(known, reason)) continue;
+    const amount = XP_AMOUNTS[event.kind];
+    const today = ymdInTimeZone(now, zone);
+    if (lastActivityDay === today) streak = Math.max(streak, 1);
+    else if (lastActivityDay === shiftYmd(today, -1)) streak = Math.max(streak, 1) + 1;
+    else streak = 1;
+    lastActivityDay = today;
+    todayXp += amount;
+    stats = appendAward(stats, { at: now, amount, reason }, known);
+    accepted.push({ reason, amount, kind: event.kind });
+    moved = true;
   }
-  const today = ymdInTimeZone(now, timeZone);
-  let streak = current.streak;
-  if (current.last_goal_date === today) streak = Math.max(streak, 1);
-  else if (current.last_goal_date === shiftYmd(today, -1)) streak = Math.max(streak, 1) + 1;
-  else streak = 1;
-  const dailyGoalMet = current.payload.dailyGoalMet.includes(today)
-    ? current.payload.dailyGoalMet
-    : [...current.payload.dailyGoalMet, today].slice(-MAX_GOALS);
-  const xpLog = [...current.payload.xpLog, { at: now, amount: event.amount, reason: code }].slice(-MAX_LOG);
+
+  if (accepted.length > 0) {
+    const today = ymdInTimeZone(now, zone);
+    stats = {
+      ...stats,
+      streak,
+      last_goal_date: lastActivityDay,
+      last_activity_at: now,
+      payload: { ...stats.payload, todayXp, todayYmd: today },
+    };
+    if (todayXp >= DAILY_GOAL_XP) {
+      const goalReason = `goal:${today}`;
+      if (!seen(known, goalReason)) {
+        stats = appendAward(stats, { at: now, amount: XP_DAILY_GOAL, reason: goalReason }, known);
+        accepted.push({ reason: goalReason, amount: XP_DAILY_GOAL, kind: "goal" });
+        const dailyGoalMet = stats.payload.dailyGoalMet.includes(today)
+          ? stats.payload.dailyGoalMet
+          : [...stats.payload.dailyGoalMet, today].slice(-MAX_GOALS);
+        stats = { ...stats, payload: { ...stats.payload, dailyGoalMet } };
+      }
+      const bonus = Math.min(Math.max(streak, 1) * XP_STREAK_PER_DAY, XP_STREAK_CAP);
+      const streakReason = `streak:${today}`;
+      if (bonus > 0 && !seen(known, streakReason)) {
+        stats = appendAward(stats, { at: now, amount: bonus, reason: streakReason }, known);
+        accepted.push({ reason: streakReason, amount: bonus, kind: "streak" });
+      }
+    }
+  }
+
+  if (!moved) return { stats: current, accepted: [] };
+  return { stats, accepted };
+}
+
+export type DailyGoalStatus = {
+  earned: number;
+  target: number;
+  met: boolean;
+  percent: number;
+};
+
+/** Today's base XP against the daily goal, using the stored timezone. */
+export function dailyGoalStatus(stats: StatsSnapshot | null, now: number): DailyGoalStatus {
+  const target = DAILY_GOAL_XP;
+  if (!stats?.timezone || !isIanaTimeZone(stats.timezone)) {
+    return { earned: 0, target, met: false, percent: 0 };
+  }
+  const today = ymdInTimeZone(now, stats.timezone);
+  const ready = normalizeSnapshot(stats);
+  const earned = baseToday(ready, today, stats.timezone);
+  const met = earned >= target || ready.payload.awarded.includes(`goal:${today}`);
+  const percent = Math.max(0, Math.min(100, Math.round((Math.min(earned, target) / target) * 100)));
+  return { earned, target, met, percent };
+}
+
+export function parseXpAwardRequest(
+  body: unknown,
+): { ok: true; timezone: string | null; events: XpEvent[] } | { ok: false; error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, error: "Award body must be an object." };
+  }
+  const raw = body as Record<string, unknown>;
+  let timezone: string | null = null;
+  if ("timezone" in raw && raw.timezone != null) {
+    if (typeof raw.timezone !== "string" || !isIanaTimeZone(raw.timezone)) {
+      return { ok: false, error: "timezone must be an IANA name." };
+    }
+    timezone = raw.timezone;
+  }
+  if (!("events" in raw)) return { ok: false, error: "events must be a list of awards." };
+  if (!Array.isArray(raw.events) || raw.events.length > MAX_EVENTS) {
+    return { ok: false, error: "events must be a short list of awards." };
+  }
+  const events: XpEvent[] = [];
+  for (const item of raw.events) {
+    if (!item || typeof item !== "object") return { ok: false, error: "Each award needs a kind and a reason." };
+    const row = item as Record<string, unknown>;
+    if (!isXpEventKind(row.kind)) return { ok: false, error: "Award kind is not one this app gives XP for." };
+    if (typeof row.reason !== "string" || !row.reason.startsWith(`${row.kind}:`) || row.reason.length > XP_REASON_MAX) {
+      return { ok: false, error: "Award reason must match its kind and stay short." };
+    }
+    events.push({ kind: row.kind, reason: row.reason });
+  }
+  return { ok: true, timezone, events };
+}
+
+function isXpEventKind(value: unknown): value is XpEventKind {
+  return value === "read" || value === "first" || value === "quiz" || value === "gap" || value === "final" || value === "reviews";
+}
+
+function normalizeSnapshot(stats: StatsSnapshot): StatsSnapshot {
+  const xpLog = Array.isArray(stats.payload?.xpLog) ? stats.payload.xpLog : [];
+  const awarded = Array.isArray(stats.payload?.awarded) ? stats.payload.awarded : xpLog.map((entry) => entry.reason);
   return {
-    xp: current.xp + event.amount,
-    streak,
-    timezone: timeZone,
-    last_goal_date: today,
-    last_activity_at: now,
-    payload: { dailyGoalMet, xpLog },
+    ...stats,
+    payload: {
+      dailyGoalMet: Array.isArray(stats.payload?.dailyGoalMet) ? stats.payload.dailyGoalMet : [],
+      xpLog,
+      awarded,
+      todayXp: typeof stats.payload?.todayXp === "number" ? stats.payload.todayXp : 0,
+      todayYmd: typeof stats.payload?.todayYmd === "string" ? stats.payload.todayYmd : null,
+    },
   };
+}
+
+function awardedSet(stats: StatsSnapshot): Set<string> {
+  return new Set([...stats.payload.awarded, ...stats.payload.xpLog.map((entry) => entry.reason)]);
+}
+
+function seen(known: Set<string>, reason: string): boolean {
+  for (const alias of reasonAliases(reason)) {
+    if (known.has(alias)) return true;
+  }
+  return false;
+}
+
+function appendAward(stats: StatsSnapshot, entry: XpLogEntry, known: Set<string>): StatsSnapshot {
+  for (const alias of reasonAliases(entry.reason)) known.add(alias);
+  const awarded = [...stats.payload.awarded, entry.reason].slice(-MAX_AWARDED);
+  const xpLog = [...stats.payload.xpLog, entry].slice(-MAX_LOG);
+  return {
+    ...stats,
+    xp: stats.xp + entry.amount,
+    payload: { ...stats.payload, awarded, xpLog },
+  };
+}
+
+function baseToday(stats: StatsSnapshot, today: string, zone: string): number {
+  if (stats.payload.todayYmd === today) return Math.max(0, stats.payload.todayXp);
+  return stats.payload.xpLog.reduce((sum, entry) => {
+    if (isBonusReason(entry.reason)) return sum;
+    try {
+      return ymdInTimeZone(entry.at, zone) === today ? sum + entry.amount : sum;
+    } catch {
+      return sum;
+    }
+  }, 0);
+}
+
+function isBonusReason(reason: string): boolean {
+  return reason.startsWith("goal:") || reason.startsWith("streak:");
+}
+
+function reasonAliases(reason: string): string[] {
+  const out = new Set<string>([reason]);
+  const add = (value: string) => {
+    if (value) out.add(value);
+  };
+  add(xpLogReason(reason));
+  for (const alias of equivalentReasons(reason)) {
+    add(alias);
+    add(xpLogReason(alias));
+  }
+  const compactRead = /^r:([^:]+):([^:]+):([^:]+)$/.exec(reason);
+  if (compactRead) add(`read:${compactRead[1]}:${compactRead[2]}:${compactRead[3]}`);
+  const shortRead = /^read:([^:]+):([^:]+):([^:]+)$/.exec(reason);
+  if (shortRead) add(`r:${shortRead[1]}:${shortRead[2]}:${shortRead[3]}`);
+  return [...out];
 }
 
 export type LessonMastery = { id: string; order: number; title: string; percent: number };

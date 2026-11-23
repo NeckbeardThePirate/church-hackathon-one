@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createProject, defaultTitle, isEmptyLearnPath, isLegacyProject, type Project } from "../lib/projects";
 import { deleteRemoteProject, loadUserWorkspace, putProject } from "../lib/workspace-sync";
-import { awardLearning, emptyStats, lessonMasteryList, type StatsSnapshot } from "../lib/learn/learner-stats";
-import { claimLegacyProgress } from "../lib/learn/plan-progress";
+import { applyXpAwards, dailyGoalStatus, emptyStats, lessonMasteryList, type StatsSnapshot, type XpEvent, type XpEventKind } from "../lib/learn/learner-stats";
+import { claimLegacyProgress, type LearnLocation, type LearnPlanProgress } from "../lib/learn/plan-progress";
+import { actionTarget, nextLearningAction, pathSummaries, type NextAction } from "../lib/learn/progress-dashboard";
 import { scopeFromProject } from "../lib/learn/progress-scope";
 import { parsePathUrl } from "../lib/learn/path-url";
 import { AppShell } from "./AppShell";
+import { ProgressDashboard } from "./ProgressDashboard";
 import type { LearnPlan } from "../lib/learn/types";
-import type { LearnPlanProgress } from "../lib/learn/plan-progress";
 import { ArchivedProjectView } from "./ArchivedProjectView";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { LearnIntakeStep } from "./LearnIntakeStep";
@@ -17,6 +18,36 @@ import { LearnPlanView } from "./LearnPlanView";
 
 /** "start" is the new-path screen. "building" follows a started (or resumed) plan. */
 type WorkspaceView = "start" | "building" | "path";
+
+const PENDING_XP_KEY = "studybuddy-xp-pending";
+
+type FocusRequest = { nonce: number; projectId: string; location: LearnLocation; review: boolean };
+
+function readPendingAwards(): XpEvent[] {
+  try {
+    const raw = sessionStorage.getItem(PENDING_XP_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is XpEvent =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as XpEvent).reason === "string" &&
+        typeof (item as XpEvent).kind === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writePendingAwards(events: XpEvent[]) {
+  try {
+    if (!events.length) sessionStorage.removeItem(PENDING_XP_KEY);
+    else sessionStorage.setItem(PENDING_XP_KEY, JSON.stringify(events));
+  } catch {
+    /* Storage can be unavailable. The in-memory total still shows until reload. */
+  }
+}
 
 function viewForProject(project: Project): WorkspaceView {
   if (isLegacyProject(project)) return "path";
@@ -35,6 +66,8 @@ export function WorkspaceApp() {
   const [stats, setStats] = useState<StatsSnapshot | null>(null);
   const [statsReady, setStatsReady] = useState(false);
   const [statsSaveError, setStatsSaveError] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+  const focusNonceRef = useRef(0);
   const [liveProgress, setLiveProgress] = useState<LearnPlanProgress | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [missingPath, setMissingPath] = useState(false);
@@ -125,6 +158,7 @@ export function WorkspaceApp() {
     if (pathId) params.set("path", pathId);
     else params.delete("path");
     if (!pathId || !samePath) params.delete("lesson");
+    if (!pathId) params.delete("review");
     const text = params.toString();
     const target = text ? `/?${text}` : "/";
     const current = `${window.location.pathname}${window.location.search}`;
@@ -152,6 +186,40 @@ export function WorkspaceApp() {
     setView("start");
     writePathUrl(null, "push");
   }, [writePathUrl]);
+
+  const openAction = useCallback(
+    (action: NextAction) => {
+      const target = actionTarget(action);
+      if (!target) {
+        showStart();
+        window.setTimeout(() => document.getElementById("learn-start")?.scrollIntoView({ block: "start" }), 0);
+        return;
+      }
+      const project = projectsRef.current.find((item) => item.id === target.projectId);
+      if (!project) return;
+      setMissingPath(false);
+      setLiveProgress(null);
+      setActiveProjectId(project.id);
+      setView(viewForProject(project));
+      focusNonceRef.current += 1;
+      setFocusRequest({
+        nonce: focusNonceRef.current,
+        projectId: project.id,
+        location: target.location,
+        review: target.review,
+      });
+      const params = new URLSearchParams(window.location.search);
+      params.set("path", project.id);
+      if (target.location.screen === "overview") params.set("lesson", "home");
+      else if (target.location.screen === "final") params.set("lesson", "final");
+      else if (target.location.lessonId) params.set("lesson", target.location.lessonId);
+      if (target.review) params.set("review", "1");
+      else params.delete("review");
+      const text = params.toString();
+      window.history.pushState(null, "", text ? `/?${text}` : "/");
+    },
+    [showStart],
+  );
 
   useEffect(() => {
     if (!hydrated) return;
@@ -193,6 +261,41 @@ export function WorkspaceApp() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  const flushAwards = useCallback(async () => {
+    const pending = readPendingAwards();
+    if (!pending.length) return;
+    const zone = statsRef.current?.timezone || browserTimeZone();
+    const gen = ++statsSaveGenRef.current;
+    try {
+      const response = await fetch("/api/workspace/stats/award", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ timezone: zone, events: pending }),
+        keepalive: true,
+      });
+      if (statsSaveGenRef.current !== gen) return;
+      if (!response.ok) {
+        setStatsSaveError("Couldn't save XP. Reloading will retry the points you just earned.");
+        return;
+      }
+      const saved = (await response.json()) as StatsSnapshot;
+      const sent = new Set(pending.map((event) => event.reason));
+      const remaining = readPendingAwards().filter((event) => !sent.has(event.reason));
+      writePendingAwards(remaining);
+      const merged = remaining.length
+        ? applyXpAwards(saved, remaining, Date.now(), saved.timezone || zone).stats
+        : saved;
+      statsRef.current = merged;
+      setStats(merged);
+      setStatsSaveError(null);
+    } catch {
+      if (statsSaveGenRef.current === gen) {
+        setStatsSaveError("Couldn't save XP. Reloading will retry the points you just earned.");
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!hydrated) return;
     let cancelled = false;
@@ -213,13 +316,13 @@ export function WorkspaceApp() {
           showBlank();
           return;
         }
-        const local = statsRef.current;
-        const localNewer =
-          local != null &&
-          ((local.last_activity_at ?? 0) > (loaded.last_activity_at ?? 0) || local.xp > loaded.xp);
-        if (localNewer) return;
-        statsRef.current = loaded;
-        setStats(loaded);
+        const pending = readPendingAwards();
+        const zone = loaded.timezone || browserTimeZone();
+        const applied = pending.length ? applyXpAwards(loaded, pending, Date.now(), zone) : null;
+        const next = applied && !applied.error ? applied.stats : loaded;
+        statsRef.current = next;
+        setStats(next);
+        if (pending.length) void flushAwards();
       })
       .catch(() => {
         if (!cancelled) showBlank();
@@ -230,35 +333,37 @@ export function WorkspaceApp() {
     return () => {
       cancelled = true;
     };
-  }, [hydrated]);
+  }, [hydrated, flushAwards]);
 
-  const award = useCallback((reason: string, amount: number) => {
-    const zone = statsRef.current?.timezone || browserTimeZone();
-    const next = awardLearning(statsRef.current ?? emptyStats(), { reason, amount }, Date.now(), zone);
-    if (next === (statsRef.current ?? emptyStats()) && statsRef.current) return;
-    statsRef.current = next;
-    setStats(next);
-    if (statsTimerRef.current) window.clearTimeout(statsTimerRef.current);
-    statsTimerRef.current = window.setTimeout(() => {
-      const snapshot = statsRef.current;
-      if (!snapshot) return;
-      const gen = ++statsSaveGenRef.current;
-      void fetch("/api/workspace/stats", {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(snapshot),
-      })
-        .then((response) => {
-          if (statsSaveGenRef.current !== gen) return;
-          setStatsSaveError(response.ok ? null : "Couldn't save XP. Reloading will drop the points you just earned.");
-        })
-        .catch(() => {
-          if (statsSaveGenRef.current !== gen) return;
-          setStatsSaveError("Couldn't save XP. Reloading will drop the points you just earned.");
-        });
-    }, 300);
-  }, []);
+  const award = useCallback(
+    (reason: string, kind: XpEventKind) => {
+      const zone = statsRef.current?.timezone || browserTimeZone();
+      const result = applyXpAwards(statsRef.current ?? emptyStats(), [{ reason, kind }], Date.now(), zone);
+      if (result.error) {
+        setStatsSaveError(result.error);
+        return;
+      }
+      if (!result.accepted.length) return;
+      statsRef.current = result.stats;
+      setStats(result.stats);
+      const pending = readPendingAwards();
+      if (!pending.some((event) => event.reason === reason)) pending.push({ reason, kind });
+      writePendingAwards(pending);
+      if (statsTimerRef.current) window.clearTimeout(statsTimerRef.current);
+      statsTimerRef.current = window.setTimeout(() => {
+        void flushAwards();
+      }, 250);
+    },
+    [flushAwards],
+  );
+
+  useEffect(() => {
+    const flush = () => {
+      void flushAwards();
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [flushAwards]);
 
   const startedPlan = useCallback(
     (planId: string, topic: string) => {
@@ -342,6 +447,17 @@ export function WorkspaceApp() {
     );
   }, [activeProject, liveProgress]);
 
+  const dashboardProjects = useMemo(
+    () =>
+      projects.map((project) =>
+        project.id === activeProjectId && liveProgress ? { ...project, learnProgress: liveProgress } : project,
+      ),
+    [projects, activeProjectId, liveProgress],
+  );
+  const summaries = useMemo(() => pathSummaries(dashboardProjects, Date.now()), [dashboardProjects]);
+  const nextAction = useMemo(() => nextLearningAction(dashboardProjects, Date.now()), [dashboardProjects]);
+  const goal = dailyGoalStatus(stats, Date.now());
+
   const rebuildPath = useCallback(() => {
     if (!activeProjectId) return;
     updateProject(activeProjectId, { importComplete: false, learnPlanId: undefined });
@@ -404,6 +520,10 @@ export function WorkspaceApp() {
         sidebarCompact={view === "building"}
         stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak } : null}
         mastery={mastery}
+        goal={statsReady && stats ? goal : null}
+        nextLabel={nextAction.label}
+        onNext={() => openAction(nextAction)}
+        onShowProgress={showStart}
         onRequestDelete={setPendingDeleteId}
       >
         {missingPath && (view === "start" || !activeProject) ? (
@@ -412,7 +532,18 @@ export function WorkspaceApp() {
           </p>
         ) : null}
         {view === "start" || !activeProject ? (
-          <LearnIntakeStep key={draft.id} projectId={draft.id} onStarted={startedPlan} onComplete={completeLearnPlan} />
+          <div>
+            <ProgressDashboard
+              xp={stats?.xp ?? 0}
+              streak={stats?.streak ?? 0}
+              pending={!statsReady || !stats}
+              goal={goal}
+              summaries={summaries}
+              action={nextAction}
+              onOpen={openAction}
+            />
+            <LearnIntakeStep key={draft.id} projectId={draft.id} onStarted={startedPlan} onComplete={completeLearnPlan} />
+          </div>
         ) : view === "building" ? (
           <LearnIntakeStep
             key={activeProject.id}
@@ -441,6 +572,8 @@ export function WorkspaceApp() {
             onAward={award}
             onPlan={(plan) => updateProject(activeProject.id, { learnPlan: plan })}
             stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak, timezone: stats.timezone } : null}
+            focusRequest={focusRequest && focusRequest.projectId === activeProject.id ? focusRequest : null}
+            goal={statsReady && stats ? goal : null}
           />
         ) : (
           <ArchivedProjectView

@@ -82,6 +82,15 @@ test("real attempt and stats routes reject a signed-out caller with 401", async 
     }),
   );
   assert.equal(put.status, 401);
+  const awardRoute = await import("../../../api/workspace/stats/award/route.ts");
+  const award = await awardRoute.POST(
+    new Request("https://study.example/api/workspace/stats/award", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ timezone: "UTC", events: [{ kind: "read", reason: "read:p:l1" }] }),
+    }),
+  );
+  assert.equal(award.status, 401);
   assert.equal(planRecords, 0);
   assert.equal(workspaceReads, 0);
 });
