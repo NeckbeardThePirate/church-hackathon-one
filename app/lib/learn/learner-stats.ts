@@ -19,6 +19,8 @@ export const XP_QUIZ_ATTEMPT = 2;
 
 const MAX_LOG = 100;
 const MAX_GOALS = 800;
+/** Matches the workspace stats validator. Longer reasons are rejected and the whole save fails. */
+const XP_REASON_MAX = 80;
 
 export function emptyStats(): StatsSnapshot {
   return {
@@ -53,6 +55,43 @@ export function shiftYmd(ymd: string, days: number): string {
 }
 
 /**
+ * Reason stored in xpLog and sent with the stats snapshot.
+ * Path and plan ids are UUIDs, so `read:<project>:<plan>:<lesson>` is longer than the server allows.
+ * Short codes keep that award key unique. Reasons that already fit are stored unchanged.
+ */
+export function xpLogReason(reason: string): string {
+  if (reason.length <= XP_REASON_MAX) return reason;
+  const read = /^read:([^:]+):([^:]+):([^:]+)$/.exec(reason);
+  if (read) {
+    const code = `r:${compactId(read[1]!)}:${compactId(read[2]!)}:${read[3]}`;
+    if (code.length <= XP_REASON_MAX) return code;
+  }
+  const quiz = /^quiz:([^:]+):([^:]+):([^:]+):(\d+):(correct|partial|wrong)$/.exec(reason);
+  if (quiz) {
+    const outcome = quiz[5] === "correct" ? "c" : quiz[5] === "partial" ? "p" : "w";
+    const code = `q:${compactId(quiz[1]!)}:${compactId(quiz[2]!)}:${quiz[3]}:${quiz[4]}:${outcome}`;
+    if (code.length <= XP_REASON_MAX) return code;
+  }
+  return `x:${fnv1a32(reason)}`;
+}
+
+/** First 8 hex digits of a UUID. Other ids are kept, then capped so the code still fits. */
+function compactId(id: string): string {
+  const hex = id.replace(/-/g, "");
+  if (/^[0-9a-f]{32}$/i.test(hex)) return hex.slice(0, 8).toLowerCase();
+  return id.length > 24 ? id.slice(0, 24) : id;
+}
+
+function fnv1a32(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
  * Add XP for one learning event and advance the streak when the local day changes.
  * The same reason is ignored, so a reload cannot award a lesson twice.
  */
@@ -63,7 +102,13 @@ export function awardLearning(
   timeZone: string,
 ): StatsSnapshot {
   if (!event.reason || event.amount < 0 || !Number.isInteger(event.amount)) return current;
-  if (equivalentReasons(event.reason).some((reason) => current.payload.xpLog.some((entry) => entry.reason === reason))) {
+  const code = xpLogReason(event.reason);
+  const aliases = new Set<string>([code, event.reason]);
+  for (const reason of equivalentReasons(event.reason)) {
+    aliases.add(reason);
+    aliases.add(xpLogReason(reason));
+  }
+  if ([...aliases].some((reason) => current.payload.xpLog.some((entry) => entry.reason === reason))) {
     return current;
   }
   const today = ymdInTimeZone(now, timeZone);
@@ -74,7 +119,7 @@ export function awardLearning(
   const dailyGoalMet = current.payload.dailyGoalMet.includes(today)
     ? current.payload.dailyGoalMet
     : [...current.payload.dailyGoalMet, today].slice(-MAX_GOALS);
-  const xpLog = [...current.payload.xpLog, { at: now, amount: event.amount, reason: event.reason }].slice(-MAX_LOG);
+  const xpLog = [...current.payload.xpLog, { at: now, amount: event.amount, reason: code }].slice(-MAX_LOG);
   return {
     xp: current.xp + event.amount,
     streak,

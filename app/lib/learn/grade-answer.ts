@@ -35,7 +35,12 @@ const CLUSTERS: string[][] = [
   ["kindness", "kind", "mercy", "merciful", "love", "loving", "grace", "goodness", "compassion"],
   ["action", "act", "acts", "practice", "shown", "show", "deed", "deeds", "behavior", "behaviour"],
   ["obligation", "duty", "duties", "required", "requirement", "strict", "law", "legal", "owed"],
-  ["beyond", "extra", "exceeds", "surpasses", "above", "past"],
+  ["beyond", "extra", "additional", "further", "exceeds", "surpasses", "above", "past"],
+  ["bread", "food", "foods", "sustenance", "loaf"],
+  ["petition", "line", "lines", "request"],
+  ["omit", "omits", "omitted", "leave", "leaves", "leaving", "left", "leav", "omitt"],
+  ["address", "addresses", "call", "calls", "calling"],
+  ["longer", "long", "lengthier"],
 ];
 
 function normalize(text: string): string {
@@ -124,20 +129,26 @@ export function parseGradeModel(value: unknown): GradeResult {
   return { correct, partial, score: correct ? Math.max(score, 0.75) : score };
 }
 
-export const GRADE_SYSTEM = `You grade one short study answer. Judge meaning, not wording.
-Accept a paraphrase or an answer that includes the key concepts even when none of the expected phrases appear.
-Secondary details may be missing and the answer can still be correct.
-Reject an answer that misses the main idea or asserts something different.
-Return only JSON: {"score": number from 0 to 1, "correct": boolean, "partial": boolean}.
-correct is true when the answer is substantively right.
-partial is true only when correct is false and at least one key concept is present.`;
+export const GRADE_SYSTEM = `You grade one short study answer for faithfulness to the lesson. Score meaning, not wording.
+
+Rubric:
+1. Break the lesson's key points into the claims the question asks for. A question that asks for one shared feature and one varying feature has two claims.
+2. Count a claim as hit when the learner says the same thing in other words. Synonyms and plain paraphrases count: "daily food" hits "daily bread", "extra lines" hits "additional petitions", "leaves out" hits "omits", "calling God Father" hits "addresses God as Father". Do not require the lesson's terms, names, or phrasing.
+3. correct is true when every claim the question asks for is hit. Extra true detail does not reduce the score. A missing side detail does not reduce it when the asked-for claims are present.
+4. partial is true only when correct is false and at least one claim is hit.
+5. An answer that misses the lesson's point, answers a different question, or contradicts the lesson is incorrect, even if it shares a word or two.
+
+Scores: 0.85 to 1 when correct, 0.4 to 0.74 when partial, below 0.4 when incorrect.
+Return only JSON: {"score": number from 0 to 1, "correct": boolean, "partial": boolean}.`;
 
 export function gradeUserPrompt(input: GradeInput): string {
   const lines = [
     `Question: ${input.question.trim()}`,
-    `Expected answer: ${input.expected.trim()}`,
+    `Key points from the lesson (match their meaning, not these words): ${input.expected.trim()}`,
     `Learner answer: ${input.given.trim()}`,
   ];
-  if (input.rationale?.trim()) lines.push(`Why the expected answer is right: ${input.rationale.trim()}`);
+  if (input.rationale?.trim()) {
+    lines.push(`Why this is faithful to the lesson (context only; do not require this wording): ${input.rationale.trim()}`);
+  }
   return lines.join("\n");
 }
