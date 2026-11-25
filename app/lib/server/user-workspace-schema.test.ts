@@ -171,21 +171,25 @@ test("awarding XP is idempotent, ignores a client amount, and a later stats put 
   const now = Date.parse("2026-11-16T20:00:00Z");
   const request = {
     timezone: "America/Los_Angeles",
-    events: [{ kind: "read", reason: "read:p:l1", amount: 999 }],
+    events: [
+      { kind: "read", reason: "read:p:l1", amount: 999 },
+      { kind: "quiz", reason: "quiz:p:l1" },
+    ],
   };
   const award = (input: unknown, at: number) => awardStoredLearnerStats(sql, input, at);
   const first = await handleStatsAward(auth, request, now, award);
   assert.equal(first.status, 200);
   const body = (await first.json()) as LearnerStats;
-  assert.equal(body.xp, 10);
+  assert.equal(body.xp, 45);
   assert.equal(body.streak, 1);
+  assert.equal(body.payload.todayXp, 30);
   assert.equal(body.timezone, "America/Los_Angeles");
   assert.equal(body.payload.xpLog[0]?.amount, 10);
 
   const reload = await handleStatsAward(auth, request, now + 5_000, award);
   const reloaded = (await reload.json()) as LearnerStats;
-  assert.equal(reloaded.xp, 10);
-  assert.equal(reloaded.payload.xpLog.length, 1);
+  assert.equal(reloaded.xp, 45);
+  assert.equal(reloaded.payload.xpLog.length, body.payload.xpLog.length);
 
   const wiped = await handleStatsPut(auth, { xp: 0, streak: 0, payload: { dailyGoalMet: [], xpLog: [] } }, (patch) => {
     writeLearnerStats(sql, applyLearnerStatsPatch(readLearnerStats(sql), patch));
@@ -193,7 +197,7 @@ test("awarding XP is idempotent, ignores a client amount, and a later stats put 
   });
   assert.equal(wiped.status, 200);
   const still = (await wiped.json()) as LearnerStats;
-  assert.equal(still.xp, 10);
+  assert.equal(still.xp, 45);
   assert.equal(still.streak, 1);
   assert.equal(still.payload.xpLog[0]?.reason, "read:p:l1");
 

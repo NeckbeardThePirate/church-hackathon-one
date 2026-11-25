@@ -51,7 +51,7 @@ test("the teach prompt asks for stable concepts and does not invent scripture te
   assert.doesNotMatch(rules, /For God so loved|In the beginning God|the wages of sin/);
   const stages = readFileSync(new URL("./stages.ts", import.meta.url), "utf8");
   assert.match(stages, /teachConceptRules\(lesson\.order\)/);
-  assert.match(stages, /Never quote Bible verse text/);
+  assert.match(stages, /SOURCE_TEXT_RULE/);
   assert.match(stages, /strictConcepts: true/);
 });
 
@@ -140,7 +140,11 @@ test("MOCK_AI teach output is a tagged quiz the lesson checker can still answer"
     stage: "teach",
     lessonId: "l1",
   });
-  const body = JSON.parse(text) as { quiz: unknown; scriptureRefs: { reference: string }[] };
+  const body = JSON.parse(text) as {
+    quiz: unknown;
+    scriptureRefs: { reference: string }[];
+    libraryRefs: { reference: string; note?: string }[];
+  };
   const quiz = parseQuizItems(body.quiz, "quiz", 2, { strictConcepts: true });
   requireConceptTags(quiz);
   assert.equal(quiz.length, 3);
@@ -149,7 +153,9 @@ test("MOCK_AI teach output is a tagged quiz the lesson checker can still answer"
   assert.equal(quiz[2]?.answer, "Faith receives a gift.");
   assert.equal(quiz[0]?.alternate?.conceptId, "l1-gift");
   assert.equal(body.scriptureRefs[0]?.reference, "Romans 3:21-26");
+  assert.equal(body.libraryRefs[0]?.reference, "Westminster Confession of Faith 11.1");
   assert.equal(JSON.stringify(body).includes("For all have sinned"), false);
+  assert.equal(JSON.stringify(body).includes("Those whom God effectually"), false);
 
   const check = JSON.parse(
     mockModelText("You are a student", "Questions", { planId: "plan-1", stage: "check", lessonId: "l1" }),

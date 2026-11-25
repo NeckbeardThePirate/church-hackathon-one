@@ -102,12 +102,14 @@ import {
   type TeachBlock,
   type VideoResource,
 } from "../lib/learn/types";
+import type { LearnReviewFocus } from "../lib/learn/agent-context";
 import { ArticleReadWindow } from "./ArticleReadWindow";
 import { LearnAgentFloat } from "./LearnAgentFloat";
 import { LearnPathMap } from "./LearnPathMap";
 import { LearnReviewPanel } from "./LearnReviewPanel";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
 import { LessonVideoPlayer } from "./LessonVideoPlayer";
+import { SourceNote } from "./SourceNote";
 import { PROJECT_KIND_LABEL } from "../lib/projects";
 
 type Props = {
@@ -194,7 +196,7 @@ function LibraryCallout({ item }: { item: LibraryCitation }) {
   return (
     <li className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--sidebar)_90%,var(--canvas))] px-4 py-3">
       <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
-        {item.source === "confession" ? "Confession" : "Church father"}
+        {item.source === "confession" ? "Confession" : "Church father"} · retrieved
       </p>
       <p className="mt-1 text-sm font-medium text-[var(--ink)]">
         {item.url ? <ExternalLink href={item.url}>{heading}</ExternalLink> : heading}
@@ -214,7 +216,7 @@ function ScriptureCallout({ reading }: { reading: ScriptureReading }) {
       aria-label={`Scripture: ${reading.reference}`}
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Berean Study Bible</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Berean Study Bible · retrieved</p>
         <ExternalLink href={gatewayUrl}>
           <span className="break-words">{reading.reference} (ESV on Bible Gateway)</span>
         </ExternalLink>
@@ -594,6 +596,7 @@ function QuizSection({
           </p>
         ) : null}
       </div>
+      <SourceNote place="quiz" />
       <ol className="mt-4 space-y-4">
         {items.map((item, i) => (
           <QuizQuestion
@@ -735,11 +738,12 @@ function LessonBody({
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">
         Lesson {lesson.order} of {total}
       </p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-3xl">{lesson.title}</h1>
+      <h1 className="mt-2 break-words text-2xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-3xl">{lesson.title}</h1>
       <p className="mt-2 text-sm text-[var(--ink-muted)]">
         About {lesson.estimatedMinutes} min
         {lesson.status === "degraded" ? " · Some resources may be missing" : null}
       </p>
+      <SourceNote place="lesson" />
 
       {lesson.objectives.length ? (
         <div className="mt-6" data-read-section>
@@ -1162,6 +1166,7 @@ export function LearnPlanView({
   const [progress, setProgress] = useState<LearnPlanProgress>(hydrated);
   const [location, setLocation] = useState<LearnLocation>(() => resolveLocation(plan.lessons, hydrated.location));
   const [homeView, setHomeView] = useState<"map" | "list">("map");
+  const [reviewFocus, setReviewFocus] = useState<LearnReviewFocus | null>(null);
 
   const saveTimerRef = useRef<number | null>(null);
   const lessonScrollIntentRef = useRef<LessonScrollIntent>("restore");
@@ -1715,12 +1720,13 @@ export function LearnPlanView({
             <p className="mb-3 inline-flex rounded-md border border-[var(--line)] px-2 py-0.5 text-xs font-medium text-[var(--ink-muted)]">
               {PROJECT_KIND_LABEL.learn}
             </p>
-            <h1 className="text-3xl font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-[2.5rem]">{title}</h1>
+            <h1 className="break-words text-3xl font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-[2.5rem]">{title}</h1>
             <p className="mt-3 text-sm leading-relaxed text-[var(--ink-muted)]">
               {plan.lessons.length} lesson{plan.lessons.length === 1 ? "" : "s"} · about {roundedMin} min · {plan.complexity}{" "}
               topic
               {plan.perspective !== "neutral" ? ` · ${plan.perspective} perspective` : null}
             </p>
+            <SourceNote place="home" />
 
             <div className="mt-5 lg:hidden">
               <LearnProgressTrack {...progressStats} />
@@ -1752,6 +1758,7 @@ export function LearnPlanView({
               gradeShort={gradeShort}
               onCommit={(updater) => commitProgress(updater, true)}
               onAward={(reason, kind) => onAwardRef.current?.(reason, kind)}
+              onFocus={setReviewFocus}
             />
 
             {practice.cards.length ? (
@@ -1964,7 +1971,7 @@ export function LearnPlanView({
         ) : null}
       </div>
       {sidebar}
-      <LearnAgentFloat projectId={projectId} plan={plan} location={location} />
+      <LearnAgentFloat projectId={projectId} plan={plan} location={location} reviewFocus={reviewFocus} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { MAX_IMPORT_IMAGES, runOcrForKey, uploadSourceImage } from "../lib/impor
 import { MAX_NOTES, MAX_TOPIC, deriveTopic, hasIntake } from "../lib/learn/intake";
 import { TRADITIONS, isPerspective, type Perspective } from "../lib/learn/types";
 import { fetchLearnPerspective } from "../lib/workspace-sync";
+import { SourceNote } from "./SourceNote";
 
 export type StartPayload = {
   topic: string;
@@ -203,6 +204,7 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
       <header className="flex flex-col gap-2">
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">New learn path</p>
         <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-4xl">What do you want to learn?</h1>
+        <SourceNote place="intake" />
       </header>
 
       <div className="flex flex-col gap-5">
