@@ -18,6 +18,8 @@ type Props = {
   learnPlanId?: string;
   onStarted: (planId: string, topic: string) => void;
   onComplete: (plan: LearnPlan) => void;
+  /** First core lesson ready while the pipeline is still running. */
+  onStudyReady?: (plan: LearnPlan) => void;
   onMarkFailed?: () => void;
   onRequestRemove?: () => void;
 };
@@ -36,7 +38,23 @@ function stepIndex(stage: LearnStage | undefined): number {
   return i === -1 ? 0 : i;
 }
 
-export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete, onMarkFailed, onRequestRemove }: Props) {
+function planReadyToStudy(snap: PlanSnapshot): snap is PlanSnapshot & { plan: LearnPlan } {
+  if (!snap.plan) return false;
+  return snap.plan.lessons.some(
+    (lesson) =>
+      lesson.kind !== "gap" && lesson.teaching.length > 0 && lesson.quiz.length > 0 && lesson.status !== "pending",
+  );
+}
+
+export function LearnIntakeStep({
+  projectId,
+  learnPlanId,
+  onStarted,
+  onComplete,
+  onStudyReady,
+  onMarkFailed,
+  onRequestRemove,
+}: Props) {
   const [planId, setPlanId] = useState<string | undefined>(learnPlanId);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
   const [snapshot, setSnapshot] = useState<PlanSnapshot | null>(null);
@@ -46,6 +64,7 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete,
   const [heartbeat, setHeartbeat] = useState<Heartbeat | null>(null);
   const [heartbeatReceivedAt, setHeartbeatReceivedAt] = useState<number | null>(null);
   const completedRef = useRef(false);
+  const studyReadyRef = useRef(false);
 
   const refresh = useCallback(async (id: string) => {
     const res = await fetch(`/api/learn/plans/${id}`, { credentials: "same-origin" });
@@ -72,6 +91,7 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete,
   useEffect(() => {
     if (!planId) return;
     completedRef.current = false;
+    studyReadyRef.current = false;
     let closed = false;
     const source = new EventSource(`/api/learn/plans/${planId}/events`);
 
@@ -143,6 +163,14 @@ export function LearnIntakeStep({ projectId, learnPlanId, onStarted, onComplete,
   useEffect(() => {
     if (snapshot?.status === "failed") onMarkFailed?.();
   }, [snapshot?.status, onMarkFailed]);
+
+  useEffect(() => {
+    if (!snapshot || studyReadyRef.current || !onStudyReady) return;
+    if (snapshot.status !== "running" && snapshot.status !== "partial") return;
+    if (!planReadyToStudy(snapshot)) return;
+    studyReadyRef.current = true;
+    onStudyReady(snapshot.plan);
+  }, [snapshot, onStudyReady]);
 
   const currentStage = events.at(-1)?.stage ?? snapshot?.stage;
   const active = stepIndex(currentStage);

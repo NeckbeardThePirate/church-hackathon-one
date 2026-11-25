@@ -234,7 +234,7 @@ test("MOCK_AI builds one tagged gap lesson after its parent and ignores a second
 
 test("a gap job that hits the model budget leaves the core plan usable", async () => {
   const plan = await bootPlan();
-  for (let n = 0; n < BUDGET.llm; n++) assert.equal(await plan.spend("llm", 1), true);
+  for (let n = 0; n < BUDGET.gapLlm; n++) assert.equal(await plan.spend("llm", 1, { gap: true }), true);
   const reserved = await plan.reserveGap({
     sourceLessonId: "l1",
     concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
@@ -256,6 +256,61 @@ test("a gap job that hits the model budget leaves the core plan usable", async (
     concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
   });
   assert.equal(retry.queued, true);
+});
+
+test("practice lessons can queue while the core path is still building", async () => {
+  const ctx = memoryStorage();
+  const plan = new LearnPlanDO(ctx as never, {} as never);
+  await plan.init({
+    planId: PLAN_ID,
+    userId: "user_a",
+    topic: "Faith",
+    notes: "",
+    passages: [],
+    options: { perspective: "neutral", includeScripture: "auto" },
+  });
+  await plan.setScope({
+    title: "Faith",
+    complexity: "complex",
+    lessonCount: 6,
+    prerequisites: [],
+    coreConcepts: ["Faith"],
+    objectives: ["Explain the main idea"],
+    isFaithRelevant: true,
+  });
+  const ready = lesson("l1", 1, "The gift", "l1-faith");
+  await plan.setOutline([
+    {
+      id: "l1",
+      order: 1,
+      title: "The gift",
+      objectives: ["Explain the main idea"],
+      prerequisiteLessonIds: [],
+      estimatedMinutes: 25,
+      searchHints: ["introduction"],
+    },
+    {
+      id: "l2",
+      order: 2,
+      title: "The next idea",
+      objectives: ["Explain the main idea"],
+      prerequisiteLessonIds: ["l1"],
+      estimatedMinutes: 25,
+      searchHints: ["next"],
+    },
+  ]);
+  await plan.putLesson(ready);
+  const reserved = await plan.reserveGap({
+    sourceLessonId: "l1",
+    concepts: [{ conceptId: "l1-faith", conceptLabel: "Faith" }],
+  });
+  assert.equal(reserved.queued, true);
+  assert.equal(reserved.lessonId, "gap-l1-1");
+  const snap = await plan.snapshot();
+  assert.equal(snap.status, "queued");
+  assert.ok(snap.plan);
+  assert.ok(snap.plan?.lessons.some((item) => item.id === "l1" && item.quiz.length > 0));
+  assert.equal((await plan.snapshot()).status, "queued");
 });
 
 type SqlCursor = { one(): Record<string, unknown>; toArray(): Record<string, unknown>[] };

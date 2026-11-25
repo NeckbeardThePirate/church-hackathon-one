@@ -47,7 +47,7 @@ async function llm<T>(
   role: LlmRole,
   call: { system: string; user: string; validate: (v: unknown) => T; maxTokens?: number; temperature?: number },
 ): Promise<T> {
-  if (!(await ctx.stub.spend("llm", 1))) throw new BudgetExhausted("LLM call budget reached.");
+  if (!(await ctx.stub.spend("llm", 1, { gap: ctx.msg.job === "gap" }))) throw new BudgetExhausted("LLM call budget reached.");
   const meta: LlmMeta = { planId: ctx.msg.planId, stage: ctx.msg.stage, lessonId: ctx.msg.lessonId };
   const info = await ctx.stub.info().catch(() => null);
   return llmJson(ctx.env, { role, meta, ...call, userId: info?.userId });
