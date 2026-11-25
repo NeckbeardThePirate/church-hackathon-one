@@ -36,9 +36,11 @@ import {
   type LearnAttemptAnswer,
 } from "../lib/learn/attempts";
 import {
+  adoptLivePlan,
   groupMissesBySource,
   missedFromQuiz,
   missedGapConcepts,
+  practiceCardHeading,
   practiceCards,
   selectGapConcepts,
   type GapConcept,
@@ -59,7 +61,6 @@ import {
   quizAllAnswered,
   quizCorrectCount,
   resolveLocation,
-  resumeLabel,
   retryMissedQuiz,
   writeLearnProgress,
   type LearnLocation,
@@ -67,6 +68,7 @@ import {
   type PersistedQuiz,
   type PersistedQuizAnswer,
 } from "../lib/learn/plan-progress";
+import { courseContinue } from "../lib/learn/progress-dashboard";
 import { attemptPassed, derivePathMap } from "../lib/learn/path-map";
 import {
   articleDoneFor,
@@ -512,9 +514,7 @@ function PracticeList({
                 onClick={() => onOpen(card.gapLessonId!)}
                 className="flex min-h-11 w-full flex-col items-start justify-center text-left"
               >
-                <span className="text-sm font-medium text-[var(--ink)]">
-                  Practice lesson ready{card.title ? `: ${card.title}` : ""}
-                </span>
+                <span className="text-sm font-medium text-[var(--ink)]">{practiceCardHeading(card)}</span>
                 <span className="mt-1 text-xs text-[var(--ink-muted)]">Citations and a short quiz for what you missed.</span>
               </button>
             ) : status?.error ? (
@@ -527,7 +527,7 @@ function PracticeList({
                   onClick={() => onGenerate(card.sourceLessonId, card.concepts)}
                   className="mt-2 flex min-h-11 w-full flex-col items-start justify-center text-left"
                 >
-                  <span className="text-sm font-medium text-[var(--ink)]">Generate gap lesson</span>
+                  <span className="text-sm font-medium text-[var(--ink)]">{practiceCardHeading(card)}</span>
                   {labels ? <span className="mt-1 text-xs text-[var(--ink-muted)]">{labels}</span> : null}
                 </button>
               </>
@@ -541,7 +541,7 @@ function PracticeList({
                 onClick={() => onGenerate(card.sourceLessonId, card.concepts)}
                 className="flex min-h-11 w-full flex-col items-start justify-center text-left"
               >
-                <span className="text-sm font-medium text-[var(--ink)]">Generate gap lesson</span>
+                <span className="text-sm font-medium text-[var(--ink)]">{practiceCardHeading(card)}</span>
                 {labels ? <span className="mt-1 text-xs text-[var(--ink-muted)]">{labels}</span> : null}
               </button>
             )}
@@ -1132,7 +1132,7 @@ function applyRead(
 
 export function LearnPlanView({
   projectId,
-  plan,
+  plan: incomingPlan,
   displayTitle,
   savedProgress,
   onSaveProgress,
@@ -1143,6 +1143,11 @@ export function LearnPlanView({
   goal = null,
   focusRequest = null,
 }: Props) {
+  const [plan, setPlan] = useState(incomingPlan);
+  const planStateRef = useRef(plan);
+  planStateRef.current = plan;
+  const incomingRef = useRef(incomingPlan);
+  incomingRef.current = incomingPlan;
   const title = displayTitle?.trim() || plan.title.trim() || plan.topic;
   const totalMin = plan.lessons.reduce((n, l) => n + l.estimatedMinutes, 0);
   const roundedMin = Math.round(totalMin / 5) * 5;
@@ -1170,6 +1175,38 @@ export function LearnPlanView({
   onAwardRef.current = onAward;
   const onPlanRef = useRef(onPlan);
   onPlanRef.current = onPlan;
+
+  useEffect(() => {
+    setPlan((current) => {
+      const base = current.id === incomingPlan.id ? current : incomingPlan;
+      const merged = adoptLivePlan(base, incomingPlan);
+      planStateRef.current = merged;
+      return merged;
+    });
+  }, [incomingPlan]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const planId = incomingPlan.id;
+    void fetch(`/api/learn/plans/${planId}`, { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: unknown) => {
+        if (cancelled) return;
+        const live = (body as PlanSnapshot | null)?.plan;
+        if (!live || live.id !== planId) return;
+        const current = planStateRef.current;
+        const base = current.id === planId ? current : incomingRef.current;
+        const merged = adoptLivePlan(base, live);
+        if (merged === current) return;
+        planStateRef.current = merged;
+        setPlan(merged);
+        onPlanRef.current?.(merged);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [incomingPlan.id]);
   const gapPostedRef = useRef<Set<string>>(new Set());
   const [gapWatch, setGapWatch] = useState<Record<string, GapWatch>>({});
   const urlAppliedRef = useRef(false);
@@ -1326,7 +1363,16 @@ export function LearnPlanView({
     setOpenArticleUrl(null);
   }, [activeLesson?.id]);
 
-  const resume = resumeLabel(scope, plan, progress, hasFinal);
+  const resume = courseContinue(
+    {
+      id: projectId,
+      title,
+      updatedAt: 0,
+      learnPlan: plan,
+      learnProgress: progress,
+    },
+    Date.now(),
+  );
 
   const gradeShort = useCallback((item: QuizItem, given: string) => gradeFreeText(plan.id, item, given), [plan.id]);
   const timeZone = learnerTimeZone(stats?.timezone);
@@ -1684,19 +1730,17 @@ export function LearnPlanView({
               <button
                 type="button"
                 onClick={() => {
-                  const loc = resolveLocation(plan.lessons, progress.location);
-                  if (loc.screen === "final") goFinal();
-                  else if (loc.screen === "lesson" && loc.lessonId) goLesson(loc.lessonId);
-                  else {
-                    const next = plan.lessons.find((l) => !isLessonStepComplete(scope, l.id, l.quiz.length > 0, progress));
-                    if (next) goLesson(next.id);
-                    else if (hasFinal && !isFinalStepComplete(scope, progress, true)) goFinal();
+                  if (resume.kind === "reviews") {
+                    document.getElementById("learn-review")?.scrollIntoView({ block: "start" });
+                    return;
                   }
+                  if (resume.kind === "final") goFinal();
+                  else if (resume.kind === "lesson" || resume.kind === "gap") goLesson(resume.lessonId, "top");
                 }}
                 className="mt-5 flex w-full flex-col items-start gap-1 rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_50%,var(--line))]"
               >
                 <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Continue</span>
-                <span className="text-sm font-medium text-[var(--ink)]">{resume}</span>
+                <span className="text-sm font-medium text-[var(--ink)]">{resume.label}</span>
               </button>
             ) : null}
 

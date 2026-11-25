@@ -1,3 +1,4 @@
+import { parseXpAwardRequest } from "../learn/learner-stats.ts";
 import {
   parseLearnerStatsPut,
   StatsInputError,
@@ -44,6 +45,12 @@ export async function handleStatsPut(
   }
 }
 
+/** A Durable Object call can rethrow StatsInputError without the class identity. */
+function isStatsInputError(error: unknown): error is { message: string } {
+  if (error instanceof StatsInputError) return true;
+  return !!error && typeof error === "object" && "name" in error && (error as { name?: unknown }).name === "StatsInputError";
+}
+
 /** POST /api/workspace/stats/award. Amounts are chosen on the server and each reason pays once. */
 export async function handleStatsAward(
   auth: Auth,
@@ -52,10 +59,12 @@ export async function handleStatsAward(
   award: (input: unknown, now: number) => Promise<LearnerStats> | LearnerStats,
 ): Promise<Response> {
   if (auth instanceof Response) return auth;
+  const parsed = parseXpAwardRequest(body);
+  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
   try {
     return Response.json(await award(body, now));
   } catch (error) {
-    if (error instanceof StatsInputError) return Response.json({ error: error.message }, { status: 400 });
+    if (isStatsInputError(error)) return Response.json({ error: error.message }, { status: 400 });
     return failure(error, "Could not save XP.");
   }
 }

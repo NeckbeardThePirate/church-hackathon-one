@@ -290,6 +290,67 @@ export function practiceCards(
   return cards;
 }
 
+export function practiceCardHeading(card: PracticeCard): string {
+  if (card.gapLessonId) return card.title ? `Practice lesson ready: ${card.title}` : "Practice lesson ready";
+  return "Generate gap lesson";
+}
+
+type StoredGapLesson = GapLessonRef & {
+  title?: string;
+  status?: string;
+  teaching?: readonly unknown[];
+};
+
+/** A gap on the live plan is ready once check has saved it. A reserved ticket is not on the plan yet. */
+function liveGapReady(lesson: StoredGapLesson): boolean {
+  if (lessonKind(lesson) !== "gap" || !lesson.sourceLessonId) return false;
+  if ((lesson.teaching?.length ?? 0) > 0) return true;
+  return lesson.status === "ok" || lesson.status === "degraded";
+}
+
+/** Replace a snapshot copy when the live lesson is the one that was actually built. */
+function liveGapRicher(current: StoredGapLesson, live: StoredGapLesson): boolean {
+  if (lessonKind(current) !== "gap") return true;
+  if ((live.teaching?.length ?? 0) > (current.teaching?.length ?? 0)) return true;
+  if (!current.title && live.title) return true;
+  if ((live.status === "ok" || live.status === "degraded") && current.status !== live.status) return true;
+  return false;
+}
+
+/**
+ * Copy finished gap lessons from the live plan onto a workspace snapshot that left them out.
+ * The snapshot array is returned unchanged when it already has each ready gap.
+ */
+export function adoptLiveGapLessons<T extends StoredGapLesson>(snapshot: readonly T[], live: readonly T[]): readonly T[] {
+  let next: T[] | null = null;
+  for (const lesson of live) {
+    if (!liveGapReady(lesson)) continue;
+    const list = next ?? snapshot.slice();
+    const index = list.findIndex((item) => item.id === lesson.id);
+    if (index < 0) {
+      next = insertGapLesson(list, lesson);
+      continue;
+    }
+    if (!liveGapRicher(list[index]!, lesson)) continue;
+    next = insertGapLesson(
+      list.filter((item) => item.id !== lesson.id),
+      lesson,
+    );
+  }
+  return next ?? snapshot;
+}
+
+/** Keep every other plan field. Only the lesson list can gain a live gap. */
+export function adoptLivePlan<T extends { id: string; lessons: readonly StoredGapLesson[] }>(
+  snapshot: T,
+  live: { id?: string; lessons?: readonly StoredGapLesson[] } | null | undefined,
+): T {
+  if (!live || live.id !== snapshot.id || !live.lessons) return snapshot;
+  const lessons = adoptLiveGapLessons(snapshot.lessons, live.lessons as readonly T["lessons"][number][]);
+  if (lessons === snapshot.lessons) return snapshot;
+  return { ...snapshot, lessons: lessons as T["lessons"] };
+}
+
 /** Keep gap lessons a newer project save dropped. Incoming copies of the same id win. */
 export function preserveGapLessons<T extends GapLessonRef>(incoming: readonly T[], stored: readonly T[]): T[] {
   let next = incoming.slice();

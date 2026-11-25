@@ -586,24 +586,6 @@ export function resolveLocation(
   return defaultLocation();
 }
 
-export function resumeLabel(
-  scope: ProgressScope,
-  plan: { lessons: { id: string; order: number; title: string }[] },
-  progress: LearnPlanProgress,
-  hasFinal: boolean,
-): string | null {
-  const loc = resolveLocation(plan.lessons, progress.location);
-  if (loc.screen === "lesson" && loc.lessonId) {
-    const lesson = plan.lessons.find((l) => l.id === loc.lessonId);
-    if (lesson) return `Lesson ${lesson.order}: ${lesson.title}`;
-  }
-  if (loc.screen === "final" && hasFinal) return "Final assessment";
-  const next = plan.lessons.find((l) => !readDoneFor(progress, scope, l.id));
-  if (next) return `Lesson ${next.order}: ${next.title}`;
-  if (hasFinal && !isFinalStepComplete(scope, progress, true)) return "Final assessment";
-  return null;
-}
-
 export const MAIN_SCROLL_SELECTOR = "[data-learn-scroll]";
 
 export function mainScrollElement(): HTMLElement | null {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createProject, defaultTitle, isEmptyLearnPath, isLegacyProject, type Project } from "../lib/projects";
 import { deleteRemoteProject, loadUserWorkspace, putProject } from "../lib/workspace-sync";
 import { applyXpAwards, dailyGoalStatus, emptyStats, lessonMasteryList, type StatsSnapshot, type XpEvent, type XpEventKind } from "../lib/learn/learner-stats";
-import { claimLegacyProgress, type LearnLocation, type LearnPlanProgress } from "../lib/learn/plan-progress";
+import { claimLegacyProgress, mergeLearnProgress, type LearnLocation, type LearnPlanProgress } from "../lib/learn/plan-progress";
 import { actionTarget, nextLearningAction, pathSummaries, type NextAction } from "../lib/learn/progress-dashboard";
 import { scopeFromProject } from "../lib/learn/progress-scope";
 import { parsePathUrl } from "../lib/learn/path-url";
@@ -433,8 +433,8 @@ export function WorkspaceApp() {
   const mastery = useMemo(() => {
     if (!activeProject?.learnPlan || isLegacyProject(activeProject)) return [];
     const scope = scopeFromProject(activeProject);
-    const progress = liveProgress ?? activeProject.learnProgress;
-    if (!scope || !progress) return [];
+    if (!scope) return [];
+    const progress = mergeLearnProgress(liveProgress ?? activeProject.learnProgress, scope);
     return lessonMasteryList(
       activeProject.learnPlan.lessons.map((lesson) => ({
         id: lesson.id,
@@ -449,9 +449,12 @@ export function WorkspaceApp() {
 
   const dashboardProjects = useMemo(
     () =>
-      projects.map((project) =>
-        project.id === activeProjectId && liveProgress ? { ...project, learnProgress: liveProgress } : project,
-      ),
+      projects.map((project) => {
+        const scope = scopeFromProject(project);
+        if (!scope || isLegacyProject(project)) return project;
+        const base = project.id === activeProjectId && liveProgress ? liveProgress : project.learnProgress;
+        return { ...project, learnProgress: mergeLearnProgress(base, scope) };
+      }),
     [projects, activeProjectId, liveProgress],
   );
   const summaries = useMemo(() => pathSummaries(dashboardProjects, Date.now()), [dashboardProjects]);
