@@ -203,6 +203,36 @@ test("awarding XP is idempotent, ignores a client amount, and a later stats put 
   assert.equal(denied.status, 401);
 });
 
+test("an unknown award kind is a 400 and does not award", async () => {
+  const now = Date.parse("2026-11-16T20:00:00Z");
+  let called = false;
+  const response = await handleStatsAward(
+    { userId: "user_1" },
+    { timezone: "America/Los_Angeles", events: [{ kind: "bonus", reason: "bonus:p" }] },
+    now,
+    () => {
+      called = true;
+      throw new Error("award should not run");
+    },
+  );
+  assert.equal(called, false);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, "Award kind is not one this app gives XP for.");
+
+  const remote = new Error("Award kind is not one this app gives XP for.");
+  remote.name = "StatsInputError";
+  const wrapped = await handleStatsAward(
+    { userId: "user_1" },
+    { timezone: "America/Los_Angeles", events: [{ kind: "read", reason: "read:p:l1" }] },
+    now,
+    () => {
+      throw remote;
+    },
+  );
+  assert.equal(wrapped.status, 400);
+  assert.equal((await wrapped.json()).error, "Award kind is not one this app gives XP for.");
+});
+
 test("schema 1 migrates to learner stats without dropping projects or prefs", () => {
   const { db, sql } = open();
   applyWorkspaceMigrations(sql, 1);

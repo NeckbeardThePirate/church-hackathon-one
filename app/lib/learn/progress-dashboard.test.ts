@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { lessonMasteryPercent } from "./learner-stats.ts";
 import { emptyLearnProgress, newConceptMastery, type LearnPlanProgress } from "./plan-progress.ts";
-import { actionTarget, nextLearningAction, pathSummaries, type DashboardProject } from "./progress-dashboard.ts";
-import { withConceptMastery, withLessonQuiz, type ProgressScope } from "./progress-scope.ts";
+import { courseContinue, actionTarget, nextLearningAction, pathSummaries, type DashboardProject } from "./progress-dashboard.ts";
+import { withConceptMastery, withLessonQuiz, withReadState, type ProgressScope } from "./progress-scope.ts";
 import type { LearnLesson, QuizItem } from "./types.ts";
 
 const now = Date.parse("2026-11-23T20:00:00Z");
@@ -159,4 +160,120 @@ test("an earlier due review wins, and a finished path points at the final", () =
   assert.equal(doneSummary?.percent, 50);
   assert.equal(olderSummary?.reviewsDue, 1);
   assert.equal(nextLearningAction([], now).kind, "none");
+});
+
+test("continue names the unlocked in-progress lesson even when the saved location is a later locked lesson", () => {
+  const scope = { projectId: "lords", planId: "plan-lords" };
+  let progress = passedQuiz(scope, emptyLearnProgress(), "l1");
+  progress = withReadState(progress, scope, "l2", 100, true);
+  progress = withLessonQuiz(progress, scope, "l2", {
+    answers: [
+      { mcChoice: "Yes", shortText: "", shortSubmitted: false, correct: true },
+      { mcChoice: null, shortText: "", shortSubmitted: false, correct: null },
+      { mcChoice: null, shortText: "", shortSubmitted: false, correct: null },
+    ],
+  });
+  progress = { ...progress, location: { screen: "lesson", lessonId: "l3" } };
+  const action = courseContinue(
+    project({
+      id: "lords",
+      title: "The Lord's Prayer",
+      learnPlan: {
+        id: "plan-lords",
+        lessons: [
+          lesson({ id: "l1", order: 1, title: "Address" }),
+          lesson({ id: "l2", order: 2, title: "Petitions", prerequisiteLessonIds: ["l1"] }),
+          lesson({ id: "l3", order: 3, title: "Doxology", prerequisiteLessonIds: ["l2"] }),
+        ],
+        finalAssessment: questions(3, "final"),
+      },
+      learnProgress: progress,
+    }),
+    now,
+  );
+  assert.equal(action?.kind, "lesson");
+  if (action?.kind === "lesson") {
+    assert.equal(action.lessonId, "l2");
+    assert.equal(action.label, "Lesson 2: Petitions");
+  }
+});
+
+test("continue prefers a due review, then a ready gap, over the next core lesson", () => {
+  const scope = { projectId: "lords", planId: "plan-lords" };
+  const lessons = [
+    lesson({ id: "l1", order: 1, title: "Address" }),
+    lesson({
+      id: "gap-l1-1",
+      order: 1,
+      title: "Practice: Line-by-line comparison",
+      kind: "gap",
+      sourceLessonId: "l1",
+      prerequisiteLessonIds: ["l1"],
+      quiz: questions(1, "gap"),
+    }),
+    lesson({ id: "l2", order: 2, title: "Petitions", prerequisiteLessonIds: ["l1"] }),
+  ];
+  const gapAction = courseContinue(
+    project({
+      id: "lords",
+      title: "The Lord's Prayer",
+      learnPlan: { id: "plan-lords", lessons },
+      learnProgress: passedQuiz(scope, emptyLearnProgress(), "l1"),
+    }),
+    now,
+  );
+  assert.equal(gapAction?.kind, "gap");
+  if (gapAction?.kind === "gap") {
+    assert.equal(gapAction.lessonId, "gap-l1-1");
+    assert.equal(gapAction.label, "Practice: Line-by-line comparison");
+  }
+
+  const due = courseContinue(
+    project({
+      id: "lords",
+      title: "The Lord's Prayer",
+      learnPlan: { id: "plan-lords", lessons },
+      learnProgress: withConceptMastery(
+        passedQuiz(scope, emptyLearnProgress(), "l1"),
+        scope,
+        "l1-c1",
+        { ...newConceptMastery({ conceptId: "l1-c1", conceptLabel: "Address", lessonId: "l1" }), dueAt: now - 1000, repetitions: 1 },
+      ),
+    }),
+    now,
+  );
+  assert.equal(due?.kind, "reviews");
+  assert.equal(due?.label, "Review 1 due");
+});
+
+test("path percent counts mastered nodes, so partial lesson scores can leave a path at 0%", () => {
+  const scope = { projectId: "lords", planId: "plan-lords" };
+  const lessons = [
+    lesson({ id: "l1", order: 1, title: "Address", quiz: questions(4, "l1") }),
+    lesson({ id: "l2", order: 2, title: "Petitions", quiz: questions(4, "l2"), prerequisiteLessonIds: ["l1"] }),
+  ];
+  let progress = withReadState(emptyLearnProgress(), scope, "l1", 100, true);
+  progress = withLessonQuiz(progress, scope, "l1", {
+    answers: [0, 1, 2, 3].map((index) => ({
+      mcChoice: index < 3 ? "Yes" : null,
+      shortText: "",
+      shortSubmitted: false,
+      correct: index < 3 ? true : null,
+    })),
+  });
+  progress = withReadState(progress, scope, "l2", 100, true);
+  assert.equal(lessonMasteryPercent({ scope, lessonId: "l1", quizCount: 4, progress }), 81);
+  assert.equal(lessonMasteryPercent({ scope, lessonId: "l2", quizCount: 4, progress }), 35);
+  const summary = pathSummaries(
+    [
+      project({
+        id: "lords",
+        title: "The Lord's Prayer",
+        learnPlan: { id: "plan-lords", lessons, finalAssessment: questions(3, "final") },
+        learnProgress: progress,
+      }),
+    ],
+    now,
+  )[0];
+  assert.equal(summary?.percent, 0);
 });

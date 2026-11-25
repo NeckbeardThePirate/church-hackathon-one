@@ -11,6 +11,8 @@ import {
   MAX_GAP_LESSONS_PER_CORE,
   missedGapConcepts,
   parseGapRequest,
+  adoptLiveGapLessons,
+  practiceCardHeading,
   practiceCards,
   preserveGapLessons,
   selectGapConcepts,
@@ -144,6 +146,43 @@ test("final misses map onto the core lesson that taught the concept", () => {
     requests,
   );
   assert.equal(covered.some((card) => !card.gapLessonId && card.concepts.some((concept) => concept.conceptId === "l1-line")), false);
+});
+
+test("a plan snapshot missing a gap lesson plus a live gap renders ready, not Generate", () => {
+  const snapshot = [
+    {
+      id: "l1",
+      kind: "core",
+      title: "Line by line",
+      quiz: [{ conceptId: "l1-line", conceptLabel: "Line-by-line comparison" }],
+    },
+    { id: "l2", kind: "core", title: "Next" },
+  ];
+  const liveGap = {
+    id: "gap-l1-1",
+    kind: "gap" as const,
+    title: "Practice: Line-by-line comparison",
+    status: "ok" as const,
+    sourceLessonId: "l1",
+    sourceConceptIds: ["l1-line"],
+    teaching: [{ text: "Set the lines next to each other." }],
+  };
+  const lessons = adoptLiveGapLessons(snapshot, [...snapshot, liveGap]);
+  assert.deepEqual(lessons.map((lesson) => lesson.id), ["l1", "gap-l1-1", "l2"]);
+  const misses = [
+    { sourceLessonId: "l1", concepts: [{ conceptId: "l1-line", conceptLabel: "Line-by-line comparison" }] },
+  ];
+  const cards = practiceCards(lessons, misses);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0]?.gapLessonId, "gap-l1-1");
+  assert.equal(practiceCardHeading(cards[0]!), "Practice lesson ready: Practice: Line-by-line comparison");
+  assert.equal(cards.some((card) => practiceCardHeading(card) === "Generate gap lesson"), false);
+
+  const pending = adoptLiveGapLessons(snapshot, [
+    ...snapshot,
+    { ...liveGap, id: "gap-l1-2", status: "pending", teaching: [] },
+  ]);
+  assert.deepEqual(pending.map((lesson) => lesson.id), ["l1", "l2"]);
 });
 
 test("a newer plan save keeps a gap lesson it left out", () => {
