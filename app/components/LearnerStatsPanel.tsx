@@ -1,6 +1,7 @@
 "use client";
 
-import { statsFigures, type LessonMastery } from "../lib/learn/learner-stats";
+import { statsFigures, type DailyGoalStatus, type LessonMastery } from "../lib/learn/learner-stats";
+import { DailyGoalBar } from "./ProgressDashboard";
 
 type Props = {
   xp: number;
@@ -10,10 +11,23 @@ type Props = {
   lessons?: LessonMastery[];
   /** Shown on the compact strip for the lesson that is open. */
   masteryPercent?: number | null;
+  goal?: DailyGoalStatus | null;
+  nextLabel?: string | null;
+  onNext?: () => void;
   variant?: "sidebar" | "strip";
 };
 
-export function LearnerStatsPanel({ xp, streak, pending = false, lessons = [], masteryPercent = null, variant = "sidebar" }: Props) {
+export function LearnerStatsPanel({
+  xp,
+  streak,
+  pending = false,
+  lessons = [],
+  masteryPercent = null,
+  goal = null,
+  nextLabel = null,
+  onNext,
+  variant = "sidebar",
+}: Props) {
   const figures = statsFigures(pending ? null : { xp, streak });
   if (variant === "strip") {
     return (
@@ -33,6 +47,11 @@ export function LearnerStatsPanel({ xp, streak, pending = false, lessons = [], m
           <span>
             Mastery <strong className="tabular-nums font-semibold text-[var(--ink)]">{masteryPercent}%</strong>
           </span>
+        ) : null}
+        {goal ? (
+          <div className="min-w-[8rem] flex-1">
+            <DailyGoalBar {...goal} />
+          </div>
         ) : null}
       </div>
     );
@@ -54,6 +73,20 @@ export function LearnerStatsPanel({ xp, streak, pending = false, lessons = [], m
           {figures.busy ? figures.streak : `${figures.streak} ${streak === 1 ? "day" : "days"}`}
         </span>
       </div>
+      {goal ? (
+        <div className="mt-2 border-t border-[var(--line)] pt-2">
+          <DailyGoalBar {...goal} />
+        </div>
+      ) : null}
+      {nextLabel && onNext ? (
+        <button
+          type="button"
+          onClick={onNext}
+          className="mt-2 flex min-h-11 w-full items-center rounded-md border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] px-2 py-2 text-left text-xs font-medium text-[var(--ink)]"
+        >
+          <span className="min-w-0 flex-1">{nextLabel}</span>
+        </button>
+      ) : null}
       {lessons.length ? (
         <ol className="mt-2 max-h-40 space-y-1 overflow-y-auto border-t border-[var(--line)] pt-2 [scrollbar-gutter:stable]">
           {lessons.map((lesson) => (
