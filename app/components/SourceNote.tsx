@@ -9,14 +9,23 @@ const COPY = {
     "Lessons and quizzes are AI-generated. Scripture and historical sources are retrieved from the library, not written by the model.",
   intake:
     "The path is AI-generated. Scripture and historical sources are retrieved from the library, not written by the model.",
+  tutor:
+    "Answers here are AI-generated. Scripture and historical sources are retrieved from the library, not written by the model.",
 } as const;
 
 export type SourceNotePlace = keyof typeof COPY;
 
 /** Short honesty line on the screens a learner (or a judge) actually reads. */
-export function SourceNote({ place }: { place: SourceNotePlace }) {
+export function SourceNote({ place, compact = false }: { place: SourceNotePlace; compact?: boolean }) {
   return (
-    <p className="mt-3 max-w-full text-sm leading-relaxed break-words text-[var(--ink-muted)]" data-source-note={place}>
+    <p
+      className={
+        compact
+          ? "mt-1 max-w-full text-xs leading-snug break-words text-[var(--ink-muted)]"
+          : "mt-3 max-w-full text-sm leading-relaxed break-words text-[var(--ink-muted)]"
+      }
+      data-source-note={place}
+    >
       {COPY[place]}
     </p>
   );

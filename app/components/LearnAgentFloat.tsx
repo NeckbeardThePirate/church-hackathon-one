@@ -6,6 +6,7 @@ import { buildLearnChatContext, focusLabel, type LearnChatMessage, type LearnRev
 import type { LearnLocation } from "../lib/learn/plan-progress";
 import type { LearnPlan } from "../lib/learn/types";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { SourceNote } from "./SourceNote";
 
 const STORAGE_PREFIX = "learn-agent:";
 
@@ -178,6 +179,7 @@ export function LearnAgentFloat({ projectId, plan, location, reviewFocus = null 
             {contextTitle}
           </p>
           <p className="mt-0.5 text-[10px] text-[var(--ink-muted)]">Uses this lesson&apos;s readings &amp; notes</p>
+          <SourceNote place="tutor" compact />
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <button
@@ -205,7 +207,7 @@ export function LearnAgentFloat({ projectId, plan, location, reviewFocus = null 
         className="min-h-[200px] max-h-[min(52dvh,420px)] flex-1 overflow-y-auto px-3 py-2 [scrollbar-gutter:stable]"
       >
         {messages.length === 0 ? (
-          <p className="text-sm leading-relaxed text-[var(--ink-muted)]">
+          <p className="text-sm leading-relaxed break-words text-[var(--ink-muted)]">
             Ask about what you&apos;re studying — teaching points, scripture, linked videos and articles, or quiz ideas.
             Context updates when you change lessons ({contextTitle}).
           </p>
