@@ -89,7 +89,7 @@ function NodeCard({ node, onOpen }: { node: PathMapNode; onOpen: (nodeId: string
           </span>
           <span className={`text-xs font-medium ${stateClass(node.state)}`}>{STATE_LABEL[node.state]}</span>
         </span>
-        <span className={`mt-1 block text-sm font-medium leading-snug ${locked ? "text-[var(--ink-muted)]" : "text-[var(--ink)]"}`}>
+        <span className={`mt-1 block break-words text-sm font-medium leading-snug ${locked ? "text-[var(--ink-muted)]" : "text-[var(--ink)]"}`}>
           {node.kind === "final" ? "Final assessment" : node.title}
         </span>
         {node.estimatedMinutes ? (

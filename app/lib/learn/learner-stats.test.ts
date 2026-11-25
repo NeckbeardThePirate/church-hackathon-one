@@ -46,9 +46,10 @@ test("awards pay the spec amount once, and the streak follows the stored timezon
   const first = award(emptyStats(), [{ kind: "read", reason: "read:p:plan:l1" }], lateNight);
   assert.equal(first.error, undefined);
   assert.equal(first.stats.xp, 10);
-  assert.equal(first.stats.streak, 1);
+  assert.equal(first.stats.streak, 0);
   assert.equal(first.stats.timezone, zone);
-  assert.equal(first.stats.last_goal_date, "2026-11-16");
+  assert.equal(first.stats.last_goal_date, null);
+  assert.equal(first.stats.payload.todayXp, 10);
   assert.equal(dailyGoalStatus(first.stats, lateNight).earned, 10);
   assert.equal(dailyGoalStatus(first.stats, lateNight).met, false);
 
@@ -60,19 +61,53 @@ test("awards pay the spec amount once, and the streak follows the stored timezon
   assert.equal(ymdInTimeZone(morning, zone), "2026-11-17");
   const next = award(first.stats, [{ kind: "quiz", reason: "quiz:p:plan:l1" }], morning, "UTC");
   assert.equal(next.stats.timezone, zone);
-  assert.equal(next.stats.streak, 2);
-  assert.equal(next.stats.last_goal_date, "2026-11-17");
+  assert.equal(next.stats.streak, 0);
+  assert.equal(next.stats.last_goal_date, null);
   assert.equal(next.stats.xp, 30);
+  assert.equal(next.stats.payload.todayXp, 20);
   assert.equal(next.stats.payload.dailyGoalMet.includes("2026-11-17"), false);
 
   const goal = award(next.stats, [{ kind: "read", reason: "read:p:plan:l2" }], morning + 1000, "Europe/London");
   assert.equal(goal.stats.timezone, zone);
-  assert.equal(goal.stats.xp, 30 + 10 + XP_DAILY_GOAL + 2 * XP_STREAK_PER_DAY);
+  assert.equal(goal.stats.streak, 1);
+  assert.equal(goal.stats.last_goal_date, "2026-11-17");
+  assert.equal(goal.stats.xp, 30 + 10 + XP_DAILY_GOAL + XP_STREAK_PER_DAY);
   assert.equal(goal.stats.payload.dailyGoalMet.includes("2026-11-17"), true);
   assert.equal(dailyGoalStatus(goal.stats, morning).met, true);
   assert.equal(dailyGoalStatus(goal.stats, morning).earned, 30);
   const again = award(goal.stats, [{ kind: "read", reason: "read:p:plan:l2" }], morning + 2000);
   assert.equal(again.stats.xp, goal.stats.xp);
+});
+
+test("a read below the daily goal on a new local day does not extend the streak", () => {
+  const monday = Date.parse("2026-11-16T20:00:00Z");
+  const met = award(
+    emptyStats(),
+    [
+      { kind: "read", reason: "read:p:l1" },
+      { kind: "quiz", reason: "quiz:p:l1" },
+    ],
+    monday,
+  );
+  assert.equal(met.stats.streak, 1);
+  assert.equal(met.stats.last_goal_date, "2026-11-16");
+  assert.equal(met.stats.payload.todayXp, 30);
+
+  const tuesday = Date.parse("2026-11-17T20:00:00Z");
+  const read = award(met.stats, [{ kind: "read", reason: "read:p:l2" }], tuesday);
+  assert.equal(read.stats.xp, met.stats.xp + 10);
+  assert.equal(read.stats.payload.todayXp, 10);
+  assert.equal(read.stats.streak, 1);
+  assert.equal(read.stats.last_goal_date, "2026-11-16");
+  assert.equal(
+    read.accepted.some((entry) => entry.kind === "goal" || entry.kind === "streak"),
+    false,
+  );
+
+  const done = award(read.stats, [{ kind: "quiz", reason: "quiz:p:l2" }], tuesday + 1000);
+  assert.equal(done.stats.payload.todayXp, 30);
+  assert.equal(done.stats.streak, 2);
+  assert.equal(done.stats.last_goal_date, "2026-11-17");
 });
 
 test("a client amount cannot change what an event pays", () => {
@@ -109,7 +144,19 @@ test("streak bonus is 5 per streak day and stops at 50", () => {
     xpBeforeBonus = stats.xp;
   }
   const skipped = award(stats, [{ kind: "read", reason: "read:p:later" }], Date.parse("2026-11-16T20:00:00Z") + 20 * 86_400_000);
-  assert.equal(skipped.stats.streak, 1);
+  assert.equal(skipped.stats.streak, 12);
+  assert.equal(skipped.stats.last_goal_date, stats.last_goal_date);
+  assert.equal(skipped.stats.payload.todayXp, 10);
+  const resumed = award(
+    skipped.stats,
+    [
+      { kind: "quiz", reason: "quiz:p:later" },
+      { kind: "first", reason: "first:p:later" },
+    ],
+    Date.parse("2026-11-16T20:00:00Z") + 20 * 86_400_000 + 1000,
+  );
+  assert.equal(resumed.stats.streak, 1);
+  assert.equal(resumed.stats.payload.todayXp, 35);
 });
 
 test("a trimmed xp log still blocks the same lesson", () => {

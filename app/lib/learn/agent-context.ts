@@ -33,6 +33,8 @@ export type LearnChatContext = {
   lessonOutline?: { order: number; title: string; objectives: string[] }[];
   lesson?: SerializedLesson;
   finalQuestions?: { question: string; kind: string }[];
+  /** Set while a review card is open. Sources come from that card's lesson. */
+  review?: { conceptLabel: string; question: string; lesson?: SerializedLesson };
 };
 
 export type SerializedLesson = {
@@ -48,6 +50,13 @@ export type SerializedLesson = {
   library?: { source: string; label: string; detail?: string; text: string; note: string; condemned?: boolean }[];
   quiz: { kind: string; question: string; choices?: string[]; sourceRef?: string }[];
   warnings: string[];
+  kind?: "core" | "gap";
+};
+
+export type LearnReviewFocus = {
+  lessonId: string;
+  conceptLabel: string;
+  question: string;
 };
 
 export type LearnChatInput = {
@@ -151,10 +160,15 @@ export function serializeLesson(lesson: LearnLesson): SerializedLesson {
     })),
     quiz: lesson.quiz.map(serializeQuizItem),
     warnings: lesson.warnings,
+    kind: lesson.kind === "gap" ? "gap" : "core",
   };
 }
 
-export function buildLearnChatContext(plan: LearnPlan, location: LearnLocation): LearnChatContext {
+export function buildLearnChatContext(
+  plan: LearnPlan,
+  location: LearnLocation,
+  reviewFocus?: LearnReviewFocus | null,
+): LearnChatContext {
   const focus: LearnAgentFocus = { screen: location.screen };
   if (location.screen === "lesson" && location.lessonId) {
     const lesson = plan.lessons.find((l) => l.id === location.lessonId);
@@ -201,11 +215,21 @@ export function buildLearnChatContext(plan: LearnPlan, location: LearnLocation):
     }));
   }
 
+  if (reviewFocus) {
+    const source = plan.lessons.find((lesson) => lesson.id === reviewFocus.lessonId);
+    base.review = {
+      conceptLabel: reviewFocus.conceptLabel,
+      question: reviewFocus.question,
+      ...(source ? { lesson: serializeLesson(source) } : {}),
+    };
+  }
+
   return base;
 }
 
 export function focusLabel(context: LearnChatContext): string {
   const { focus } = context;
+  if (context.review) return `Review: ${context.review.conceptLabel}`;
   if (focus.screen === "lesson" && focus.lessonOrder != null && focus.lessonTitle) {
     return `Lesson ${focus.lessonOrder}: ${focus.lessonTitle}`;
   }

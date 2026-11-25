@@ -2,11 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  buildLearnChatContext,
-  focusLabel,
-  type LearnChatMessage,
-} from "../lib/learn/agent-context";
+import { buildLearnChatContext, focusLabel, type LearnChatMessage, type LearnReviewFocus } from "../lib/learn/agent-context";
 import type { LearnLocation } from "../lib/learn/plan-progress";
 import type { LearnPlan } from "../lib/learn/types";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -17,6 +13,7 @@ type Props = {
   projectId: string;
   plan: LearnPlan;
   location: LearnLocation;
+  reviewFocus?: LearnReviewFocus | null;
 };
 
 function readMessages(projectId: string): LearnChatMessage[] {
@@ -62,7 +59,7 @@ function TypingDots() {
   );
 }
 
-export function LearnAgentFloat({ projectId, plan, location }: Props) {
+export function LearnAgentFloat({ projectId, plan, location, reviewFocus = null }: Props) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [messages, setMessages] = useState<LearnChatMessage[]>(() => readMessages(projectId));
@@ -73,7 +70,10 @@ export function LearnAgentFloat({ projectId, plan, location }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contextKey = `${location.screen}:${location.lessonId ?? ""}`;
 
-  const chatContext = useMemo(() => buildLearnChatContext(plan, location), [plan, location]);
+  const chatContext = useMemo(
+    () => buildLearnChatContext(plan, location, reviewFocus),
+    [plan, location, reviewFocus],
+  );
   const contextTitle = focusLabel(chatContext);
 
   useEffect(() => setMounted(true), []);

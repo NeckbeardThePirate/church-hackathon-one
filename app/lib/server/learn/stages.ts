@@ -24,7 +24,8 @@ import {
 } from "@/app/lib/learn/types";
 import { fetchPassageFromD1 } from "../bible-db";
 import { exaAuthFrom, exaReady, exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId, youtubeOembed } from "./exa";
-import { citeLibrary } from "./library-cite";
+import { citeLibrary, mergeLibraryCitations, resolveLibraryRefs, type NamedLibraryRef } from "./library-cite";
+import { SOURCE_TEXT_RULE } from "./source-policy";
 import { list, llmJson, num, obj, str, strList, type LlmMeta, type LlmRole } from "./llm";
 import { carryConceptTags, parseQuizItems, requireConceptTags, teachConceptRules } from "./quiz-items.ts";
 import { openSourceQueryOrder, searchOpenLibrary, searchWikipedia } from "./open-sources";
@@ -362,6 +363,7 @@ export async function runReview(ctx: Ctx): Promise<void> {
     system: `You choose study resources for one lesson and review them for the learner.
 Pick only from the numbered candidates. Choose up to ${MAX_ARTICLES} articles (A#) and up to ${MAX_VIDEOS} videos (V#) that best serve the lesson objectives. Skip weak, off-topic, or low-quality items; fewer is fine.
 For each pick write "review": 1-2 sentences on what it covers, who it suits, and any caveat. Base it only on the text shown; do not invent ratings, view counts, or facts not in the text.
+${SOURCE_TEXT_RULE}
 ${tagRule}
 Return JSON: {"articles":[{"id":"A1","review":"","perspective":""}],"videos":[{"id":"V1","review":"","perspective":""}]}`,
     user: `Lesson: ${lesson.title}
@@ -433,7 +435,7 @@ function hostOf(url: string): string {
 
 function perspectiveRules(isFaithRelevant: boolean, perspective: Perspective): string {
   if (!isFaithRelevant) return "";
-  const base = `Never quote Bible verse text. Cite references only (e.g. "Romans 3:21-26"); verified text is inserted later.`;
+  const base = SOURCE_TEXT_RULE;
   if (perspective === "neutral") {
     return `${base}
 Where Christian traditions disagree on this subject, present each main position in its own block, attributed ("Catholic teaching holds…", "Reformed theology holds…"). Do not take a side.`;
@@ -493,7 +495,8 @@ One sitting. Teach only the missed concepts named in the user message. Do not ad
 Return JSON:
 {"teaching":[{"type":"heading2"|"paragraph"|"bullet"|"numbered"|"quote"|"divider","text":""}],
  "quiz":[{"kind":"mc"|"short","question":"","choices":["",""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"","conceptLabel":"","alternate":{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"","conceptLabel":""}}],
- "scriptureRefs":[{"reference":"Book C:V-V","note":"one sentence on why it connects"}]}
+ "scriptureRefs":[{"reference":"Book C:V-V","note":"one sentence on why it connects"}],
+ "libraryRefs":[{"reference":"Document or author, section","note":"one sentence on why it connects"}]}
 teaching: 3-6 short blocks. End with a heading2 "Discuss" and 2 bullet questions.
 quiz: ${band.quiz[0]}-${band.quiz[1]} items, and every item is about those missed concepts only.
 ${QUIZ_RULES}
@@ -501,14 +504,16 @@ Each quiz item must copy conceptId and conceptLabel from the missed list. Do not
 For each conceptId you use, put "alternate" on exactly one item for that concept. The alternate is a second question with the same conceptId, conceptLabel, and objectiveIndex, and it must not contain its own alternate.
 objectiveIndex is the 0-based index of that concept in the missed list.
 scriptureRefs: ${scope.isFaithRelevant ? "0-2 references, or an empty array" : "always an empty array"}.
-Never quote Bible verse text, confession text, or church father quotations. scriptureRefs are references only.
+libraryRefs: ${scope.isFaithRelevant ? "0-2 confession or church-father references, or an empty array" : "always an empty array"}.
+${SOURCE_TEXT_RULE}
 ${perspectiveRules(scope.isFaithRelevant, info.options.perspective)}`,
     user: `Course: ${scope.title} (${scope.complexity})
 Practice after lesson ${parent?.order ?? lesson.order}: ${parent?.title ?? lesson.title}
 One sitting, about ${lesson.estimatedMinutes} minutes.
 Missed concepts (use these ids and labels only):
 ${concepts.map((concept) => gapConceptLine(concept)).join("\n")}
-${parent ? `What the learner already read:\n"""\n${clip(lessonText(parent), 4000)}\n"""` : ""}`,
+${parent ? `What the learner already read:\n"""\n${clip(lessonText(parent), 4000)}\n"""` : ""}
+${retrievedSources(parent)}`,
     validate: (value) => {
       const record = obj(value);
       const teaching: TeachBlock[] = list(record.teaching, "teaching", { min: 3 }).flatMap((item, i) => {
@@ -543,31 +548,33 @@ ${parent ? `What the learner already read:\n"""\n${clip(lessonText(parent), 4000
               : [];
           })
         : [];
-      return { teaching, quiz, refs };
+      return { teaching, quiz, refs, libraryRefs: readNamedRefs(record.libraryRefs) };
     },
   });
 
   const verified = scope.isFaithRelevant
     ? await verifyScripture(ctx.env, result.refs.slice(0, 2))
     : { readings: [] as ScriptureReading[], dropped: [] as string[] };
-  const library = scope.isFaithRelevant
-    ? await citeLibrary(
+  const cited = scope.isFaithRelevant
+    ? await attachLibrary(
         ctx.env,
         `${lesson.title}. ${concepts.map((concept) => concept.conceptLabel).join(". ")}`,
         verified.readings.map((reading) => reading.reference),
         info.options.perspective,
+        result.libraryRefs,
       )
-    : [];
+    : { library: [], dropped: [] as string[] };
   const warnings = [
     ...lesson.warnings,
     ...verified.dropped.map((ref) => `Scripture reference dropped (did not resolve in BSB): ${ref}`),
+    ...cited.dropped.map((ref) => `Library reference dropped (did not resolve): ${ref}`),
   ];
   await ctx.stub.putLesson({
     ...lesson,
     teaching: result.teaching,
     quiz: result.quiz,
     scripture: verified.readings,
-    library,
+    library: cited.library,
     warnings,
     kind: "gap",
     sourceLessonId: lesson.sourceLessonId,
@@ -616,7 +623,7 @@ async function runGapCheck(ctx: Ctx): Promise<void> {
         system: `Rewrite quiz items so each is clearly answerable from the lesson text alone.
 Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0}]}
 Return exactly ${bad.length} items. ${QUIZ_RULES}
-Do not quote Bible verse text, confession text, or church father quotations.`,
+${SOURCE_TEXT_RULE}`,
         user: `Lesson:\n"""\n${clip(lessonText(lesson), 9000)}\n"""\n\nItems that failed:\n${bad
           .map((item) => `- ${item.question} (key: ${item.answer})`)
           .join("\n")}`,
@@ -686,12 +693,14 @@ export async function runTeach(ctx: Ctx): Promise<void> {
 Return JSON:
 {"teaching":[{"type":"heading2"|"paragraph"|"bullet"|"numbered"|"quote"|"divider","text":""}],
  "quiz":[{"kind":"mc"|"short","question":"","choices":["",""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"l${lesson.order}-justification","conceptLabel":"Justification","alternate":{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"l${lesson.order}-justification","conceptLabel":"Justification"}}],
- "scriptureRefs":[{"reference":"Book C:V-V","note":"one sentence on why it connects"}]}
+ "scriptureRefs":[{"reference":"Book C:V-V","note":"one sentence on why it connects"}],
+ "libraryRefs":[{"reference":"Document or author, section","note":"one sentence on why it connects"}]}
 teaching: 5-12 blocks. Cover every objective: explanation, key ideas, a worked example or illustration,
 and end with a heading2 "Discuss" followed by 2-3 bullet discussion questions. Keep each block short.
 quiz: ${band.quiz[0]}-${band.quiz[1]} items. ${QUIZ_RULES}
 ${teachConceptRules(lesson.order)}
 scriptureRefs: ${scope.isFaithRelevant ? "1-3 passages central to this lesson" : "always an empty array"}.
+libraryRefs: ${scope.isFaithRelevant ? "0-2 confession or church-father references, or an empty array" : "always an empty array"}.
 ${
   repair
     ? `A reviewer asked for a fix. If the fix requires changing what the lesson covers, also return "objectives": [2-4 revised, verb-first objectives] and write the teaching and quiz against those. objectiveIndex refers to the revised list.`
@@ -739,7 +748,7 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
               : [];
           })
         : [];
-      return { objectives, teaching, quiz, refs };
+      return { objectives, teaching, quiz, refs, libraryRefs: readNamedRefs(o.libraryRefs) };
     },
   });
 
@@ -753,35 +762,84 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
     ...own.filter((p) => !verified.readings.some((r) => r.reference === p.reference)).map((p) => ({ ...p, note: "A passage you chose." })),
     ...verified.readings,
   ];
-  const library = scope.isFaithRelevant
-    ? await citeLibrary(
+  const cited = scope.isFaithRelevant
+    ? await attachLibrary(
         ctx.env,
         `${lesson.title}. ${lesson.objectives.join(". ")}`,
         readings.map((reading) => reading.reference),
         info.options.perspective,
+        result.libraryRefs,
       )
-    : [];
+    : { library: [], dropped: [] as string[] };
 
-  const warnings = dropped.map((ref) => `Scripture reference dropped (did not resolve in BSB): ${ref}`);
+  const warnings = [
+    ...dropped.map((ref) => `Scripture reference dropped (did not resolve in BSB): ${ref}`),
+    ...cited.dropped.map((ref) => `Library reference dropped (did not resolve): ${ref}`),
+  ];
   await ctx.stub.putLesson({
     ...lesson,
     objectives: result.objectives,
     teaching: result.teaching,
     quiz: result.quiz,
     scripture: readings,
-    library,
+    library: cited.library,
     warnings,
   });
   await ctx.stub.event(
     "teach",
     `L${lesson.order} ${lesson.title}: ${result.teaching.length} blocks, ${result.quiz.length} quiz items${
       scope.isFaithRelevant
-        ? `, ${readings.length} readings, ${library.length} cited sources${dropped.length ? ` (${dropped.length} dropped)` : ""}`
+        ? `, ${readings.length} readings, ${cited.library.length} cited sources${dropped.length || cited.dropped.length ? ` (${dropped.length + cited.dropped.length} dropped)` : ""}`
         : ""
     }`,
     lessonId,
   );
   await enqueue(ctx.env, { planId: ctx.msg.planId, stage: "check", lessonId, round: ctx.msg.round });
+}
+
+function readNamedRefs(value: unknown): NamedLibraryRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const reference = typeof row.reference === "string" ? row.reference.trim() : "";
+    if (!reference) return [];
+    return [{ reference, note: typeof row.note === "string" ? row.note : "" }];
+  });
+}
+
+/** Parent scripture and library text already stored from D1. The model may quote only this. */
+function retrievedSources(lesson: LearnLesson | undefined): string {
+  if (!lesson) return "";
+  const scripture = lesson.scripture
+    .filter((row) => row.text.trim())
+    .map((row) => `- ${row.reference}: ${clip(row.text, 1200)}`)
+    .join("\n");
+  const library = (lesson.library ?? [])
+    .filter((row) => row.text.trim())
+    .map((row) => `- ${row.label}${row.detail ? ` (${row.detail})` : ""}: ${clip(row.text, 1200)}`)
+    .join("\n");
+  return [
+    scripture ? `Scripture already retrieved from the library. Quote only this wording:\n${scripture}` : "",
+    library ? `Confessions and church fathers already retrieved from the library. Quote only this wording:\n${library}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+async function attachLibrary(
+  env: LearnEnv,
+  query: string,
+  scriptureRefs: string[],
+  perspective: Perspective,
+  named: NamedLibraryRef[],
+): Promise<{ library: LearnLesson["library"]; dropped: string[] }> {
+  const searched = await citeLibrary(env, query, scriptureRefs, perspective);
+  const resolved = await resolveLibraryRefs(env, named.slice(0, 2));
+  return {
+    library: mergeLibraryCitations(resolved.citations, searched.citations),
+    dropped: [...searched.dropped, ...resolved.dropped],
+  };
 }
 
 /** S4 verify for scripture: reference must parse and resolve in D1; text is never model-generated. */
@@ -799,6 +857,7 @@ async function verifyScripture(
         : null;
     if (!passage) {
       dropped.push(reference);
+      console.warn(`[learn] scripture reference dropped (did not resolve in BSB): ${reference}`);
       continue;
     }
     if (readings.some((r) => r.reference === passage.reference)) continue;
@@ -891,7 +950,8 @@ export async function runCheck(ctx: Ctx): Promise<void> {
       const replacements = await llm(ctx, "worker", {
         system: `Rewrite quiz items so each is clearly answerable from the lesson text alone.
 Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0}]}
-Return exactly ${bad.length} items. ${QUIZ_RULES}`,
+Return exactly ${bad.length} items. ${QUIZ_RULES}
+${SOURCE_TEXT_RULE}`,
         user: `Lesson objectives:\n${lesson.objectives.map((o, i) => `${i}. ${o}`).join("\n")}\n\nLesson:\n"""\n${clip(
           lessonText(lesson),
           9000,
@@ -950,7 +1010,8 @@ export async function runCritic(ctx: Ctx): Promise<void> {
       system: `You review a course outline before it ships. Check: every course objective is covered;
 no two lessons substantially duplicate each other; lessons are in a sensible prerequisite order;
 each lesson's teaching matches its objectives. Only report problems a rewrite of one lesson would fix.
-Return JSON: {"issues":[{"lesson":number,"issue":"specific instruction for the rewrite"}]} (empty array if fine).`,
+Return JSON: {"issues":[{"lesson":number,"issue":"specific instruction for the rewrite"}]} (empty array if fine).
+${SOURCE_TEXT_RULE}`,
       user: `Course: ${scope.title} (${scope.complexity}, ${totalMinutes} min total)
 Course objectives:\n${scope.objectives.map((o, i) => `${i + 1}. ${o}`).join("\n")}
 
@@ -1041,7 +1102,8 @@ ${
   conceptLines.length
     ? `Each item must copy conceptId and conceptLabel from the lesson concepts in the user message. Do not invent concept ids.`
     : ""
-}`,
+}
+${SOURCE_TEXT_RULE}`,
           user: `Course objectives:\n${scope.objectives.map((o, i) => `${i}. ${o}`).join("\n")}
 ${conceptLines.length ? `\nLesson concepts:\n${conceptLines.join("\n")}\n` : ""}
 ${ready.map((l) => `Lesson ${l.order}: ${l.title}\n${clip(lessonText(l), 1500)}`).join("\n\n")}`,

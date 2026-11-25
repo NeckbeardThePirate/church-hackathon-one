@@ -192,7 +192,10 @@ test("MOCK_AI builds one tagged gap lesson after its parent and ignores a second
   assert.ok(gap.quiz.some((item) => item.alternate?.conceptId === "l1-faith"));
   assert.deepEqual(gap.scripture, []);
   assert.match(gap.warnings.join("\n"), /did not resolve in BSB/);
+  assert.match(gap.warnings.join("\n"), /Library reference dropped \(did not resolve\)/);
+  assert.equal(gap.library?.length ?? 0, 0);
   assert.equal(JSON.stringify(gap.teaching).includes("For all have sinned"), false);
+  assert.equal(JSON.stringify(gap).includes("Those whom God effectually"), false);
 
   const again = await plan.reserveGap({
     sourceLessonId: "l1",

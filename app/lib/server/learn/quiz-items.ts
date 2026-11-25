@@ -5,6 +5,7 @@
 import { CONCEPT_ID } from "../../learn/attempts.ts";
 import type { QuizItem } from "../../learn/types.ts";
 import { list, num, obj, str, strList } from "./llm.ts";
+import { SOURCE_TEXT_RULE } from "./source-policy.ts";
 
 const LABEL_MAX = 200;
 
@@ -24,7 +25,7 @@ Use few concepts. A concept usually matches one lesson objective: set objectiveI
 conceptLabel is a short human name for that concept.
 For each conceptId, put "alternate" on exactly one item for that concept. The alternate is a second question with the same conceptId, conceptLabel, and objectiveIndex, and it must not contain its own alternate.
 The alternate follows the same quiz rules and must be answerable from the lesson text alone.
-Do not write Bible verse text, confession text, or father quotations. scriptureRefs are references only; verified wording is inserted later from the library.`;
+${SOURCE_TEXT_RULE}`;
 }
 
 export function parseQuizItems(

@@ -125,6 +125,9 @@ export function mockModelText(system: string, user: string, meta: LlmMeta): stri
     scriptureRefs: FAITH.test(`${system}\n${user}`)
       ? [{ reference: "Romans 3:21-26", note: "Paul says righteousness is given through faith in Christ." }]
       : [],
+    libraryRefs: FAITH.test(`${system}\n${user}`)
+      ? [{ reference: "Westminster Confession of Faith 11.1", note: "The confession's chapter on this idea." }]
+      : [],
   });
 }
 
@@ -188,6 +191,9 @@ function mockGapTeach(user: string): string {
     quiz,
     scriptureRefs: FAITH.test(user)
       ? [{ reference: "Romans 3:21-26", note: "Cited for this practice lesson." }]
+      : [],
+    libraryRefs: FAITH.test(user)
+      ? [{ reference: "Westminster Confession of Faith 11.1", note: "Cited for this practice lesson." }]
       : [],
   });
 }

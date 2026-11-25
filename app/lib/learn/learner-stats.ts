@@ -155,6 +155,7 @@ export type XpAwardResult = {
  * Apply learning events. Amounts come from the kind, never from the caller.
  * A reason that was already awarded is skipped, including after the visible log is trimmed.
  * The day boundary is the stored timezone once one has been saved.
+ * Streak and last_goal_date move only when today's base XP reaches the daily goal.
  */
 export function applyXpAwards(
   current: StatsSnapshot,
@@ -172,9 +173,10 @@ export function applyXpAwards(
   let stats: StatsSnapshot = storedZone ? ready : { ...ready, timezone: zone };
   const accepted: XpAwardResult["accepted"] = [];
   const known = awardedSet(stats);
-  let todayXp = baseToday(stats, ymdInTimeZone(now, zone), zone);
+  const today = ymdInTimeZone(now, zone);
+  let todayXp = baseToday(stats, today, zone);
   let streak = stats.streak;
-  let lastActivityDay = stats.last_goal_date;
+  let lastGoal = stats.last_goal_date;
   let moved = stats.timezone !== current.timezone;
 
   for (const event of events) {
@@ -183,11 +185,6 @@ export function applyXpAwards(
     if (!reason.startsWith(`${event.kind}:`) || reason.length > XP_REASON_MAX) continue;
     if (seen(known, reason)) continue;
     const amount = XP_AMOUNTS[event.kind];
-    const today = ymdInTimeZone(now, zone);
-    if (lastActivityDay === today) streak = Math.max(streak, 1);
-    else if (lastActivityDay === shiftYmd(today, -1)) streak = Math.max(streak, 1) + 1;
-    else streak = 1;
-    lastActivityDay = today;
     todayXp += amount;
     stats = appendAward(stats, { at: now, amount, reason }, known);
     accepted.push({ reason, amount, kind: event.kind });
@@ -195,24 +192,28 @@ export function applyXpAwards(
   }
 
   if (accepted.length > 0) {
-    const today = ymdInTimeZone(now, zone);
+    const metBefore = lastGoal === today || seen(known, `goal:${today}`);
+    const meetsNow = todayXp >= DAILY_GOAL_XP && !metBefore;
+    if (meetsNow) {
+      if (lastGoal === shiftYmd(today, -1)) streak = Math.max(streak, 1) + 1;
+      else streak = 1;
+      lastGoal = today;
+    }
     stats = {
       ...stats,
       streak,
-      last_goal_date: lastActivityDay,
+      last_goal_date: lastGoal,
       last_activity_at: now,
       payload: { ...stats.payload, todayXp, todayYmd: today },
     };
-    if (todayXp >= DAILY_GOAL_XP) {
+    if (meetsNow) {
       const goalReason = `goal:${today}`;
-      if (!seen(known, goalReason)) {
-        stats = appendAward(stats, { at: now, amount: XP_DAILY_GOAL, reason: goalReason }, known);
-        accepted.push({ reason: goalReason, amount: XP_DAILY_GOAL, kind: "goal" });
-        const dailyGoalMet = stats.payload.dailyGoalMet.includes(today)
-          ? stats.payload.dailyGoalMet
-          : [...stats.payload.dailyGoalMet, today].slice(-MAX_GOALS);
-        stats = { ...stats, payload: { ...stats.payload, dailyGoalMet } };
-      }
+      stats = appendAward(stats, { at: now, amount: XP_DAILY_GOAL, reason: goalReason }, known);
+      accepted.push({ reason: goalReason, amount: XP_DAILY_GOAL, kind: "goal" });
+      const dailyGoalMet = stats.payload.dailyGoalMet.includes(today)
+        ? stats.payload.dailyGoalMet
+        : [...stats.payload.dailyGoalMet, today].slice(-MAX_GOALS);
+      stats = { ...stats, payload: { ...stats.payload, dailyGoalMet } };
       const bonus = Math.min(Math.max(streak, 1) * XP_STREAK_PER_DAY, XP_STREAK_CAP);
       const streakReason = `streak:${today}`;
       if (bonus > 0 && !seen(known, streakReason)) {

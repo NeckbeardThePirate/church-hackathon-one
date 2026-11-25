@@ -1,5 +1,6 @@
 import { callAnthropic, learnModelId, readAnthropicText, type LlmEnv } from "./learn/llm";
-import type { LearnChatContext, LearnChatInput, LearnChatMessage } from "../learn/agent-context";
+import { SOURCE_TEXT_RULE } from "./learn/source-policy";
+import type { LearnChatContext, LearnChatInput, LearnChatMessage, SerializedLesson } from "../learn/agent-context";
 
 const clip = (text: string | undefined, n: number) => {
   const t = (text ?? "").trim();
@@ -9,9 +10,11 @@ const clip = (text: string | undefined, n: number) => {
 const SYSTEM = `You are a patient tutor inside a structured learning course. The learner sees one screen at a time; you receive the course metadata and the materials for their current focus (overview, one lesson, or final assessment).
 
 Rules:
-- Ground explanations in the TEACHING text, scripture, and confession or church-father passages provided. Quote those texts only as they appear in the context.
+- Ground explanations in the TEACHING text and in scripture, confession, or church-father passages provided in the context.
+- ${SOURCE_TEXT_RULE}
+- When the focus is a practice (gap) lesson or a review item, use the same rule: quote only the retrieved wording in that focus, and do not write any other verse, confession, or church-father text.
 - When mentioning a video, article, or book, name it and you may mention its URL from the context.
-- Do not invent resources, URLs, ratings, or scripture wording that are not in the context.
+- Do not invent resources, URLs, or ratings that are not in the context.
 - Quiz: help the learner think through questions without giving away answers unless they paste their attempt and ask you to check it, or they explicitly ask for the answer key.
 - If the course perspective is not "neutral", teach primarily from that tradition while noting other views when relevant. If neutral, present major views fairly.
 - Use plain Markdown: short paragraphs, **bold** for key terms, "- " bullets. No headings above ###.
@@ -22,6 +25,9 @@ function formatLesson(ctx: LearnChatContext): string {
   if (!lesson) return "";
   const parts = [
     `Lesson ${lesson.order}: ${lesson.title} (~${lesson.estimatedMinutes} min)`,
+    lesson.kind === "gap"
+      ? "This is a practice lesson for missed ideas. Scripture and historical sources below were retrieved from the library."
+      : "",
     lesson.objectives.length ? `Objectives:\n${lesson.objectives.map((o) => `- ${o}`).join("\n")}` : "",
     lesson.teaching ? `Teaching:\n"""\n${lesson.teaching}\n"""` : "",
     lesson.videos.length
@@ -43,12 +49,12 @@ function formatLesson(ctx: LearnChatContext): string {
           .join("\n")}`
       : "",
     lesson.scripture.length
-      ? `Scripture (BSB text provided):\n${lesson.scripture
+      ? `Scripture (retrieved from the library):\n${lesson.scripture
           .map((s) => `- ${s.reference}: ${clip(s.text, 2000)}${s.note ? `\n  Note: ${s.note}` : ""}`)
           .join("\n\n")}`
       : "",
     lesson.library?.length
-      ? `Confessions and church fathers (retrieved text):\n${lesson.library
+      ? `Confessions and church fathers (retrieved from the library):\n${lesson.library
           .map(
             (item) =>
               `- ${item.label}${item.condemned ? " [condemned]" : ""}${item.detail ? ` (${item.detail})` : ""}: ${clip(item.text, 1500)}`,
@@ -68,9 +74,42 @@ function formatLesson(ctx: LearnChatContext): string {
   return parts.filter(Boolean).join("\n\n");
 }
 
+function formatRetrieved(lesson: SerializedLesson): string {
+  const scripture = lesson.scripture.length
+    ? `Scripture (retrieved from the library):\n${lesson.scripture
+        .map((s) => `- ${s.reference}: ${clip(s.text, 2000)}`)
+        .join("\n\n")}`
+    : "";
+  const library = lesson.library?.length
+    ? `Confessions and church fathers (retrieved from the library):\n${lesson.library
+        .map(
+          (item) =>
+            `- ${item.label}${item.condemned ? " [condemned]" : ""}${item.detail ? ` (${item.detail})` : ""}: ${clip(item.text, 1500)}`,
+        )
+        .join("\n\n")}`
+    : "";
+  return [scripture, library].filter(Boolean).join("\n\n");
+}
+
+function formatReview(ctx: LearnChatContext): string {
+  const review = ctx.review;
+  if (!review) return "";
+  const retrieved = review.lesson ? formatRetrieved(review.lesson) : "";
+  return [
+    "Current review item. The question comes from the teach-time quiz bank. Do not reveal the answer unless the learner asks for it.",
+    `Concept: ${review.conceptLabel}`,
+    `Question: ${review.question}`,
+    review.lesson?.kind === "gap" ? "The source is a practice lesson." : "",
+    retrieved || "No retrieved scripture or historical source is in the context for this item. Do not supply that wording.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function buildContextBlock(ctx: LearnChatContext): string {
-  const focusLine =
-    ctx.focus.screen === "lesson" && ctx.focus.lessonTitle
+  const focusLine = ctx.review
+    ? `Current focus: Review — ${ctx.review.conceptLabel}`
+    : ctx.focus.screen === "lesson" && ctx.focus.lessonTitle
       ? `Current focus: Lesson ${ctx.focus.lessonOrder ?? "?"} — ${ctx.focus.lessonTitle}`
       : ctx.focus.screen === "final"
         ? "Current focus: Final assessment (whole course)"
@@ -94,6 +133,7 @@ function buildContextBlock(ctx: LearnChatContext): string {
     ctx.finalQuestions?.length
       ? `Final assessment questions:\n${ctx.finalQuestions.map((q, i) => `${i + 1}. [${q.kind}] ${q.question}`).join("\n")}`
       : "",
+    formatReview(ctx),
     formatLesson(ctx),
   ];
   return parts.filter(Boolean).join("\n\n");

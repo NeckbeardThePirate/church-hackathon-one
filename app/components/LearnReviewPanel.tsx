@@ -17,6 +17,8 @@ import {
   scheduleConcept,
 } from "../lib/learn/sm2";
 import type { LearnPlan, QuizItem } from "../lib/learn/types";
+import type { LearnReviewFocus } from "../lib/learn/agent-context";
+import { SourceNote } from "./SourceNote";
 
 type Props = {
   plan: LearnPlan;
@@ -26,6 +28,7 @@ type Props = {
   gradeShort: (item: QuizItem, given: string) => Promise<GradeResult>;
   onCommit: (updater: (prev: LearnPlanProgress) => LearnPlanProgress) => void;
   onAward?: (reason: string, kind: XpEventKind) => void;
+  onFocus?: (focus: LearnReviewFocus | null) => void;
 };
 
 type GradeState = { correct: boolean; partial: boolean; skipped: boolean };
@@ -47,7 +50,7 @@ const choiceClass =
  * Due concepts on the path overview. Questions come only from the lesson bank
  * (the quiz item and its teach-time alternate). Opening the list does not call a model.
  */
-export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, onCommit, onAward }: Props) {
+export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, onCommit, onAward, onFocus }: Props) {
   const bank = useMemo(() => conceptItemBank(plan), [plan]);
   const queue = useMemo(() => reviewQueue(plan, progress.conceptMastery, Date.now()), [plan, progress.conceptMastery]);
   const [queueIds, setQueueIds] = useState<string[] | null>(null);
@@ -80,6 +83,19 @@ export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, 
 
   if (phase === "prompt" && liveCard) frozenRef.current = liveCard;
   const card = phase === "feedback" ? frozenRef.current : liveCard;
+
+  useEffect(() => {
+    if (!onFocus) return;
+    if (queueIds !== null && card && (phase === "prompt" || phase === "feedback")) {
+      onFocus({
+        lessonId: card.lessonId,
+        conceptLabel: card.concept.conceptLabel,
+        question: card.item.question,
+      });
+      return;
+    }
+    onFocus(null);
+  }, [onFocus, queueIds, phase, card]);
 
   const start = (conceptId?: string) => {
     const ids = queue.map((entry) => entry.concept.conceptId);
@@ -212,6 +228,7 @@ export function LearnReviewPanel({ plan, scope, progress, timeZone, gradeShort, 
           </p>
         )}
       </div>
+      <SourceNote place="review" />
 
       {!sessionOpen ? (
         queue.length === 0 ? (

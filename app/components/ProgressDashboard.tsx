@@ -2,6 +2,7 @@
 
 import { statsFigures, type DailyGoalStatus } from "../lib/learn/learner-stats";
 import type { NextAction, PathSummary } from "../lib/learn/progress-dashboard";
+import { SourceNote } from "./SourceNote";
 
 export function DailyGoalBar({ earned, target, met, percent }: DailyGoalStatus) {
   const shown = Math.min(earned, target);
@@ -47,6 +48,7 @@ export function ProgressDashboard({ xp, streak, pending = false, goal, summaries
   return (
     <section aria-label="Progress" className="mx-auto w-full max-w-[640px] px-4 pt-4 sm:px-10 sm:pt-8">
       <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Progress</h2>
+      <SourceNote place="progress" />
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-3 py-3">
           <p className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">XP</p>
