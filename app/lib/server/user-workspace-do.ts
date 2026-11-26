@@ -239,6 +239,34 @@ export class UserWorkspaceDO extends DurableObject {
     return row?.value ?? null;
   }
 
+  /** Projects and stats in one Durable Object call. The dashboard used to pay for both separately. */
+  loadHome(): { projects: Project[]; stats: LearnerStats } {
+    return { projects: this.listProjects(), stats: this.getLearnerStats() };
+  }
+
+  /**
+   * Lesson ids, plan scope, mastery, and timezone for one attempt.
+   * Read again before the plan write so a concurrent review is the SM-2 base.
+   * Lesson ids stand in for the project: a full project is not RPC-serializable.
+   */
+  readAttemptContext(planId: string): {
+    lessonIds: string[] | null;
+    projectId: string | null;
+    workspaceMastery: Record<string, ConceptMastery> | null;
+    timeZone: string | null;
+  } {
+    const project = this.findProjectByLearnPlan(planId);
+    const scope = project ? scopeFromProject(project) : null;
+    const lessons = project?.learnPlan?.lessons;
+    const mastery = project?.learnProgress?.conceptMastery;
+    return {
+      lessonIds: lessons?.length ? lessons.map((lesson) => lesson.id) : null,
+      projectId: scope?.projectId ?? null,
+      workspaceMastery: mastery ?? null,
+      timeZone: this.getLearnerStats().timezone,
+    };
+  }
+
   /** Zeros and a null timezone when the learner has no stats row yet. */
   getLearnerStats(): LearnerStats {
     return readLearnerStats(workspaceSql(this.ctx.storage.sql));

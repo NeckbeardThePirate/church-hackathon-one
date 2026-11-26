@@ -127,6 +127,7 @@ export async function resolveLibraryRefs(
   const citations: LibraryCitation[] = [];
   const dropped: string[] = [];
   const seen = new Set<string>();
+  const pending: { reference: string; note: string }[] = [];
   for (const ref of refs) {
     const reference = ref.reference.replace(/\s+/g, " ").trim();
     if (!reference || seen.has(reference.toLowerCase())) continue;
@@ -136,14 +137,22 @@ export async function resolveLibraryRefs(
       warnDropped(reference);
       continue;
     }
-    const citation = await lookupLibraryRef(env.BIBLE, reference, ref.note).catch(() => null);
+    pending.push({ reference, note: ref.note });
+  }
+  const bible = env.BIBLE;
+  const looked = await Promise.all(
+    pending.map((ref) => (bible ? lookupLibraryRef(bible, ref.reference, ref.note).catch(() => null) : null)),
+  );
+  looked.forEach((citation, index) => {
+    const reference = pending[index]?.reference;
+    if (!reference) return;
     if (!citation) {
       dropped.push(reference);
       warnDropped(reference);
-      continue;
+      return;
     }
     citations.push(citation);
-  }
+  });
   return { citations, dropped };
 }
 

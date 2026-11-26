@@ -1,3 +1,4 @@
+import { attemptLessonError } from "../../../../../lib/learn/attempts.ts";
 import { handleLearnAttempt } from "../../../../../lib/server/learn/attempt-response.ts";
 import { ownedPlan } from "../../../../../lib/server/learn/api.ts";
 import { userWorkspaceStub } from "../../../../../lib/server/user-workspace.ts";
@@ -13,21 +14,23 @@ export async function POST(request: Request, context: { params: Promise<{ planId
     readBody: () => request.json(),
     previewAttempt: async (attempt) => {
       if (owned instanceof Response) return { ok: false, error: "Sign in required." };
-      return userWorkspaceStub(owned.userId).previewLearnAttempt(planId, attempt);
+      const context = await userWorkspaceStub(owned.userId).readAttemptContext(planId);
+      const error = attemptLessonError(
+        context.lessonIds ? { learnPlan: { lessons: context.lessonIds.map((id) => ({ id })) } } : null,
+        attempt,
+      );
+      return error ? { ok: false, error } : { ok: true };
     },
     recordPlanAttempt: async (record) => {
       if (owned instanceof Response) throw new Error("Sign in required.");
-      const workspace = userWorkspaceStub(owned.userId);
-      const scope = await workspace.learnScopeForPlan(planId);
-      const project = scope ? await workspace.getProject(scope.projectId) : null;
-      const stats = await workspace.getLearnerStats();
-      const timeZone = stats.timezone || record.timeZone || "UTC";
+      const context = await userWorkspaceStub(owned.userId).readAttemptContext(planId);
+      const timeZone = context.timeZone || record.timeZone || "UTC";
       return owned.stub.recordLearnAttempt({
         ...record,
         planId,
         timeZone,
-        ...(project?.learnProgress?.conceptMastery ? { workspaceMastery: project.learnProgress.conceptMastery } : {}),
-        ...(scope ? { projectId: scope.projectId } : {}),
+        ...(context.workspaceMastery ? { workspaceMastery: context.workspaceMastery } : {}),
+        ...(context.projectId ? { projectId: context.projectId } : {}),
       });
     },
     mirrorAttempt: async (input) => {

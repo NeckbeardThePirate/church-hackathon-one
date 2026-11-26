@@ -17,10 +17,7 @@ export function learnEnv(): LearnEnv {
 }
 
 /** Auth + ownership check. Returns the plan stub or an error Response. */
-export async function ownedPlan(
-  request: Request,
-  planId: string,
-): Promise<{ stub: ReturnType<typeof planStub>; userId: string } | Response> {
+export async function ownedPlan(request: Request, planId: string) {
   const auth = await requireUser(request);
   if (auth instanceof Response) return auth;
   if (!PLAN_ID.test(planId)) return Response.json({ error: "Invalid plan id" }, { status: 400 });
@@ -34,6 +31,6 @@ export async function ownedPlan(
   const stub = planStub(e, planId);
   const info = await stub.info().catch(() => null);
   const denied = unownedPlanResponse(auth.userId, info);
-  if (denied) return denied;
-  return { stub, userId: auth.userId };
+  if (denied || !info) return denied ?? Response.json({ error: "Plan not found" }, { status: 404 });
+  return { stub, userId: auth.userId, info };
 }

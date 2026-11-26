@@ -1,3 +1,4 @@
+import type { StatsSnapshot } from "./learn/learner-stats";
 import { claimLegacyProgress } from "./learn/plan-progress";
 import {
   clearLocalProjects,
@@ -18,11 +19,15 @@ async function readError(response: Response): Promise<string> {
   }
 }
 
-export async function fetchWorkspace(): Promise<Project[]> {
+export async function fetchWorkspace(): Promise<{ projects: Project[]; stats: StatsSnapshot | null }> {
   const response = await fetch("/api/workspace", { credentials: "same-origin" });
   if (!response.ok) throw new Error(await readError(response));
-  const body = (await response.json()) as { projects?: Project[] };
-  return Array.isArray(body.projects) ? body.projects : [];
+  const body = (await response.json()) as { projects?: Project[]; stats?: StatsSnapshot };
+  const stats = body.stats;
+  return {
+    projects: Array.isArray(body.projects) ? body.projects : [],
+    stats: stats && typeof stats.xp === "number" && typeof stats.streak === "number" ? stats : null,
+  };
 }
 
 export async function putProject(project: Project): Promise<void> {
@@ -65,11 +70,11 @@ async function savePref(key: string, value: string): Promise<void> {
  * Leftover local notes are uploaded once (including a partial earlier upload), then the local copy is dropped.
  * Saved lesson/study projects from earlier versions load unchanged (they open read-only).
  */
-export async function loadUserWorkspace(): Promise<Project[]> {
+export async function loadUserWorkspace(): Promise<{ projects: Project[]; stats: StatsSnapshot | null }> {
   const remote = await fetchWorkspace();
   const local = readLocalProjects();
-  const remoteIds = new Set(remote.map((project) => project.id));
-  const merged = [...remote];
+  const remoteIds = new Set(remote.projects.map((project) => project.id));
+  const merged = [...remote.projects];
 
   for (const project of local) {
     if (remoteIds.has(project.id)) continue;
@@ -80,12 +85,12 @@ export async function loadUserWorkspace(): Promise<Project[]> {
 
   if (merged.length === 0) {
     clearLocalProjects();
-    return [];
+    return { projects: [], stats: remote.stats };
   }
 
   clearLocalProjects();
   merged.sort((a, b) => b.updatedAt - a.updatedAt);
-  return claimLegacyProgress(merged);
+  return { projects: claimLegacyProgress(merged), stats: remote.stats };
 }
 
 export async function fetchLearnPerspective(): Promise<string | null> {

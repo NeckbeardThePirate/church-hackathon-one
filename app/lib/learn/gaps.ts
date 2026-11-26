@@ -81,7 +81,7 @@ export function nextGapLessonId(sourceLessonId: string, usedIds: string[]): stri
 }
 
 /** Concept ids that already have a gap lesson on this plan, including ones still being built. */
-export function coveredConceptIds(lessons: GapLessonRef[]): Set<string> {
+export function coveredConceptIds(lessons: readonly GapLessonRef[]): Set<string> {
   const ids = new Set<string>();
   for (const lesson of lessons) {
     if (lessonKind(lesson) !== "gap") continue;
@@ -92,7 +92,7 @@ export function coveredConceptIds(lessons: GapLessonRef[]): Set<string> {
   return ids;
 }
 
-export function gapLessonsForSource(lessons: GapLessonRef[], sourceLessonId: string): GapLessonRef[] {
+export function gapLessonsForSource(lessons: readonly GapLessonRef[], sourceLessonId: string): GapLessonRef[] {
   return lessons.filter((lesson) => lessonKind(lesson) === "gap" && lesson.sourceLessonId === sourceLessonId);
 }
 
@@ -100,7 +100,11 @@ export function gapLessonsForSource(lessons: GapLessonRef[], sourceLessonId: str
  * Drop concepts that already have a gap lesson. Refuse a fourth gap from the same core lesson.
  * A gap lesson cannot be the source of another gap.
  */
-export function selectGapConcepts(lessons: GapLessonRef[], sourceLessonId: string, concepts: GapConcept[]): GapSelection {
+export function selectGapConcepts(
+  lessons: readonly GapLessonRef[],
+  sourceLessonId: string,
+  concepts: GapConcept[],
+): GapSelection {
   const source = lessons.find((lesson) => lesson.id === sourceLessonId);
   if (!source || lessonKind(source) === "gap") {
     return { concepts: [], skipped: [], error: "Unknown lesson." };
@@ -325,7 +329,7 @@ export function adoptLiveGapLessons<T extends StoredGapLesson>(snapshot: readonl
   let next: T[] | null = null;
   for (const lesson of live) {
     if (!liveGapReady(lesson)) continue;
-    const list = next ?? snapshot.slice();
+    const list: T[] = next ?? snapshot.slice();
     const index = list.findIndex((item) => item.id === lesson.id);
     if (index < 0) {
       next = insertGapLesson(list, lesson);

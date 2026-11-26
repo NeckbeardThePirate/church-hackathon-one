@@ -67,7 +67,7 @@ export function LearnIntakeStep({
   const studyReadyRef = useRef(false);
 
   const refresh = useCallback(async (id: string) => {
-    const res = await fetch(`/api/learn/plans/${id}`, { credentials: "same-origin" });
+    const res = await fetch(`/api/learn/plans/${id}?view=plan`, { credentials: "same-origin" });
     if (!res.ok) return null;
     const snap = (await res.json()) as PlanSnapshot;
     setSnapshot(snap);

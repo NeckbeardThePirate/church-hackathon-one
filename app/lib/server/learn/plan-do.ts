@@ -134,8 +134,16 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     round: number;
     createdAt: number;
     deadlineHit: boolean;
+    stage: LearnStage;
+    lessonIds: string[];
+    lessonsDone: number;
+    lessonsTotal: number;
   }> {
-    const m = await this.meta();
+    return this.infoFrom(await this.meta());
+  }
+
+  private infoFrom(m: Meta) {
+    const lessonsTotal = m.lessonIds.length;
     return {
       userId: m.userId,
       topic: m.topic,
@@ -146,6 +154,10 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       round: m.round,
       createdAt: m.createdAt,
       deadlineHit: !!m.deadlineHit,
+      stage: m.stage,
+      lessonIds: m.lessonIds,
+      lessonsDone: lessonsTotal - m.pending.length,
+      lessonsTotal,
     };
   }
 
@@ -183,19 +195,34 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   /** Reserve budget before a paid call. Returns false when exhausted. */
   async spend(kind: "llm" | "exa", n = 1, opts?: { gap?: boolean }): Promise<boolean> {
     const m = await this.meta();
-    if (kind === "llm" && opts?.gap) {
+    if (!this.charge(m, kind, n, opts?.gap)) return false;
+    await this.saveMeta(m);
+    this.touch();
+    return true;
+  }
+
+  /**
+   * Charge one model call and return the plan owner in the same storage round trip.
+   * Gap jobs draw the separate gap pool so a practice lesson cannot drain the core path.
+   */
+  async reserveLlm(gap = false): Promise<{ ok: boolean; userId: string }> {
+    const m = await this.meta();
+    if (!this.charge(m, "llm", 1, gap)) return { ok: false, userId: m.userId };
+    await this.saveMeta(m);
+    this.touch();
+    return { ok: true, userId: m.userId };
+  }
+
+  private charge(m: Meta, kind: "llm" | "exa", n: number, gap = false): boolean {
+    if (kind === "llm" && gap) {
       const spent = m.spent.gapLlm ?? 0;
       if (spent + n > BUDGET.gapLlm) return false;
       m.spent = { ...m.spent, gapLlm: spent + n };
-      await this.saveMeta(m);
-      this.touch();
       return true;
     }
     const cap = kind === "llm" ? BUDGET.llm : BUDGET.exaPerPlan;
     if (m.spent[kind] + n > cap) return false;
     m.spent[kind] += n;
-    await this.saveMeta(m);
-    this.touch();
     return true;
   }
 
@@ -266,12 +293,24 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     this.broadcast(`event: heartbeat\ndata: ${JSON.stringify(beat)}\n\n`);
   }
 
-  async snapshot(): Promise<PlanSnapshot> {
-    const m = await this.meta();
-    const events = (await this.ctx.storage.get<ProgressEvent[]>("events")) ?? [];
-    const stored = await this.ctx.storage.get<LearnPlan>("plan");
-    const plan =
-      stored ?? (m.status === "running" || m.status === "queued" ? await this.workingPlanSnapshot() : undefined);
+  /**
+   * `events: false` skips the progress log (HTTP clients read that over SSE).
+   * `workingPlan: false` skips assembling in-progress lesson bodies. Live SSE
+   * only needs status plus the event backlog until the plan is stored.
+   */
+  async snapshot(options?: { events?: boolean; workingPlan?: boolean }): Promise<PlanSnapshot> {
+    const withEvents = options?.events !== false;
+    const withWorkingPlan = options?.workingPlan !== false;
+    const rows = await this.readMap(withEvents ? ["meta", "events", "plan"] : ["meta", "plan"]);
+    const m = rows.get("meta") as Meta | undefined;
+    if (!m) throw new Error("Plan not found.");
+    const events = withEvents ? ((rows.get("events") as ProgressEvent[] | undefined) ?? []) : [];
+    let plan = rows.get("plan") as LearnPlan | undefined;
+    // A lesson can be studyable while it is still listed as pending, so this
+    // cannot key off `pending`. Empty outlines have nothing to assemble.
+    if (!plan && withWorkingPlan && (m.status === "running" || m.status === "queued") && m.lessonIds.length > 0) {
+      plan = await this.workingPlanFrom(m);
+    }
     return {
       planId: m.planId,
       status: m.status,
@@ -282,6 +321,16 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       ...(plan ? { plan } : {}),
       ...(m.error ? { error: m.error } : {}),
     };
+  }
+
+  private async readMap(keys: string[]): Promise<Map<string, unknown>> {
+    if (!keys.length) return new Map();
+    return this.ctx.storage.get(keys);
+  }
+
+  private async writeMap(entries: Record<string, unknown>): Promise<void> {
+    if (!Object.keys(entries).length) return;
+    await this.ctx.storage.put(entries);
   }
 
   /** True when at least one core lesson has teach + quiz content the learner can open. */
@@ -297,13 +346,15 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
    * Omits the final assessment until assemble.
    */
   async workingPlanSnapshot(): Promise<LearnPlan | undefined> {
+    return this.workingPlanFrom(await this.meta());
+  }
+
+  private async workingPlanFrom(m: Meta): Promise<LearnPlan | undefined> {
     const scope = await this.getScope();
     if (!scope) return undefined;
-    const lessons = await this.getLessons();
+    const lessons = await this.lessonsFor(m);
     if (!this.hasStudyableCoreLesson(lessons)) return undefined;
-    const m = await this.meta();
-    const info = await this.info();
-    return this.planFromParts(m.planId, info, scope, lessons, "running");
+    return this.planFromParts(m.planId, this.infoFrom(m), scope, lessons, "running");
   }
 
   async ensureStoredPlan(): Promise<LearnPlan> {
@@ -360,8 +411,9 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
 
   async setOutline(outlines: LessonOutline[]): Promise<void> {
     const m = await this.meta();
+    const entries: Record<string, LearnLesson> = {};
     for (const outline of outlines) {
-      const lesson: LearnLesson = {
+      entries[`lesson:${outline.id}`] = {
         ...outline,
         status: "pending",
         teaching: [],
@@ -373,8 +425,8 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
         quiz: [],
         warnings: [],
       };
-      await this.ctx.storage.put(`lesson:${outline.id}`, lesson);
     }
+    await this.writeMap(entries);
     m.lessonIds = outlines.map((o) => o.id);
     m.pending = [...m.lessonIds];
     await this.saveMeta(m);
@@ -385,10 +437,16 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   }
 
   async getLessons(): Promise<LearnLesson[]> {
-    const m = await this.meta();
+    return this.lessonsFor(await this.meta());
+  }
+
+  /** One storage read for every lesson body. Order follows the outline, then core before gap. */
+  private async lessonsFor(m: Meta): Promise<LearnLesson[]> {
+    if (!m.lessonIds.length) return [];
+    const rows = await this.readMap(m.lessonIds.map((id) => `lesson:${id}`));
     const lessons: LearnLesson[] = [];
     for (const id of m.lessonIds) {
-      const lesson = await this.ctx.storage.get<LearnLesson>(`lesson:${id}`);
+      const lesson = rows.get(`lesson:${id}`) as LearnLesson | undefined;
       if (lesson) lessons.push(lesson);
     }
     return lessons.sort((a, b) => a.order - b.order || gapRank(a) - gapRank(b));
@@ -406,29 +464,24 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     await this.ctx.storage.put("gapTickets", tickets);
   }
 
-  /** Merged lessons plus gap jobs that have been reserved but not saved onto the plan yet. */
-  private async lessonsForGapCaps(): Promise<GapLessonRef[]> {
-    const lessons = await this.getLessons();
-    const pending = await this.gapTickets();
-    return [
-      ...lessons,
-      ...pending.map((ticket) => ({
-        id: ticket.lessonId,
-        kind: "gap" as const,
-        sourceLessonId: ticket.sourceLessonId,
-        sourceConceptIds: ticket.sourceConceptIds,
-      })),
-    ];
-  }
-
   /**
    * Reserve one gap lesson for the concepts that are still uncovered.
    * Does not change plan status. The lesson stays off the stored plan until check finishes.
    */
   async reserveGap(request: GapRequest): Promise<GapReserveResult> {
     const m = await this.meta();
+    if (m.status === "failed") {
+      return {
+        queued: false,
+        conceptIds: [],
+        skipped: [],
+        error: "This path did not finish, so a practice lesson cannot be added.",
+      };
+    }
+    const lessons = await this.lessonsFor(m);
+    const tickets = await this.gapTickets();
     if (m.status === "queued" || m.status === "running") {
-      const parent = (await this.getLessons()).find((lesson) => lesson.id === request.sourceLessonId);
+      const parent = lessons.find((lesson) => lesson.id === request.sourceLessonId);
       if (!parent || lessonKind(parent) === "gap" || !parent.quiz.length) {
         const outlined = m.lessonIds.length > 0;
         return {
@@ -441,21 +494,20 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
         };
       }
     }
-    if (m.status === "failed") {
-      return {
-        queued: false,
-        conceptIds: [],
-        skipped: [],
-        error: "This path did not finish, so a practice lesson cannot be added.",
-      };
-    }
-    const known = await this.lessonsForGapCaps();
+    const known: GapLessonRef[] = [
+      ...lessons,
+      ...tickets.map((ticket) => ({
+        id: ticket.lessonId,
+        kind: "gap" as const,
+        sourceLessonId: ticket.sourceLessonId,
+        sourceConceptIds: ticket.sourceConceptIds,
+      })),
+    ];
     const selected = selectGapConcepts(known, request.sourceLessonId, request.concepts);
     if (selected.error) {
       return { queued: false, conceptIds: [], skipped: selected.skipped, error: selected.error };
     }
     if (!selected.concepts.length) {
-      const tickets = await this.gapTickets();
       const wanted = new Set(request.concepts.map((concept) => concept.conceptId));
       const ticket = tickets.find(
         (item) => item.sourceLessonId === request.sourceLessonId && item.sourceConceptIds.some((id) => wanted.has(id)),
@@ -465,7 +517,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
         if (!pending?.teaching.length && gapTicketIsStale(ticket.queuedAt, Date.now())) {
           ticket.queuedAt = Date.now();
           await this.saveGapTickets(tickets);
-          const parent = (await this.getLessons()).find((lesson) => lesson.id === request.sourceLessonId);
+          const parent = lessons.find((lesson) => lesson.id === request.sourceLessonId);
           const labels = request.concepts
             .filter((concept) => ticket.sourceConceptIds.includes(concept.conceptId))
             .map((concept) => concept.conceptLabel)
@@ -488,11 +540,11 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       return { queued: false, conceptIds: [], skipped: selected.skipped };
     }
 
-    const parent = (await this.getLessons()).find((lesson) => lesson.id === request.sourceLessonId);
+    const parent = lessons.find((lesson) => lesson.id === request.sourceLessonId);
     if (!parent || lessonKind(parent) === "gap") {
       return { queued: false, conceptIds: [], skipped: selected.skipped, error: "Unknown lesson." };
     }
-    const used = [...m.lessonIds, ...(await this.gapTickets()).map((ticket) => ticket.lessonId)];
+    const used = [...m.lessonIds, ...tickets.map((ticket) => ticket.lessonId)];
     const lessonId = nextGapLessonId(parent.id, used);
     const lesson: LearnLesson = {
       id: lessonId,
@@ -517,7 +569,6 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     };
     await this.putLesson(lesson);
     await this.putScratch(`gap-concepts:${lessonId}`, selected.concepts);
-    const tickets = await this.gapTickets();
     tickets.push({
       lessonId,
       sourceLessonId: parent.id,
@@ -723,7 +774,8 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
 
-    const snap = await this.snapshot();
+    // Live connections only replay events. Lesson bodies are loaded when a client asks for the plan.
+    const snap = await this.snapshot({ workingPlan: false });
     const gapsOpen = (await this.gapTickets()).length > 0;
     const backlog = snap.events
       .filter((ev) => ev.seq > after)
