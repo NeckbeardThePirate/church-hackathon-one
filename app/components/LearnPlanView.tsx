@@ -115,6 +115,9 @@ import { PROJECT_KIND_LABEL } from "../lib/projects";
 type Props = {
   projectId: string;
   plan: LearnPlan;
+  /** Set while the Learn queue is still generating lessons in the background. */
+  buildingPlanId?: string;
+  onBuildComplete?: (plan: LearnPlan) => void;
   displayTitle?: string;
   savedProgress?: LearnPlanProgress;
   onSaveProgress?: (projectId: string, progress: LearnPlanProgress) => void;
@@ -1137,6 +1140,8 @@ function applyRead(
 export function LearnPlanView({
   projectId,
   plan: incomingPlan,
+  buildingPlanId,
+  onBuildComplete,
   displayTitle,
   savedProgress,
   onSaveProgress,
@@ -1212,6 +1217,65 @@ export function LearnPlanView({
       cancelled = true;
     };
   }, [incomingPlan.id]);
+
+  const onBuildCompleteRef = useRef(onBuildComplete);
+  onBuildCompleteRef.current = onBuildComplete;
+
+  useEffect(() => {
+    if (!buildingPlanId || buildingPlanId !== incomingPlan.id) return;
+    let closed = false;
+    const source = new EventSource(`/api/learn/plans/${buildingPlanId}/events`);
+    const absorbLive = (snap: PlanSnapshot | null) => {
+      if (!snap?.plan || closed) return;
+      const current = planStateRef.current;
+      const merged = adoptLivePlan(current, snap.plan);
+      if (merged === current) return;
+      planStateRef.current = merged;
+      setPlan(merged);
+      onPlanRef.current?.(merged);
+    };
+    const finishIfDone = (snap: PlanSnapshot) => {
+      absorbLive(snap);
+      if (snap.status === "complete" || snap.status === "partial") {
+        closed = true;
+        source.close();
+        if (snap.plan) onBuildCompleteRef.current?.(snap.plan);
+      }
+    };
+    source.addEventListener("done", (event) => {
+      finishIfDone(JSON.parse((event as MessageEvent).data) as PlanSnapshot);
+    });
+    source.addEventListener("progress", () => {
+      void fetch(`/api/learn/plans/${buildingPlanId}`, { credentials: "same-origin" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: unknown) => absorbLive(body as PlanSnapshot | null))
+        .catch(() => undefined);
+    });
+    source.onerror = () => {
+      if (closed) return;
+      void fetch(`/api/learn/plans/${buildingPlanId}`, { credentials: "same-origin" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: unknown) => {
+          const snap = body as PlanSnapshot | null;
+          if (!snap) return;
+          absorbLive(snap);
+          if (snap.status === "complete" || snap.status === "partial") finishIfDone(snap);
+        })
+        .catch(() => undefined);
+    };
+    const poll = window.setInterval(() => {
+      void fetch(`/api/learn/plans/${buildingPlanId}`, { credentials: "same-origin" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((body: unknown) => absorbLive(body as PlanSnapshot | null))
+        .catch(() => undefined);
+    }, 8000);
+  return () => {
+      closed = true;
+      source.close();
+      window.clearInterval(poll);
+    };
+  }, [buildingPlanId, incomingPlan.id]);
+
   const gapPostedRef = useRef<Set<string>>(new Set());
   const [gapWatch, setGapWatch] = useState<Record<string, GapWatch>>({});
   const urlAppliedRef = useRef(false);
@@ -1721,6 +1785,15 @@ export function LearnPlanView({
               {PROJECT_KIND_LABEL.learn}
             </p>
             <h1 className="break-words text-3xl font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-[2.5rem]">{title}</h1>
+            {buildingPlanId ? (
+              <p
+                role="status"
+                className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_8%,var(--sidebar))] px-3 py-2 text-sm text-[var(--ink)]"
+              >
+                More lessons are still being built in the background. You can study at your own pace; new steps will appear
+                here as they finish.
+              </p>
+            ) : null}
             <p className="mt-3 text-sm leading-relaxed text-[var(--ink-muted)]">
               {plan.lessons.length} lesson{plan.lessons.length === 1 ? "" : "s"} · about {roundedMin} min · {plan.complexity}{" "}
               topic

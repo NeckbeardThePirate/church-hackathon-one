@@ -40,6 +40,8 @@ import type { LearnEnv, LearnMessage } from "./queues";
 
 export const BUDGET = {
   llm: 120,
+  /** Practice lessons use a separate pool so a slower pace does not exhaust the core path budget. */
+  gapLlm: 24,
   exaPerLesson: 12,
   exaPerPlan: 120,
   wallClockMs: 10 * 60 * 1000,
@@ -62,7 +64,7 @@ type Meta = {
   stage: LearnStage;
   createdAt: number;
   round: number;
-  spent: { llm: number; exa: number };
+  spent: { llm: number; gapLlm: number; exa: number };
   lessonIds: string[];
   pending: string[];
   error?: string;
@@ -112,7 +114,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       stage: "intake",
       createdAt: Date.now(),
       round: 0,
-      spent: { llm: 0, exa: 0 },
+      spent: { llm: 0, gapLlm: 0, exa: 0 },
       lessonIds: [],
       pending: [],
     };
@@ -179,8 +181,16 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   }
 
   /** Reserve budget before a paid call. Returns false when exhausted. */
-  async spend(kind: "llm" | "exa", n = 1): Promise<boolean> {
+  async spend(kind: "llm" | "exa", n = 1, opts?: { gap?: boolean }): Promise<boolean> {
     const m = await this.meta();
+    if (kind === "llm" && opts?.gap) {
+      const spent = m.spent.gapLlm ?? 0;
+      if (spent + n > BUDGET.gapLlm) return false;
+      m.spent = { ...m.spent, gapLlm: spent + n };
+      await this.saveMeta(m);
+      this.touch();
+      return true;
+    }
     const cap = kind === "llm" ? BUDGET.llm : BUDGET.exaPerPlan;
     if (m.spent[kind] + n > cap) return false;
     m.spent[kind] += n;
@@ -259,7 +269,9 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   async snapshot(): Promise<PlanSnapshot> {
     const m = await this.meta();
     const events = (await this.ctx.storage.get<ProgressEvent[]>("events")) ?? [];
-    const plan = await this.ctx.storage.get<LearnPlan>("plan");
+    const stored = await this.ctx.storage.get<LearnPlan>("plan");
+    const plan =
+      stored ?? (m.status === "running" || m.status === "queued" ? await this.workingPlanSnapshot() : undefined);
     return {
       planId: m.planId,
       status: m.status,
@@ -269,6 +281,61 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
       events,
       ...(plan ? { plan } : {}),
       ...(m.error ? { error: m.error } : {}),
+    };
+  }
+
+  /** True when at least one core lesson has teach + quiz content the learner can open. */
+  private hasStudyableCoreLesson(lessons: LearnLesson[]): boolean {
+    return lessons.some(
+      (lesson) =>
+        lessonKind(lesson) === "core" && lesson.teaching.length > 0 && lesson.quiz.length > 0 && lesson.status !== "pending",
+    );
+  }
+
+  /**
+   * In-progress path for the client while the queue still runs. Does not change meta status.
+   * Omits the final assessment until assemble.
+   */
+  async workingPlanSnapshot(): Promise<LearnPlan | undefined> {
+    const scope = await this.getScope();
+    if (!scope) return undefined;
+    const lessons = await this.getLessons();
+    if (!this.hasStudyableCoreLesson(lessons)) return undefined;
+    const m = await this.meta();
+    const info = await this.info();
+    return this.planFromParts(m.planId, info, scope, lessons, "running");
+  }
+
+  async ensureStoredPlan(): Promise<LearnPlan> {
+    const stored = await this.ctx.storage.get<LearnPlan>("plan");
+    if (stored) return stored;
+    const draft = await this.workingPlanSnapshot();
+    if (!draft) throw new Error("The path is not ready for practice lessons yet.");
+    await this.ctx.storage.put("plan", draft);
+    return draft;
+  }
+
+  private planFromParts(
+    planId: string,
+    info: Awaited<ReturnType<LearnPlanDO["info"]>>,
+    scope: ScopeResult,
+    lessons: LearnLesson[],
+    status: PlanStatus,
+  ): LearnPlan {
+    return {
+      id: planId,
+      topic: info.topic,
+      title: scope.title,
+      complexity: scope.complexity,
+      perspective: info.options.perspective,
+      status,
+      prerequisites: scope.prerequisites,
+      objectives: scope.objectives,
+      lessons,
+      courseBooks: [],
+      finalAssessment: [],
+      warnings: [],
+      createdAt: info.createdAt,
     };
   }
 
@@ -361,7 +428,18 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   async reserveGap(request: GapRequest): Promise<GapReserveResult> {
     const m = await this.meta();
     if (m.status === "queued" || m.status === "running") {
-      return { queued: false, conceptIds: [], skipped: [], error: "The path is still being built." };
+      const parent = (await this.getLessons()).find((lesson) => lesson.id === request.sourceLessonId);
+      if (!parent || lessonKind(parent) === "gap" || !parent.quiz.length) {
+        const outlined = m.lessonIds.length > 0;
+        return {
+          queued: false,
+          conceptIds: [],
+          skipped: [],
+          error: outlined
+            ? "That lesson is not ready for practice yet. The rest of the path keeps building in the background."
+            : "The path is still being outlined.",
+        };
+      }
     }
     if (m.status === "failed") {
       return {
@@ -463,8 +541,14 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   async commitGapLesson(lesson: LearnLesson): Promise<LearnPlan | null> {
     const m = await this.meta();
     const tickets = await this.gapTickets();
-    const stored = await this.ctx.storage.get<LearnPlan>("plan");
-    if (!stored) return null;
+    let stored = await this.ctx.storage.get<LearnPlan>("plan");
+    if (!stored) {
+      try {
+        stored = await this.ensureStoredPlan();
+      } catch {
+        return null;
+      }
+    }
     const already = m.lessonIds.includes(lesson.id);
     if (!tickets.some((ticket) => ticket.lessonId === lesson.id) && !already) return null;
     if (already && !tickets.some((ticket) => ticket.lessonId === lesson.id)) {

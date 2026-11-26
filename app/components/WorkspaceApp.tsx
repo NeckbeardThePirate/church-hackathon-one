@@ -396,17 +396,25 @@ export function WorkspaceApp() {
   );
 
   const completeLearnPlan = useCallback(
-    (plan: LearnPlan) => {
+    (plan: LearnPlan, opts?: { keepBuilding?: boolean }) => {
       if (!activeProjectId) return;
+      const current = projectsRef.current.find((project) => project.id === activeProjectId);
       updateProject(activeProjectId, {
         learnPlan: plan,
-        learnPlanId: undefined,
+        learnPlanId: opts?.keepBuilding ? current?.learnPlanId : undefined,
         ...(plan.title?.trim() ? { title: plan.title } : {}),
         importComplete: true,
       });
       setView("path");
     },
     [activeProjectId, updateProject],
+  );
+
+  const studyWhileBuilding = useCallback(
+    (plan: LearnPlan) => {
+      completeLearnPlan(plan, { keepBuilding: true });
+    },
+    [completeLearnPlan],
   );
 
   const markPathFailed = useCallback(() => {
@@ -545,7 +553,13 @@ export function WorkspaceApp() {
               action={nextAction}
               onOpen={openAction}
             />
-            <LearnIntakeStep key={draft.id} projectId={draft.id} onStarted={startedPlan} onComplete={completeLearnPlan} />
+            <LearnIntakeStep
+              key={draft.id}
+              projectId={draft.id}
+              onStarted={startedPlan}
+              onComplete={completeLearnPlan}
+              onStudyReady={studyWhileBuilding}
+            />
           </div>
         ) : view === "building" ? (
           <LearnIntakeStep
@@ -560,6 +574,7 @@ export function WorkspaceApp() {
               })
             }
             onComplete={completeLearnPlan}
+            onStudyReady={studyWhileBuilding}
             onMarkFailed={markPathFailed}
             onRequestRemove={() => setPendingDeleteId(activeProject.id)}
           />
@@ -568,12 +583,14 @@ export function WorkspaceApp() {
             key={activeProject.id}
             projectId={activeProject.id}
             plan={activeProject.learnPlan}
+            buildingPlanId={activeProject.learnPlanId}
             displayTitle={activeProject.title}
             savedProgress={activeProject.learnProgress}
             onSaveProgress={saveLearnProgress}
             onProgress={setLiveProgress}
             onAward={award}
             onPlan={(plan) => updateProject(activeProject.id, { learnPlan: plan })}
+            onBuildComplete={completeLearnPlan}
             stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak, timezone: stats.timezone } : null}
             focusRequest={focusRequest && focusRequest.projectId === activeProject.id ? focusRequest : null}
             goal={statsReady && stats ? goal : null}
