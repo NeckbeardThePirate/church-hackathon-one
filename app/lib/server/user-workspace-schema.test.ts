@@ -221,7 +221,7 @@ test("an unknown award kind is a 400 and does not award", async () => {
   );
   assert.equal(called, false);
   assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "Award kind is not one this app gives XP for.");
+  assert.equal((await response.json() as { error?: string }).error, "Award kind is not one this app gives XP for.");
 
   const remote = new Error("Award kind is not one this app gives XP for.");
   remote.name = "StatsInputError";
@@ -234,7 +234,7 @@ test("an unknown award kind is a 400 and does not award", async () => {
     },
   );
   assert.equal(wrapped.status, 400);
-  assert.equal((await wrapped.json()).error, "Award kind is not one this app gives XP for.");
+  assert.equal((await wrapped.json() as { error?: string }).error, "Award kind is not one this app gives XP for.");
 });
 
 test("schema 1 migrates to learner stats without dropping projects or prefs", () => {

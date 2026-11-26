@@ -23,6 +23,43 @@ function stripFootnoteMarkers(text: string): string {
   return text.replace(/\d+:\d+\s/g, "").replace(/\s+/g, " ").trim();
 }
 
+const PASSAGE_SQL = `SELECT verse, text FROM bible_verses
+       WHERE book_id = ? AND chapter = ? AND verse >= ? AND verse <= ?
+       ORDER BY verse ASC`;
+
+export type PassageQuery = {
+  slug: string;
+  chapter: number;
+  verseStart: number;
+  verseEnd: number;
+};
+
+/** One D1 round trip for every passage. A miss stays null and does not drop the others. */
+export async function fetchPassagesFromD1(db: D1Database, refs: PassageQuery[]): Promise<(PassageResult | null)[]> {
+  const out: (PassageResult | null)[] = refs.map(() => null);
+  const jobs: { index: number; book: NonNullable<ReturnType<typeof bookBySlug>>; chapter: number; verseStart: number; end: number }[] = [];
+  refs.forEach((ref, index) => {
+    const book = bookBySlug(ref.slug);
+    if (!book) return;
+    jobs.push({
+      index,
+      book,
+      chapter: ref.chapter,
+      verseStart: ref.verseStart,
+      end: Math.max(ref.verseStart, ref.verseEnd),
+    });
+  });
+  if (!jobs.length) return out;
+
+  const rows = await passageRows(db, jobs);
+  rows.forEach((result, index) => {
+    const job = jobs[index];
+    if (!job || !result?.length) return;
+    out[job.index] = passageFromRows(job.book, job.chapter, job.verseStart, job.end, result);
+  });
+  return out;
+}
+
 export async function fetchPassageFromD1(
   db: D1Database,
   slug: string,
@@ -30,33 +67,49 @@ export async function fetchPassageFromD1(
   verseStart: number,
   verseEnd: number,
 ): Promise<PassageResult | null> {
-  const book = bookBySlug(slug);
-  if (!book) return null;
+  const [passage] = await fetchPassagesFromD1(db, [{ slug, chapter, verseStart, verseEnd }]);
+  return passage ?? null;
+}
 
-  const end = Math.max(verseStart, verseEnd);
-  const { results } = await db
-    .prepare(
-      `SELECT verse, text FROM bible_verses
-       WHERE book_id = ? AND chapter = ? AND verse >= ? AND verse <= ?
-       ORDER BY verse ASC`,
-    )
-    .bind(book.id, chapter, verseStart, end)
-    .all<{ verse: number; text: string }>();
+async function passageRows(
+  db: D1Database,
+  jobs: { book: { id: number }; chapter: number; verseStart: number; end: number }[],
+): Promise<({ verse: number; text: string }[] | null)[]> {
+  const statements = () =>
+    jobs.map((job) => db.prepare(PASSAGE_SQL).bind(job.book.id, job.chapter, job.verseStart, job.end));
+  if (typeof db.batch === "function") {
+    try {
+      const results = await db.batch<{ verse: number; text: string }>(statements());
+      return results.map((result) => result.results ?? []);
+    } catch {
+      /* A failed batch must not drop every passage. */
+    }
+  }
+  return Promise.all(
+    statements().map(async (statement) => {
+      try {
+        const { results } = await statement.all<{ verse: number; text: string }>();
+        return results ?? [];
+      } catch {
+        return null;
+      }
+    }),
+  );
+}
 
-  if (!results?.length) return null;
-
-  const reference =
-    end !== verseStart ? `${book.name} ${chapter}:${verseStart}–${end}` : `${book.name} ${chapter}:${verseStart}`;
-
+function passageFromRows(
+  book: NonNullable<ReturnType<typeof bookBySlug>>,
+  chapter: number,
+  verseStart: number,
+  end: number,
+  results: { verse: number; text: string }[],
+): PassageResult {
+  const reference = end !== verseStart ? `${book.name} ${chapter}:${verseStart}–${end}` : `${book.name} ${chapter}:${verseStart}`;
   const verses = results.map((row) => ({
     verse: row.verse,
     text: stripFootnoteMarkers(row.text),
   }));
-
-  const calloutHtml = verses
-    .map((row) => `<p><sup>${row.verse}</sup> ${escapeHtml(row.text)}</p>`)
-    .join("");
-
+  const calloutHtml = verses.map((row) => `<p><sup>${row.verse}</sup> ${escapeHtml(row.text)}</p>`).join("");
   return {
     reference,
     translation: "BSB",

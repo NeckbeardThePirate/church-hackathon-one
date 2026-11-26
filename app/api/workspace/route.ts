@@ -8,8 +8,8 @@ export async function GET(request: Request): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   try {
-    const projects = await userWorkspaceStub(auth.userId).listProjects();
-    return Response.json({ projects });
+    const home = await userWorkspaceStub(auth.userId).loadHome();
+    return Response.json(home, { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load workspace.";
     return Response.json({ error: message }, { status: 500 });

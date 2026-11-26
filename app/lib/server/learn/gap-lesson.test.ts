@@ -13,12 +13,26 @@ const SECRET = "gap-lesson-test-secret";
 
 function memoryStorage() {
   const data = new Map<string, unknown>();
+  const gets: (string | string[])[] = [];
   return {
     data,
+    gets,
     storage: {
-      get: async (key: string) => data.get(key),
-      put: async (key: string, value: unknown) => {
-        data.set(key, value);
+      get: async (key: string | string[]) => {
+        gets.push(Array.isArray(key) ? [...key] : key);
+        if (Array.isArray(key)) {
+          const rows = new Map<string, unknown>();
+          for (const item of key) if (data.has(item)) rows.set(item, data.get(item));
+          return rows;
+        }
+        return data.get(key);
+      },
+      put: async (key: string | Record<string, unknown>, value?: unknown) => {
+        if (typeof key === "string") {
+          data.set(key, value);
+          return;
+        }
+        for (const [item, stored] of Object.entries(key)) data.set(item, stored);
       },
       delete: async (key: string) => {
         data.delete(key);
@@ -313,6 +327,66 @@ test("practice lessons can queue while the core path is still building", async (
   assert.equal((await plan.snapshot()).status, "queued");
 });
 
+test("outline lessons load in one read and a poll skips lesson bodies until one is studyable", async () => {
+  const ctx = memoryStorage();
+  const plan = new LearnPlanDO(ctx as never, {} as never);
+  await plan.init({
+    planId: PLAN_ID,
+    userId: "user_a",
+    topic: "Faith",
+    notes: "",
+    passages: [],
+    options: { perspective: "neutral", includeScripture: "auto" },
+  });
+  await plan.setScope({
+    title: "Faith",
+    complexity: "simple",
+    lessonCount: 2,
+    prerequisites: [],
+    coreConcepts: ["Faith"],
+    objectives: ["Explain the main idea"],
+    isFaithRelevant: false,
+  });
+  ctx.gets.length = 0;
+  const early = await plan.snapshot({ events: false });
+  assert.equal(early.plan, undefined);
+  assert.equal(early.events.length, 0);
+  assert.equal(ctx.gets.some((key) => JSON.stringify(key).includes("lesson:")), false);
+  assert.equal(ctx.gets.some((key) => Array.isArray(key) && key.includes("events")), false);
+
+  await plan.setOutline([
+    {
+      id: "l1",
+      order: 1,
+      title: "The gift",
+      objectives: ["Explain the main idea"],
+      prerequisiteLessonIds: [],
+      estimatedMinutes: 20,
+      searchHints: [],
+    },
+    {
+      id: "l2",
+      order: 2,
+      title: "The next idea",
+      objectives: ["Explain the main idea"],
+      prerequisiteLessonIds: ["l1"],
+      estimatedMinutes: 20,
+      searchHints: [],
+    },
+  ]);
+  ctx.gets.length = 0;
+  const outlined = await plan.getLessons();
+  assert.deepEqual(outlined.map((item) => item.id), ["l1", "l2"]);
+  const lessonReads = ctx.gets.filter((key) => JSON.stringify(key).includes("lesson:"));
+  assert.equal(lessonReads.length, 1);
+  assert.deepEqual(lessonReads[0], ["lesson:l1", "lesson:l2"]);
+
+  const info = await plan.info();
+  assert.deepEqual(info.lessonIds, ["l1", "l2"]);
+  assert.equal(info.lessonsDone, 0);
+  assert.equal(info.lessonsTotal, 2);
+});
+
 type SqlCursor = { one(): Record<string, unknown>; toArray(): Record<string, unknown>[] };
 
 function sqliteSql(db: DatabaseSync) {
@@ -443,4 +517,54 @@ test("the gap route rejects signed-out and non-owner callers and does not queue 
   assert.equal(secondBody.error, undefined);
   assert.equal(secondBody.skipped?.[0]?.reason, "covered");
   assert.equal(queued, 1);
+});
+
+test("the roster view does not load the plan snapshot", async () => {
+  for (const key of Object.keys(workersEnv)) delete workersEnv[key];
+  delete process.env.CLERK_SECRET_KEY;
+  delete process.env.CLERK_PUBLISHABLE_KEY;
+  const plan = await bootPlan();
+  let snapshots = 0;
+  const original = plan.snapshot.bind(plan);
+  plan.snapshot = async (options) => {
+    snapshots += 1;
+    return original(options);
+  };
+  workersEnv.SESSION_SECRET = SECRET;
+  workersEnv.AI = {};
+  workersEnv.LEARN_Q_INTAKE = {};
+  workersEnv.LEARN_PLAN = {
+    idFromName: (id: string) => id,
+    get: () => plan,
+  };
+  const { GET } = await import("../../../api/learn/plans/[planId]/route.ts");
+  const token = await signSession(
+    { userId: "user_a", provider: "dev", compute: false, exp: Math.floor(Date.now() / 1000) + 3600 },
+    SECRET,
+  );
+  const response = await GET(
+    new Request(`https://study.example/api/learn/plans/${PLAN_ID}?view=roster`, {
+      headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}` },
+    }),
+    { params: Promise.resolve({ planId: PLAN_ID }) },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const body = (await response.json()) as { lessonIds?: string[]; lessonsDone?: number; lessonsTotal?: number; status?: string };
+  assert.equal(snapshots, 0);
+  assert.deepEqual(body.lessonIds, ["l1", "l2"]);
+  assert.equal(body.lessonsDone, 2);
+  assert.equal(body.lessonsTotal, 2);
+  assert.equal(body.status, "complete");
+
+  const full = await GET(
+    new Request(`https://study.example/api/learn/plans/${PLAN_ID}?view=plan`, {
+      headers: { cookie: `${SESSION_COOKIE}=${encodeURIComponent(token)}` },
+    }),
+    { params: Promise.resolve({ planId: PLAN_ID }) },
+  );
+  const planBody = (await full.json()) as { events?: unknown[]; plan?: { lessons?: { id: string }[] } };
+  assert.equal(snapshots, 1);
+  assert.deepEqual(planBody.events, []);
+  assert.deepEqual(planBody.plan?.lessons?.map((item) => item.id), ["l1", "l2"]);
 });

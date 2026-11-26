@@ -82,14 +82,16 @@ export function WorkspaceApp() {
     writeGenRef.current.clear();
     setStatsReady(false);
     setLoadError(null);
+    homeStatsRef.current = null;
     loadUserWorkspace()
       .then((loaded) => {
         if (cancelled) return;
-        for (const project of loaded) {
+        homeStatsRef.current = loaded.stats;
+        for (const project of loaded.projects) {
           persistedRef.current.set(project.id, JSON.stringify(project));
         }
         syncReadyRef.current = true;
-        setProjects(claimLegacyProgress(loaded).filter((project) => !isEmptyLearnPath(project)));
+        setProjects(claimLegacyProgress(loaded.projects).filter((project) => !isEmptyLearnPath(project)));
         setHydrated(true);
       })
       .catch((error: unknown) => {
@@ -149,6 +151,7 @@ export function WorkspaceApp() {
   projectsRef.current = projects;
   const statsRef = useRef(stats);
   statsRef.current = stats;
+  const homeStatsRef = useRef<StatsSnapshot | null>(null);
   const statsTimerRef = useRef<number | null>(null);
   const statsSaveGenRef = useRef(0);
 
@@ -305,6 +308,18 @@ export function WorkspaceApp() {
       statsRef.current = blank;
       setStats(blank);
     };
+    const seeded = homeStatsRef.current;
+    if (seeded && typeof seeded.xp === "number" && typeof seeded.streak === "number") {
+      const pending = readPendingAwards();
+      const zone = seeded.timezone || browserTimeZone();
+      const applied = pending.length ? applyXpAwards(seeded, pending, Date.now(), zone) : null;
+      const next = applied && !applied.error ? applied.stats : seeded;
+      statsRef.current = next;
+      setStats(next);
+      setStatsReady(true);
+      if (pending.length) void flushAwards();
+      return;
+    }
     void fetch("/api/workspace/stats", { credentials: "same-origin" })
       .then(async (response) => {
         if (!response.ok) return null;

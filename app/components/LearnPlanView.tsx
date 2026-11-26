@@ -1196,9 +1196,10 @@ export function LearnPlanView({
   }, [incomingPlan]);
 
   useEffect(() => {
+    if (buildingPlanId && buildingPlanId === incomingPlan.id) return;
     let cancelled = false;
     const planId = incomingPlan.id;
-    void fetch(`/api/learn/plans/${planId}`, { credentials: "same-origin" })
+    void fetch(`/api/learn/plans/${planId}?view=plan`, { credentials: "same-origin" })
       .then((response) => (response.ok ? response.json() : null))
       .then((body: unknown) => {
         if (cancelled) return;
@@ -1216,7 +1217,7 @@ export function LearnPlanView({
     return () => {
       cancelled = true;
     };
-  }, [incomingPlan.id]);
+  }, [buildingPlanId, incomingPlan.id]);
 
   const onBuildCompleteRef = useRef(onBuildComplete);
   onBuildCompleteRef.current = onBuildComplete;
@@ -1224,6 +1225,10 @@ export function LearnPlanView({
   useEffect(() => {
     if (!buildingPlanId || buildingPlanId !== incomingPlan.id) return;
     let closed = false;
+    let inflight = false;
+    let queued = false;
+    let queuedForce = false;
+    let lastSig = "";
     const source = new EventSource(`/api/learn/plans/${buildingPlanId}/events`);
     const absorbLive = (snap: PlanSnapshot | null) => {
       if (!snap?.plan || closed) return;
@@ -1242,34 +1247,58 @@ export function LearnPlanView({
         if (snap.plan) onBuildCompleteRef.current?.(snap.plan);
       }
     };
+    const rosterSig = (roster: { status?: string; lessonsDone?: number; lessonIds?: string[] }) =>
+      `${roster.status ?? ""}|${roster.lessonsDone ?? ""}|${(roster.lessonIds ?? []).join(",")}`;
+    const pull = (force: boolean) => {
+      if (closed) return;
+      if (inflight) {
+        queued = true;
+        queuedForce = queuedForce || force;
+        return;
+      }
+      inflight = true;
+      void fetch(`/api/learn/plans/${buildingPlanId}?view=roster`, { credentials: "same-origin" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then(async (body: unknown) => {
+          if (closed || !body || typeof body !== "object") return;
+          const roster = body as { status?: string; lessonsDone?: number; lessonIds?: string[] };
+          const sig = rosterSig(roster);
+          if (!force && sig === lastSig) return;
+          const response = await fetch(`/api/learn/plans/${buildingPlanId}?view=plan`, { credentials: "same-origin" });
+          const snap = response.ok ? ((await response.json()) as PlanSnapshot) : null;
+          if (!snap || closed) return;
+          lastSig = sig;
+          if (snap.status === "complete" || snap.status === "partial") finishIfDone(snap);
+          else absorbLive(snap);
+          if (force && !closed) {
+            const fresh = await fetch(`/api/learn/plans/${buildingPlanId}?view=roster`, { credentials: "same-origin" });
+            if (fresh.ok) lastSig = rosterSig((await fresh.json()) as { status?: string; lessonsDone?: number; lessonIds?: string[] });
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          inflight = false;
+          if (queued && !closed) {
+            const nextForce = queuedForce;
+            queued = false;
+            queuedForce = false;
+            pull(nextForce);
+          }
+        });
+    };
     source.addEventListener("done", (event) => {
       finishIfDone(JSON.parse((event as MessageEvent).data) as PlanSnapshot);
     });
-    source.addEventListener("progress", () => {
-      void fetch(`/api/learn/plans/${buildingPlanId}`, { credentials: "same-origin" })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((body: unknown) => absorbLive(body as PlanSnapshot | null))
-        .catch(() => undefined);
+    source.addEventListener("progress", (event) => {
+      const progressEvent = JSON.parse((event as MessageEvent).data) as ProgressEvent;
+      if (progressEvent.stage === "check" || progressEvent.stage === "assemble") pull(true);
     });
     source.onerror = () => {
-      if (closed) return;
-      void fetch(`/api/learn/plans/${buildingPlanId}`, { credentials: "same-origin" })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((body: unknown) => {
-          const snap = body as PlanSnapshot | null;
-          if (!snap) return;
-          absorbLive(snap);
-          if (snap.status === "complete" || snap.status === "partial") finishIfDone(snap);
-        })
-        .catch(() => undefined);
+      if (!closed) pull(true);
     };
-    const poll = window.setInterval(() => {
-      void fetch(`/api/learn/plans/${buildingPlanId}`, { credentials: "same-origin" })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((body: unknown) => absorbLive(body as PlanSnapshot | null))
-        .catch(() => undefined);
-    }, 8000);
-  return () => {
+    pull(false);
+    const poll = window.setInterval(() => pull(false), 8000);
+    return () => {
       closed = true;
       source.close();
       window.clearInterval(poll);
@@ -1632,15 +1661,24 @@ export function LearnPlanView({
         return changed ? updated : prev;
       });
     };
+    let inflight = false;
     const pull = () => {
-      void fetch(`/api/learn/plans/${plan.id}`, { credentials: "same-origin" })
+      if (closed || inflight) return;
+      inflight = true;
+      void fetch(`/api/learn/plans/${plan.id}?view=roster`, { credentials: "same-origin" })
         .then((response) => (response.ok ? response.json() : null))
-        .then((body: unknown) => {
-          const snap = body as PlanSnapshot | null;
+        .then(async (body: unknown) => {
+          const lessonIds = (body as { lessonIds?: string[] } | null)?.lessonIds ?? [];
+          if (closed || !lessonIds.some((id) => ids.has(id))) return;
+          const response = await fetch(`/api/learn/plans/${plan.id}?view=plan`, { credentials: "same-origin" });
+          const snap = response.ok ? ((await response.json()) as PlanSnapshot) : null;
           if (!snap?.plan || closed) return;
           if (snap.plan.lessons.some((lesson) => ids.has(lesson.id))) absorb(snap.plan);
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          inflight = false;
+        });
     };
     source.addEventListener("gap", (event) => {
       const body = JSON.parse((event as MessageEvent).data) as GapJobEvent;

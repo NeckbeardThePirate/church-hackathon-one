@@ -96,6 +96,32 @@ async function semanticIds(env: LibraryEnv, query: string, kind: "f" | "c", k: n
   return matches.map((m) => m.id.slice(2)); // strip "f:" / "c:"
 }
 
+/** Verse-anchored ids for up to six references, in one D1 batch. */
+async function idsForRefs(db: D1Database, sql: string, refs: ParsedBibleReference[]): Promise<string[]> {
+  const slice = refs.slice(0, 6);
+  if (!slice.length) return [];
+  const statements = () =>
+    slice.map((ref) => {
+      const [book, start, end] = refRange(ref);
+      return db.prepare(sql).bind(book, end, start);
+    });
+  if (typeof db.batch === "function") {
+    try {
+      const results = await db.batch<{ id: string }>(statements());
+      return results.flatMap((result) => (result.results ?? []).map((row) => row.id));
+    } catch {
+      /* Fall back to separate statements. */
+    }
+  }
+  const lists = await Promise.all(
+    statements().map(async (statement) => {
+      const { results } = await statement.all<{ id: string }>();
+      return (results ?? []).map((row) => row.id);
+    }),
+  );
+  return lists.flat();
+}
+
 async function byIds<T extends { id: string }>(db: D1Database, table: string, ids: string[]): Promise<Map<string, T>> {
   const map = new Map<string, T>();
   if (!ids.length) return map;
@@ -146,19 +172,12 @@ export async function searchFathers(
           .then((r) => (r.results ?? []).map((row) => row.id))
           .catch(() => [] as string[])
       : [],
-    Promise.all(
-      refs.slice(0, 6).map(async (ref) => {
-        const [book, start, end] = refRange(ref);
-        const { results } = await db
-          .prepare(
-            `SELECT id FROM father_quotes WHERE book_id = ? AND loc_start <= ? AND loc_end >= ?
-             ORDER BY (loc_end - loc_start) ASC, year ASC LIMIT 8`,
-          )
-          .bind(book, end, start)
-          .all<{ id: string }>();
-        return (results ?? []).map((row) => row.id);
-      }),
-    ).then((lists) => lists.flat()),
+    idsForRefs(
+      db,
+      `SELECT id FROM father_quotes WHERE book_id = ? AND loc_start <= ? AND loc_end >= ?
+       ORDER BY (loc_end - loc_start) ASC, year ASC LIMIT 8`,
+      refs,
+    ),
   ]);
 
   const top = fuse([
@@ -196,19 +215,12 @@ export async function searchConfessions(
           .then((r) => (r.results ?? []).map((row) => row.id))
           .catch(() => [] as string[])
       : [],
-    Promise.all(
-      refs.slice(0, 6).map(async (ref) => {
-        const [book, start, end] = refRange(ref);
-        const { results } = await db
-          .prepare(
-            `SELECT DISTINCT section_id AS id FROM confession_proofs
-             WHERE book_id = ? AND loc_start <= ? AND loc_end >= ? LIMIT 8`,
-          )
-          .bind(book, end, start)
-          .all<{ id: string }>();
-        return (results ?? []).map((row) => row.id);
-      }),
-    ).then((lists) => lists.flat()),
+    idsForRefs(
+      db,
+      `SELECT DISTINCT section_id AS id FROM confession_proofs
+       WHERE book_id = ? AND loc_start <= ? AND loc_end >= ? LIMIT 8`,
+      refs,
+    ),
   ]);
 
   const top = fuse([

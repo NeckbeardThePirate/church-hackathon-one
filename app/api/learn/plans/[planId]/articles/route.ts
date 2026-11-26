@@ -23,7 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ planId
       : "";
   if (!url || url.length > 2000) return Response.json({ error: "A valid article URL is required." }, { status: 400 });
 
-  const snap = await owned.stub.snapshot();
+  const snap = await owned.stub.snapshot({ events: false });
   const fromPlan = snap.plan?.lessons ?? [];
   const lessons = fromPlan.some((lesson) => lesson.articles.length) ? fromPlan : await owned.stub.getLessons();
   const article = lessons.flatMap((lesson) => lesson.articles).find((item) => item.url === url);

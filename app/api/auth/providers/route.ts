@@ -6,10 +6,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   const publishableKey = readClerkSecretKey() ? await resolveClerkPublishableKey() : undefined;
-  return Response.json({
-    clerk: Boolean(publishableKey),
-    clerkPublishableKey: publishableKey ?? null,
-    chatgpt: true,
-    dev: devAuthAllowed(request, env.DEV_AUTH),
-  });
+  return Response.json(
+    {
+      clerk: Boolean(publishableKey),
+      clerkPublishableKey: publishableKey ?? null,
+      chatgpt: true,
+      dev: devAuthAllowed(request, env.DEV_AUTH),
+    },
+    { headers: { "cache-control": "private, max-age=300" } },
+  );
 }

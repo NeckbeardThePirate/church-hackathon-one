@@ -22,7 +22,7 @@ import {
   type SourcePassage,
   type TeachBlock,
 } from "@/app/lib/learn/types";
-import { fetchPassageFromD1 } from "../bible-db";
+import { fetchPassagesFromD1 } from "../bible-db";
 import { exaAuthFrom, exaReady, exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId, youtubeOembed } from "./exa";
 import { citeLibrary, mergeLibraryCitations, resolveLibraryRefs, type NamedLibraryRef } from "./library-cite";
 import { SOURCE_TEXT_RULE } from "./source-policy";
@@ -47,10 +47,10 @@ async function llm<T>(
   role: LlmRole,
   call: { system: string; user: string; validate: (v: unknown) => T; maxTokens?: number; temperature?: number },
 ): Promise<T> {
-  if (!(await ctx.stub.spend("llm", 1, { gap: ctx.msg.job === "gap" }))) throw new BudgetExhausted("LLM call budget reached.");
+  const reserved = await ctx.stub.reserveLlm(ctx.msg.job === "gap");
+  if (!reserved.ok) throw new BudgetExhausted("LLM call budget reached.");
   const meta: LlmMeta = { planId: ctx.msg.planId, stage: ctx.msg.stage, lessonId: ctx.msg.lessonId };
-  const info = await ctx.stub.info().catch(() => null);
-  return llmJson(ctx.env, { role, meta, ...call, userId: info?.userId });
+  return llmJson(ctx.env, { role, meta, ...call, userId: reserved.userId });
 }
 
 const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)}…` : text);
@@ -63,15 +63,24 @@ export async function runIntake(ctx: Ctx): Promise<void> {
   // Learner passages: text comes from the Bible database only. Unresolved ones are reported, not guessed.
   const found: SourcePassage[] = [];
   const missing: string[] = [];
-  for (const ref of info.passages) {
-    const passage = ctx.env.BIBLE
-      ? await fetchPassageFromD1(ctx.env.BIBLE, ref.slug, ref.chapter, ref.verseStart, ref.verseEnd).catch(() => null)
-      : null;
+  const loaded = ctx.env.BIBLE
+    ? await fetchPassagesFromD1(
+        ctx.env.BIBLE,
+        info.passages.map((ref) => ({
+          slug: ref.slug,
+          chapter: ref.chapter,
+          verseStart: ref.verseStart,
+          verseEnd: ref.verseEnd,
+        })),
+      ).catch(() => info.passages.map(() => null))
+    : info.passages.map(() => null);
+  info.passages.forEach((ref, index) => {
+    const passage = loaded[index];
     if (!passage) missing.push(ref.label);
-    else if (!found.some((p) => p.reference === passage.reference)) {
-      found.push({ reference: passage.reference, text: passage.verses.map((v) => v.text).join(" ") });
+    else if (!found.some((item) => item.reference === passage.reference)) {
+      found.push({ reference: passage.reference, text: passage.verses.map((verse) => verse.text).join(" ") });
     }
-  }
+  });
   await ctx.stub.setSourcePassages(found);
 
   const sources = [
@@ -789,7 +798,7 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
     "teach",
     `L${lesson.order} ${lesson.title}: ${result.teaching.length} blocks, ${result.quiz.length} quiz items${
       scope.isFaithRelevant
-        ? `, ${readings.length} readings, ${cited.library.length} cited sources${dropped.length || cited.dropped.length ? ` (${dropped.length + cited.dropped.length} dropped)` : ""}`
+        ? `, ${readings.length} readings, ${(cited.library ?? []).length} cited sources${dropped.length || cited.dropped.length ? ` (${dropped.length + cited.dropped.length} dropped)` : ""}`
         : ""
     }`,
     lessonId,
@@ -849,20 +858,36 @@ async function verifyScripture(
 ): Promise<{ readings: ScriptureReading[]; dropped: string[] }> {
   const readings: ScriptureReading[] = [];
   const dropped: string[] = [];
+  const jobs: { reference: string; note: string; slug: string; chapter: number; verseStart: number; verseEnd: number }[] = [];
   for (const { reference, note } of refs) {
     const ref = findBibleReferences(reference)[0];
-    const passage =
-      ref && env.BIBLE
-        ? await fetchPassageFromD1(env.BIBLE, ref.book.slug, ref.chapter, ref.verseStart, ref.verseEnd).catch(() => null)
-        : null;
-    if (!passage) {
+    if (!ref || !env.BIBLE) {
       dropped.push(reference);
       console.warn(`[learn] scripture reference dropped (did not resolve in BSB): ${reference}`);
       continue;
     }
-    if (readings.some((r) => r.reference === passage.reference)) continue;
-    readings.push({ reference: passage.reference, text: passage.verses.map((v) => v.text).join(" "), note });
+    jobs.push({
+      reference,
+      note,
+      slug: ref.book.slug,
+      chapter: ref.chapter,
+      verseStart: ref.verseStart,
+      verseEnd: ref.verseEnd,
+    });
   }
+  const loaded = jobs.length && env.BIBLE
+    ? await fetchPassagesFromD1(env.BIBLE, jobs).catch(() => jobs.map(() => null))
+    : [];
+  jobs.forEach((job, index) => {
+    const passage = loaded[index];
+    if (!passage) {
+      dropped.push(job.reference);
+      console.warn(`[learn] scripture reference dropped (did not resolve in BSB): ${job.reference}`);
+      return;
+    }
+    if (readings.some((reading) => reading.reference === passage.reference)) return;
+    readings.push({ reference: passage.reference, text: passage.verses.map((verse) => verse.text).join(" "), note: job.note });
+  });
   return { readings, dropped };
 }
 
