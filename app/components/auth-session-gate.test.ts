@@ -211,7 +211,9 @@ test("AuthGate loads the session through the gate", () => {
   assert.match(source, /shouldRequestAuthSession/);
   assert.match(source, /bindAuthSessionRequest/);
   assert.match(source, /isClerkClientSettled\(clerk\.status\)/);
-  assert.match(source, /authGateView/);
-  assert.match(source, /if \(view === "app"\) return <>\{children\}<\/>/);
+  assert.match(source, /if \(session === "in"\) return <>\{children\}<\/>;/);
+  assert.match(source, /if \(!publishableKey\) return <GuestPreview \/>;/);
+  assert.match(source, /fallback=\{<GuestPreview \/>\}/);
+  assert.doesNotMatch(source, /RedirectToSignIn/);
   assert.doesNotMatch(source, /useEffect\(\(\) => \{[^}]*\/api\/auth\/session/);
 });
