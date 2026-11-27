@@ -9,6 +9,7 @@ import {
 } from "../lib/learn/types";
 
 import { lessonIsStudyable, pathMilestones } from "../lib/learn/path-milestones";
+import { OpenerQuiz } from "./OpenerQuiz";
 import { PathBuildCard } from "./PathBuildCard";
 import { StillWorking } from "./StillWorking";
 import { saveLearnPerspective } from "../lib/workspace-sync";
@@ -53,6 +54,11 @@ export function LearnIntakeStep({
   const [heartbeatReceivedAt, setHeartbeatReceivedAt] = useState<number | null>(null);
   const completedRef = useRef(false);
   const studyReadyRef = useRef(false);
+  const openerSettledRef = useRef(false);
+  const heldTerminalRef = useRef<PlanSnapshot | null>(null);
+  const heldStudyRef = useRef<LearnPlan | null>(null);
+  const [openerSettled, setOpenerSettled] = useState(false);
+  const [openerNote, setOpenerNote] = useState("");
 
   const refresh = useCallback(async (id: string) => {
     const res = await fetch(`/api/learn/plans/${id}?view=plan`, { credentials: "same-origin" });
@@ -64,6 +70,11 @@ export function LearnIntakeStep({
 
   const finish = useCallback(
     (snap: PlanSnapshot) => {
+      if (!openerSettledRef.current && snap.status !== "failed") {
+        heldTerminalRef.current = snap;
+        setSnapshot(snap);
+        return;
+      }
       setSnapshot(snap);
       if (snap.plan && !completedRef.current) {
         completedRef.current = true;
@@ -73,6 +84,39 @@ export function LearnIntakeStep({
       }
     },
     [onComplete],
+  );
+
+  useEffect(() => {
+    openerSettledRef.current = false;
+    heldTerminalRef.current = null;
+    heldStudyRef.current = null;
+    setOpenerSettled(false);
+    setOpenerNote("");
+  }, [planId]);
+
+  const settleOpener = useCallback(
+    (summary: string) => {
+      if (openerSettledRef.current) {
+        if (summary) setOpenerNote(summary);
+        return;
+      }
+      openerSettledRef.current = true;
+      setOpenerSettled(true);
+      setOpenerNote(summary);
+      const terminal = heldTerminalRef.current;
+      heldTerminalRef.current = null;
+      if (terminal) {
+        finish(terminal);
+        return;
+      }
+      const study = heldStudyRef.current;
+      heldStudyRef.current = null;
+      if (study && !studyReadyRef.current) {
+        studyReadyRef.current = true;
+        onStudyReady?.(study);
+      }
+    },
+    [finish, onStudyReady],
   );
 
   // Live progress over SSE. EventSource resumes with Last-Event-ID on reconnect.
@@ -152,6 +196,10 @@ export function LearnIntakeStep({
     if (!snapshot || studyReadyRef.current || !onStudyReady) return;
     if (snapshot.status !== "running" && snapshot.status !== "partial") return;
     if (!planReadyToStudy(snapshot)) return;
+    if (!openerSettledRef.current) {
+      heldStudyRef.current = snapshot.plan;
+      return;
+    }
     studyReadyRef.current = true;
     onStudyReady(snapshot.plan);
   }, [snapshot, onStudyReady]);
@@ -200,7 +248,7 @@ export function LearnIntakeStep({
         </h1>
       </header>
 
-      {!failed && snapshot?.status !== "complete" && snapshot?.status !== "partial" ? (
+      {!failed && (!openerSettled || (snapshot?.status !== "complete" && snapshot?.status !== "partial")) ? (
         <div
           className={`overflow-hidden rounded-2xl border bg-[var(--sidebar)] ${
             lessonOneReady
@@ -208,7 +256,11 @@ export function LearnIntakeStep({
               : "border-[var(--line)]"
           }`}
         >
-          <PathBuildCard embedded milestones={milestones} lessonOneReady={lessonOneReady} />
+          {openerSettled ? null : <OpenerQuiz key={planId} planId={planId} onSettled={settleOpener} />}
+          {openerNote ? (
+            <p className="study-serif px-4 pt-5 text-base italic leading-relaxed text-[var(--ink)] sm:px-6">{openerNote}</p>
+          ) : null}
+          <PathBuildCard embedded quiet={!openerSettled} milestones={milestones} lessonOneReady={lessonOneReady} />
           <StillWorking
             hideLamp
             stage={currentStage}

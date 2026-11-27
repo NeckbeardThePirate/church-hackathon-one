@@ -20,18 +20,19 @@ import { resolveLibraryRefs } from "./learn/library-cite";
 import { shuffleQuizChoices } from "./learn/quiz-items.ts";
 import type { LibraryEnv } from "./library-search";
 
-const HESED_KEY = "faithful, covenant-based loyalty in action that often goes beyond strict obligation";
+const JOHN_KEY = "The Word was God and became flesh.";
+const LIFE_KEY = "Believing brings life.";
 const LORDS_KEY =
   "Both address God as Father and ask for daily bread; Matthew is longer, with extra petitions Luke omits.";
 
-const WCF_5_1 =
-  "God, the great Creator of all things, doth uphold, direct, dispose, and govern all creatures, actions, and things, from the greatest even to the least, by his most wise and holy providence, according to his infallible foreknowledge, and the free and immutable counsel of his own will, to the praise of the glory of his wisdom, power, justice, goodness, and mercy.";
+const WCF_8_2 =
+  "The Son of God, the second person in the Trinity, being very and eternal God, of one substance and equal with the Father, did, when the fullness of time was come, take upon him man's nature, with all the essential properties, and common infirmities thereof, yet without sin; being conceived by the power of the Holy Ghost, in the womb of the virgin Mary, of her substance. So that two whole, perfect, and distinct natures, the Godhead and the manhood, were inseparably joined together in one person, without conversion, composition, or confusion. Which person is very God, and very man, yet one Christ, the only Mediator between God and man.";
 
-const WCF_5_7 =
-  "As the providence of God doth, in general, reach to all creatures, so, after a most special manner, it taketh care of his Church, and disposeth all things to the good thereof.";
+const WCF_14_2 =
+  "By this faith, a Christian believeth to be true whatsoever is revealed in the Word, for the authority of God himself speaking therein; and acteth differently upon that which each particular passage thereof containeth; yielding obedience to the commands, trembling at the threatenings, and embracing the promises of God for this life, and that which is to come. But the principal acts of saving faith are accepting, receiving, and resting upon Christ alone for justification, sanctification, and eternal life, by virtue of the covenant of grace.";
 
-const CHRYSOSTOM =
-  "For you do not achieve it by toilings and labors, but you receive it as a gift from above, contributing one thing only from your own store, believing.";
+const AUGUSTINE =
+  "If the Word was not ashamed to be born of man, are men ashamed to be born of God? And because He did this, He cured us; and because He cured us, we see. For this, “that the Word was made flesh, and dwelt among us,” became a medicine unto us, so that as by earth we were made blind, by earth we might be healed; and having been healed, might behold what? “And we beheld,” he says, “His glory, the glory as of the Only-begotten of the Father, full of grace and truth.”";
 
 const WLC_186 =
   "The whole Word of God is of use to direct us in the duty of prayer; but the special rule of direction is that form of prayer which our Savior Christ taught his disciples, commonly called the Lord's Prayer.";
@@ -40,10 +41,12 @@ const CYPRIAN =
   "Before all things, the Teacher of peace and the Master of unity would not have prayer to be made singly and individually, as for one who prays to pray for himself alone. For we say not “My Father, which art in heaven,” nor “Give me this day my daily bread;” nor does each one ask that only his own debt should be forgiven him; nor does he request for himself alone that he may not be led into temptation, and delivered from evil. Our prayer is public and common; and when we pray, we pray not for one, but for the whole people, because we the whole people are one.";
 
 const KJV = {
-  ruth116:
-    "And Ruth said, Intreat me not to leave thee, or to return from following after thee: for whither thou goest, I will go; and where thou lodgest, I will lodge: thy people shall be my people, and thy God my God: Where thou diest, will I die, and there will I be buried: the LORD do so to me, and more also, if ought but death part thee and me.",
-  ruth212:
-    "The LORD recompense thy work, and a full reward be given thee of the LORD God of Israel, under whose wings thou art come to trust.",
+  john11:
+    "In the beginning was the Word, and the Word was with God, and the Word was God. The same was in the beginning with God. All things were made by him; and without him was not any thing made that was made.",
+  john114:
+    "And the Word was made flesh, and dwelt among us, (and we beheld his glory, the glory as of the only begotten of the Father,) full of grace and truth.",
+  john2030:
+    "And many other signs truly did Jesus in the presence of his disciples, which are not written in this book: But these are written, that ye might believe that Jesus is the Christ, the Son of God; and that believing ye might have life through his name.",
   matt69:
     "After this manner therefore pray ye: Our Father which art in heaven, Hallowed be thy name. Thy kingdom come. Thy will be done in earth, as it is in heaven. Give us this day our daily bread. And forgive us our debts, as we forgive our debtors. And lead us not into temptation, but deliver us from evil: For thine is the kingdom, and the power, and the glory, for ever. Amen.",
   luke112:
@@ -132,248 +135,267 @@ function father(id: string, label: string, detail: string, text: string, url: st
   return { id, source: "father", label, detail, text, note: "", url };
 }
 
-const RUTH: StarterDraft = {
-  id: "ruth",
-  projectId: "starter-ruth",
-  planId: STARTER_PLAN_IDS.ruth,
-  title: "The Book of Ruth",
-  topic: "The Book of Ruth",
-  prerequisites: ["Willingness to read a short narrative slowly."],
+const JOHN: StarterDraft = {
+  id: "john",
+  projectId: "starter-john",
+  planId: STARTER_PLAN_IDS.john,
+  title: "The Gospel of John",
+  topic: "The Gospel of John",
+  prerequisites: ["Willingness to read a short Gospel prologue slowly."],
   objectives: [
-    "Describe Ruth’s choice to stay with Naomi",
-    "Explain hesed as loyal action beyond strict obligation",
-    "Connect Boaz’s blessing with being received rather than earning a place",
+    "Say that the Word was with God and was God",
+    "Explain that the Word was made flesh without giving up that he is God",
+    "State why John says these signs were written",
   ],
   lessons: [
     {
       id: "l1",
       order: 1,
-      title: "Ruth’s loyalty",
-      objectives: ["Say who stays with Naomi and who turns back", "Define hesed from this chapter"],
+      title: "The Word with God",
+      objectives: ["Say where the Word was", "Name what the Word became"],
       prerequisiteLessonIds: [],
       estimatedMinutes: 18,
       kind: "core",
       teaching: [
         paragraph(
-          "In a famine, Naomi’s family leaves Bethlehem for Moab. Her husband and both sons die there. She starts home, and both daughters-in-law set out with her. Orpah turns back. Ruth does not.",
+          "John opens before Bethlehem. The first sentence does not start with a birth. It starts with the Word, who already was.",
         ),
-        heading("Hesed"),
+        heading("With God, and God"),
         paragraph(
-          "The loyalty in this chapter has a name in Hebrew: hesed. Hesed here is faithful, covenant-based loyalty in action that often goes beyond strict obligation. Ruth was not bound by a law that forced her to leave her own people. She chooses Naomi’s road anyway.",
+          "Read the opening below. It says the Word was with God, and the Word was God. Those are two claims, not one. “With God” keeps a distinction. “Was God” refuses to make the Word a lesser being. The same verses hold both, and they say all things were made by him.",
         ),
-        heading("Three pledges"),
+        heading("Made flesh"),
         paragraph(
-          "Read her reply in the passage below. The lesson does not replace that wording. Notice three pledges: she will go where Naomi goes, she will lodge where Naomi lodges, and she will take Naomi’s people and Naomi’s God as her own. Only death, she says, will part them.",
+          "Later in the same chapter the Word was made flesh and dwelt among us. Made, here, means became: a real human life, not a costume. Hold the two claims together. The Word was God and became flesh.",
         ),
         paragraph(
-          "The confession beside the passage is about providence, not a commentary written on Ruth. It says God governs creatures and actions, from the greatest to the least. Hold that claim next to a famine, a funeral, and a choice on the road.",
+          "The confession beside the passages is about Christ the Mediator, not a commentary written on John. It says the Son, very and eternal God, took man’s nature, so that two whole natures, the Godhead and the manhood, were joined in one person, without conversion, composition, or confusion. Set that claim next to “with God” and “was made flesh.”",
         ),
       ],
       scripture: [
         {
-          reference: "Ruth 1:16-17",
-          note: "Ruth’s reply to Naomi. The lesson’s three pledges are in this wording.",
-          bundledText: KJV.ruth116,
+          reference: "John 1:1-3",
+          note: "The opening claims: the Word was with God, and the Word was God, and all things were made by him.",
+          bundledText: KJV.john11,
+        },
+        {
+          reference: "John 1:14",
+          note: "The Word was made flesh and dwelt among us.",
+          bundledText: KJV.john114,
         },
       ],
       library: [
         {
-          lookup: "Westminster Confession of Faith 5.1",
-          note: "The confession’s chapter on providence. It is not a commentary on Ruth.",
-          bundled: confession("bundled-wcf-5-1", "Westminster Confession of Faith 5.1", "Of Providence", WCF_5_1),
+          lookup: "Westminster Confession of Faith 8.2",
+          note: "Of Christ the Mediator. Two natures in one person. It is not a commentary on John 1.",
+          bundled: confession(
+            "bundled-wcf-8-2",
+            "Westminster Confession of Faith 8.2",
+            "Of Christ the Mediator",
+            WCF_8_2,
+          ),
         },
       ],
       quiz: [
         mc(
-          "Who continues with Naomi toward Bethlehem?",
-          ["Ruth", "Orpah", "Elimelech", "Boaz"],
-          "Ruth",
-          "The lesson says Orpah turns back and Ruth does not.",
-          "l1-stay",
-          "Who stays",
+          "In the opening of John, the Word was",
+          ["With God, and God", "A creature made first", "Only a title for Moses", "Absent until Bethlehem"],
+          "With God, and God",
+          "The lesson says the Word was with God, and the Word was God.",
+          "l1-word",
+          "With God, and God",
         ),
         mc(
-          "What does Orpah do?",
-          ["Turns back", "Stays with Naomi", "Marries Boaz", "Rules Bethlehem"],
-          "Turns back",
-          "The lesson says Orpah turns back.",
-          "l1-orpah",
-          "Orpah turns back",
+          "The same chapter says the Word was made",
+          ["Flesh", "A parable only", "A temple building", "Invisible forever"],
+          "Flesh",
+          "The lesson says the Word was made flesh and dwelt among us.",
+          "l1-flesh",
+          "Made flesh",
         ),
         short(
-          "What is hesed in this lesson?",
-          HESED_KEY,
-          "The lesson defines hesed as faithful, covenant-based loyalty in action that often goes beyond strict obligation.",
-          "l1-hesed",
-          "Hesed",
+          "What does this lesson claim about the Word?",
+          JOHN_KEY,
+          "The Word was God, and the Word became flesh. Both claims stay.",
+          "l1-claim",
+          "Word and flesh",
         ),
       ],
     },
     {
       id: "gap-l1-1",
       order: 2,
-      title: "Practice: Ruth’s vow",
-      objectives: ["Restate hesed without copying the lesson’s sentence", "Name one pledge in Ruth’s reply"],
+      title: "Practice: Made flesh",
+      objectives: ["Restate the two claims without copying the lesson’s sentence", "Name what the Word was made"],
       prerequisiteLessonIds: ["l1"],
       estimatedMinutes: 10,
       kind: "gap",
       sourceLessonId: "l1",
-      sourceConceptIds: ["l1-hesed"],
+      sourceConceptIds: ["l1-claim"],
       teaching: [
-        paragraph("This practice lesson stays with one claim from Ruth’s reply."),
+        paragraph("This practice lesson stays with one claim from the opening of John."),
         paragraph(
-          "Hesed, in the lesson you just read, is faithful, covenant-based loyalty in action that often goes beyond strict obligation. Ruth’s reply is that kind of act. She pledges to go where Naomi goes and to take Naomi’s people and God as her own. Nothing in the chapter says a statute compelled her.",
+          "The Word was God and became flesh. “Was God” is not withdrawn when “made flesh” is added. Made means became: the Word took a real human life. Nothing in the verses says he stopped being God.",
         ),
-        paragraph("The passage below is the same reply. Use it to check the claim, not as a new story."),
+        paragraph(
+          "The confession’s sentence, set beside the same readings, says two whole natures, the Godhead and the manhood, were joined in one person, without conversion, composition, or confusion. The passages below are the same readings. Use them to check the claim, not as a new story.",
+        ),
       ],
       scripture: [
         {
-          reference: "Ruth 1:16-17",
-          note: "The same reply, retrieved again for the practice lesson.",
-          bundledText: KJV.ruth116,
+          reference: "John 1:1-3",
+          note: "The same opening, retrieved again for the practice lesson.",
+          bundledText: KJV.john11,
+        },
+        {
+          reference: "John 1:14",
+          note: "The same flesh verse, retrieved again for the practice lesson.",
+          bundledText: KJV.john114,
         },
       ],
       library: [
         {
-          lookup: "Westminster Confession of Faith 5.1",
-          note: "The same providence sentence, set beside the vow rather than beside the famine.",
-          bundled: confession("bundled-wcf-5-1", "Westminster Confession of Faith 5.1", "Of Providence", WCF_5_1),
+          lookup: "Westminster Confession of Faith 8.2",
+          note: "The same mediator sentence, set beside the prologue rather than beside the signs.",
+          bundled: confession(
+            "bundled-wcf-8-2",
+            "Westminster Confession of Faith 8.2",
+            "Of Christ the Mediator",
+            WCF_8_2,
+          ),
         },
       ],
       quiz: [
         mc(
-          "Hesed in this path is best described as",
+          "The practice lesson says the Word",
           [
-            "Loyal action beyond strict obligation",
-            "A wage Ruth earned",
-            "Orpah’s return to Moab",
-            "A law that forced Ruth to leave home",
+            "Was God and became flesh",
+            "Was made after the world",
+            "Stopped being God when he became flesh",
+            "Was only a human teacher",
           ],
-          "Loyal action beyond strict obligation",
-          "The practice lesson repeats the definition of hesed.",
-          "l1-hesed",
-          "Hesed",
+          "Was God and became flesh",
+          "The practice lesson repeats both claims.",
+          "l1-claim",
+          "Word and flesh",
         ),
-        mc(
-          "Ruth’s pledge includes which commitment?",
-          [
-            "Naomi’s people and God become hers",
-            "She will rule Bethlehem",
-            "She will return to Moab",
-            "She will ignore Naomi’s God",
-          ],
-          "Naomi’s people and God become hers",
-          "The practice lesson names that pledge.",
-          "l1-vow",
-          "Ruth’s pledge",
+        short(
+          "Which two natures does the confession keep in one person?",
+          "The Godhead and the manhood.",
+          "The confession says the Godhead and the manhood were joined in one person.",
+          "l1-natures",
+          "Two natures",
         ),
       ],
     },
     {
       id: "l2",
       order: 3,
-      title: "Under his wings",
-      objectives: ["Say whose field Ruth gleans in", "Describe the picture in Boaz’s blessing"],
+      title: "Written that you may believe",
+      objectives: ["Say what John calls the works in this book", "State the purpose of the writing"],
       prerequisiteLessonIds: ["l1"],
       estimatedMinutes: 16,
       kind: "core",
       teaching: [
         paragraph(
-          "Ruth gleans in the fields of Boaz, a relative of Naomi’s late husband. Boaz has heard what she did for Naomi: she left her father, her mother, and her native land for a people she did not know.",
+          "John does not say he wrote down every work of Jesus. He says many other signs were done in the presence of the disciples, and that the ones in this book are written for a purpose.",
         ),
-        heading("Received, not purchased"),
+        heading("Christ, and life"),
         paragraph(
-          "He does not treat that loyalty as a debt she is collecting. He speaks of refuge. The reading below is his blessing. It asks the God of Israel to repay her, and it says she has come to trust under that God’s wings.",
-        ),
-        paragraph(
-          "A second confession line, on the special care of providence for the church, sits beside the blessing. It is not a verse-by-verse note on Ruth. Read it as the church’s later claim that God’s care is not only general.",
+          "The purpose is in the reading below. These are written so that you may believe that Jesus is the Christ, the Son of God, and that believing you may have life through his name. The lesson keeps both halves: who Jesus is, and the life that believing brings.",
         ),
         paragraph(
-          "The church father quoted here is John Chrysostom on Romans, not a sermon on Ruth. He says a person receives a gift from above rather than achieving it by labor, and contributes believing. The lesson sets that sentence next to Boaz’s welcome: Ruth is received. She does not buy her place.",
+          "A second confession line, on saving faith, sits beside that purpose. It is not a verse-by-verse note on John 20. It says the principal acts of saving faith are accepting, receiving, and resting upon Christ alone for justification, sanctification, and eternal life.",
+        ),
+        paragraph(
+          "The church father quoted here is Augustine on this Gospel, not a second author of the verse. He says the Word was not ashamed to be born of man, and that the Word made flesh became a medicine, so that as by earth we were made blind, by earth we might be healed. The lesson sets that sermon next to John’s purpose. The verse says believing brings life. Augustine is preaching the incarnation as healing. He does not replace the verse.",
         ),
       ],
       scripture: [
         {
-          reference: "Ruth 2:12",
-          note: "Boaz’s blessing. The wings belong to the God of Israel.",
-          bundledText: KJV.ruth212,
+          reference: "John 20:30-31",
+          note: "Why the signs were written: that you may believe, and that believing you may have life.",
+          bundledText: KJV.john2030,
         },
       ],
       library: [
         {
-          lookup: "Westminster Confession of Faith 5.7",
-          note: "Providence’s special care for the church. Not a commentary on Ruth 2.",
-          bundled: confession("bundled-wcf-5-7", "Westminster Confession of Faith 5.7", "Of Providence", WCF_5_7),
+          lookup: "Westminster Confession of Faith 14.2",
+          note: "Of Saving Faith. The principal acts rest on Christ for eternal life. Not a commentary on John 20.",
+          bundled: confession("bundled-wcf-14-2", "Westminster Confession of Faith 14.2", "Of Saving Faith", WCF_14_2),
         },
         {
-          lookup: "John Chrysostom, Homilies on Romans",
-          note: "Chrysostom on Romans: a gift received, with believing contributed. He is not commenting on Ruth.",
+          lookup: "Augustine, Tractates on the Gospel of John",
+          note: "Augustine on this Gospel: the Word made flesh became a medicine. He is preaching John, not replacing the verse.",
           bundled: father(
-            "bundled-chrysostom-romans",
-            "John Chrysostom",
-            "Homilies on Romans",
-            CHRYSOSTOM,
-            "https://ccel.org/ccel/schaff/npnf111",
+            "bundled-augustine-john",
+            "Augustine",
+            "Tractates on the Gospel of John",
+            AUGUSTINE,
+            "https://ccel.org/ccel/schaff/npnf107/npnf107.iii.iv.html",
           ),
         },
       ],
       quiz: [
         mc(
-          "Whose field does Ruth glean in?",
-          ["Boaz", "Orpah", "Elimelech", "A stranger with no tie to the family"],
-          "Boaz",
-          "The lesson says Ruth gleans in the fields of Boaz.",
-          "l2-boaz",
-          "Boaz’s field",
-        ),
-        mc(
-          "Boaz’s blessing pictures Ruth’s trust as being under what?",
-          ["The wings of the God of Israel", "The walls of Moab", "A wage she earned", "Orpah’s house"],
-          "The wings of the God of Israel",
-          "The lesson says she has come to trust under that God’s wings.",
-          "l2-wings",
-          "Under his wings",
-        ),
-        mc(
-          "Chrysostom’s sentence, as this lesson uses it, says a person",
+          "John says many other signs",
           [
-            "Receives a gift and contributes believing",
-            "Earns a place by labor alone",
-            "Must return to Moab",
-            "Writes the confession",
+            "Are not written in this book",
+            "Are listed only as a temple calendar",
+            "Replace the prologue",
+            "Were hidden from the disciples",
           ],
-          "Receives a gift and contributes believing",
-          "The lesson quotes him on receiving a gift rather than achieving it by labor.",
-          "l2-gift",
-          "Received as a gift",
+          "Are not written in this book",
+          "The lesson says many other signs were done, and are not written in this book.",
+          "l2-signs",
+          "Signs not written",
+        ),
+        mc(
+          "These are written so that the reader may",
+          [
+            "Believe that Jesus is the Christ, the Son of God",
+            "Memorize the temple calendar",
+            "Skip the prologue",
+            "Add a longer prayer",
+          ],
+          "Believe that Jesus is the Christ, the Son of God",
+          "The lesson says the signs are written so that you may believe that Jesus is the Christ, the Son of God.",
+          "l2-believe",
+          "That you may believe",
+        ),
+        short(
+          "What does this lesson say believing brings?",
+          LIFE_KEY,
+          "Believing brings life through his name.",
+          "l2-life",
+          "Life through his name",
         ),
       ],
     },
   ],
   finalAssessment: [
     mc(
-      "Who stays with Naomi?",
-      ["Ruth", "Orpah", "Elimelech", "Neither daughter-in-law"],
-      "Ruth",
-      "Ruth stays. Orpah turns back.",
-      "l1-stay",
-      "Who stays",
+      "The opening of John says the Word was",
+      ["With God, and God", "Created on the first day", "A proverb of Solomon", "Silent until the cross"],
+      "With God, and God",
+      "The Word was with God, and the Word was God.",
+      "l1-word",
+      "With God, and God",
+    ),
+    short(
+      "What does this path claim about the Word?",
+      JOHN_KEY,
+      "The Word was God and became flesh.",
+      "l1-claim",
+      "Word and flesh",
     ),
     mc(
-      "Hesed in this path goes beyond what?",
-      ["Strict obligation", "Boaz’s field", "The wings in the blessing", "The confession’s title"],
-      "Strict obligation",
-      "Hesed is loyal action that often goes beyond strict obligation.",
-      "l1-hesed",
-      "Hesed",
-    ),
-    mc(
-      "Boaz pictures Ruth’s trust as under",
-      ["The wings of the God of Israel", "The laws of Moab", "A contract she purchased", "Orpah’s choice"],
-      "The wings of the God of Israel",
-      "The blessing uses that picture.",
-      "l2-wings",
-      "Under his wings",
+      "John says the signs are written so that readers may",
+      ["Believe and have life", "Copy the temple rites", "Skip the prologue", "Add a longer prayer"],
+      "Believe and have life",
+      "The book’s purpose is belief, and life through his name.",
+      "l2-life",
+      "Life through his name",
     ),
   ],
 };
@@ -625,7 +647,7 @@ const LORDS: StarterDraft = {
 };
 
 const DRAFTS: Record<StarterPathId, StarterDraft> = {
-  ruth: RUTH,
+  john: JOHN,
   "lords-prayer": LORDS,
 };
 

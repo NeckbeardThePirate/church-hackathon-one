@@ -1,7 +1,6 @@
 const COPY = {
   home: "Lessons and quizzes are AI-generated. Scripture and historical sources are retrieved from the library, not written by the model.",
-  lesson:
-    "This lesson is AI-generated. Scripture and historical sources below are retrieved from the library, not written by the model.",
+  lesson: "This lesson is partially AI generated.",
   quiz: "This quiz is AI-generated. Scripture and historical sources in the lesson are retrieved from the library, not written by the model.",
   review:
     "These questions come from the lesson quiz. They are AI-generated. Scripture and historical sources are retrieved from the library, not written by the model.",

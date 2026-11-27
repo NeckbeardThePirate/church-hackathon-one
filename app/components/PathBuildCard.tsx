@@ -10,6 +10,8 @@ type Props = {
   onStartLesson?: () => void;
   /** The building screen supplies its own frame and the live status underneath. */
   embedded?: boolean;
+  /** Ticks and one line, while the opener check sits above the same card. */
+  quiet?: boolean;
 };
 
 const SHORT: Record<MilestoneId, string> = {
@@ -186,7 +188,7 @@ function PathSwoosh({ progress }: { progress: number }) {
 }
 
 /** Progress for a path that is still being written. */
-export function PathBuildCard({ milestones, lessonOneReady, lessonOrder = 1, onStartLesson, embedded = false }: Props) {
+export function PathBuildCard({ milestones, lessonOneReady, lessonOrder = 1, onStartLesson, embedded = false, quiet = false }: Props) {
   const active = milestones.find((step) => step.state === "active");
   const progress = lightProgress(milestones);
   const frame = embedded
@@ -199,8 +201,8 @@ export function PathBuildCard({ milestones, lessonOneReady, lessonOrder = 1, onS
 
   return (
     <section aria-label="Path building" className={frame}>
-      <div className={embedded ? "px-4 pb-4 pt-5 sm:px-6 sm:pt-6" : "px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6"}>
-        <PathSwoosh progress={progress} />
+      <div className={quiet ? "px-4 pb-3 pt-1 sm:px-6" : embedded ? "px-4 pb-4 pt-5 sm:px-6 sm:pt-6" : "px-4 pb-5 pt-5 sm:px-6 sm:pb-6 sm:pt-6"}>
+        {quiet ? null : <PathSwoosh progress={progress} />}
         <ol aria-label="Build stages" className="mt-1 grid grid-cols-4 gap-1.5 sm:mt-2 sm:gap-2">
           {milestones.map((step) => (
             <li key={step.id} aria-current={step.state === "active" ? "step" : undefined} className="min-w-0">
@@ -214,8 +216,10 @@ export function PathBuildCard({ milestones, lessonOneReady, lessonOrder = 1, onS
             </li>
           ))}
         </ol>
-        <div className="mt-4">
-          {lessonOneReady ? (
+        <div className={quiet ? "mt-3" : "mt-4"}>
+          {quiet ? (
+            <p className="text-sm leading-relaxed text-[var(--ink-muted)]">{active?.detail ?? "The path is being gathered."}</p>
+          ) : lessonOneReady ? (
             <>
               <p className="study-serif break-words text-xl italic leading-snug text-[var(--ink)]">Lesson {lessonOrder} is ready</p>
               <p className="mt-1 text-sm leading-relaxed text-[var(--ink-muted)]">

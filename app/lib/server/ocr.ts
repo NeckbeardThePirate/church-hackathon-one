@@ -1,3 +1,5 @@
+import { runWorkersAi, workersGatewayCall, type WorkersAiEnv } from "./ai-gateway.ts";
+
 export const OCR_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
 const OCR_SYSTEM =
@@ -77,14 +79,19 @@ function textFromContentBlocks(content: unknown[]): string {
     .trim();
 }
 
-export async function runImageOcr(ai: Ai, imageDataUri: string): Promise<string> {
-  const result = await ai.run(OCR_MODEL, {
-    messages: [
-      { role: "system", content: OCR_SYSTEM },
-      { role: "user", content: OCR_USER },
-    ],
-    image: imageDataUri,
-  });
+export async function runImageOcr(env: WorkersAiEnv, imageDataUri: string): Promise<string> {
+  const result = await runWorkersAi(
+    env.AI,
+    OCR_MODEL,
+    {
+      messages: [
+        { role: "system", content: OCR_SYSTEM },
+        { role: "user", content: OCR_USER },
+      ],
+      image: imageDataUri,
+    },
+    workersGatewayCall(env.AI_GATEWAY_ID, { stage: "ocr" }),
+  );
 
   const text = parseWorkersAiText(result);
   if (!text) {
@@ -94,6 +101,10 @@ export async function runImageOcr(ai: Ai, imageDataUri: string): Promise<string>
   return text;
 }
 
-export async function runImageOcrFromBytes(ai: Ai, bytes: Uint8Array, contentType: string): Promise<string> {
-  return runImageOcr(ai, bytesToDataUri(bytes, contentType));
+export async function runImageOcrFromBytes(
+  env: WorkersAiEnv,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<string> {
+  return runImageOcr(env, bytesToDataUri(bytes, contentType));
 }

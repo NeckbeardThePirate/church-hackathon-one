@@ -30,7 +30,7 @@ const GENERIC = new Set("based often goes within shown show into from with about
  * A learner hits the concept by using any word in the cluster.
  */
 const CLUSTERS: string[][] = [
-  ["faithful", "faithfulness", "loyal", "loyalty", "steadfast", "steadfastness", "fidelity", "hesed", "faith"],
+  ["faithful", "faithfulness", "loyal", "loyalty", "steadfast", "steadfastness", "fidelity", "hesed", "faith", "believe", "believes", "believing", "belief"],
   ["covenant", "covenantal", "treaty", "bond", "relationship", "relational", "promise", "oath", "pledge"],
   ["kindness", "kind", "mercy", "merciful", "love", "loving", "grace", "goodness", "compassion"],
   ["action", "act", "acts", "practice", "shown", "show", "deed", "deeds", "behavior", "behaviour"],
@@ -41,6 +41,10 @@ const CLUSTERS: string[][] = [
   ["omit", "omits", "omitted", "leave", "leaves", "leaving", "left", "leav", "omitt"],
   ["address", "addresses", "call", "calls", "calling"],
   ["longer", "long", "lengthier"],
+  ["word", "logos"],
+  ["god", "divine", "deity", "godhead"],
+  ["flesh", "human", "humanity", "incarnate", "incarnation", "manhood"],
+  ["life", "eternal", "everlasting"],
 ];
 
 function normalize(text: string): string {

@@ -21,6 +21,15 @@ test("the expected wording and an empty answer", () => {
   assert.equal(gradeShortAnswerLocal("the sky is blue", HESED_KEY).score, 0);
 });
 
+test("a paraphrase of the Gospel of John starter key is correct", () => {
+  const expected = "The Word was God and became flesh.";
+  const given = "the divine Word took on humanity";
+  const grade = gradeShortAnswerLocal(given, expected);
+  assert.equal(grade.correct, true);
+  assert.equal(grade.partial, false);
+  assert.ok(grade.score >= 0.55);
+});
+
 test("a paraphrase that hits both Lord's Prayer key points is correct", () => {
   const expected =
     "Both address God as Father and ask for daily bread; Matthew is longer, with extra petitions Luke omits.";

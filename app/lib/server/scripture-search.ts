@@ -1,4 +1,5 @@
 import { BIBLE_BOOKS } from "../bible/books";
+import { runWorkersAi, workersGatewayCall, type WorkersAiEnv } from "./ai-gateway.ts";
 
 export const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
 
@@ -20,8 +21,13 @@ export function verseEmbeddingInput(row: VerseRow): string {
   return `${book?.name ?? ""} ${row.chapter}:${row.verse} — ${cleanVerseText(row.text)}`;
 }
 
-export async function embedTexts(ai: Ai, texts: string[]): Promise<number[][]> {
-  const result = (await ai.run(EMBED_MODEL, { text: texts })) as { data: number[][] };
+export async function embedTexts(env: WorkersAiEnv, texts: string[]): Promise<number[][]> {
+  const result = (await runWorkersAi(
+    env.AI,
+    EMBED_MODEL,
+    { text: texts },
+    workersGatewayCall(env.AI_GATEWAY_ID, { stage: "embed" }),
+  )) as { data: number[][] };
   return result.data;
 }
 
@@ -44,7 +50,7 @@ const STOP = new Set(
 
 /** Embed + upsert a page of verses, keyed by D1 rowid cursor. */
 export async function embedVersePage(
-  env: { AI: Ai; BIBLE: D1Database; SCRIPTURE_VECTORS: VectorizeIndex },
+  env: WorkersAiEnv & { BIBLE: D1Database; SCRIPTURE_VECTORS: VectorizeIndex },
   afterRowid: number,
   limit: number,
 ): Promise<{ processed: number; nextCursor: number | null }> {
@@ -59,7 +65,7 @@ export async function embedVersePage(
   const BATCH = 100;
   for (let i = 0; i < rows.length; i += BATCH) {
     const slice = rows.slice(i, i + BATCH);
-    const vectors = await embedTexts(env.AI, slice.map(verseEmbeddingInput));
+    const vectors = await embedTexts(env, slice.map(verseEmbeddingInput));
     await env.SCRIPTURE_VECTORS.upsert(
       slice.map((row, j) => ({
         id: verseId(row.book_id, row.chapter, row.verse),

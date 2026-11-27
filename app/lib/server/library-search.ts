@@ -45,7 +45,12 @@ export type CommentaryHit = {
   sources: HitSource[];
 };
 
-export type LibraryEnv = { AI?: Ai; BIBLE?: D1Database; LIBRARY_VECTORS?: VectorizeIndex };
+export type LibraryEnv = {
+  AI?: Ai;
+  AI_GATEWAY_ID?: string;
+  BIBLE?: D1Database;
+  LIBRARY_VECTORS?: VectorizeIndex;
+};
 
 type FatherRow = {
   rowid?: number;
@@ -119,7 +124,10 @@ function fuse(lists: { ids: string[]; source: HitSource; weight?: number }[]) {
 
 async function semanticIds(env: LibraryEnv, query: string, kind: "f" | "c" | "m", k: number): Promise<string[]> {
   if (!env.AI || !env.LIBRARY_VECTORS) return [];
-  const [vector] = await embedTexts(env.AI, [query.slice(0, 2000)]);
+  const [vector] = await embedTexts(
+    { AI: env.AI, AI_GATEWAY_ID: env.AI_GATEWAY_ID },
+    [query.slice(0, 2000)],
+  );
   if (!vector) return [];
   const { matches } = await env.LIBRARY_VECTORS.query(vector, { topK: k, filter: { kind } });
   return matches.map((m) => m.id.slice(2)); // strip "f:" / "c:"
@@ -337,7 +345,7 @@ export async function searchCommentaries(
 
 /** Embed + upsert one page of fathers, confessions, or commentaries into LIBRARY_VECTORS. */
 export async function embedLibraryPage(
-  env: { AI: Ai; BIBLE: D1Database; LIBRARY_VECTORS: VectorizeIndex },
+  env: { AI: Ai; AI_GATEWAY_ID?: string; BIBLE: D1Database; LIBRARY_VECTORS: VectorizeIndex },
   corpus: "fathers" | "confessions" | "commentaries",
   afterRowid: number,
   limit: number,
@@ -389,7 +397,7 @@ export async function embedLibraryPage(
   const BATCH = 100;
   for (let i = 0; i < items.length; i += BATCH) {
     const slice = items.slice(i, i + BATCH);
-    const vectors = await embedTexts(env.AI, slice.map((item) => item.input));
+    const vectors = await embedTexts(env, slice.map((item) => item.input));
     await env.LIBRARY_VECTORS.upsert(
       slice.map((item, j) => ({
         id: item.id,
