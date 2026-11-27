@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LegalLinks } from "./LegalLinks";
 
 /** Auth pages share the app bar and canvas so Clerk does not sit on a blank page. */
 export function AuthChrome({ children }: { children: ReactNode }) {
@@ -9,9 +10,12 @@ export function AuthChrome({ children }: { children: ReactNode }) {
           StudyBuddy
         </a>
       </header>
-      <main className="safe-area-bottom flex flex-1 flex-col overflow-y-auto py-8 pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] [scrollbar-gutter:stable_both-edges]">
+      <main className="flex flex-1 flex-col overflow-y-auto py-8 pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] [scrollbar-gutter:stable_both-edges]">
         <div className="my-auto flex w-full max-w-[min(100%,24rem)] flex-col gap-6 self-center">{children}</div>
       </main>
+      <footer className="safe-area-bottom flex shrink-0 justify-center px-4 pt-1 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
+        <LegalLinks />
+      </footer>
     </div>
   );
 }
