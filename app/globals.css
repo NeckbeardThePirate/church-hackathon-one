@@ -285,3 +285,91 @@ kbd {
     animation: none;
   }
 }
+
+/* Sign out: bordered, tinted control. Unlayered so it beats Clerk menu-row utilities. */
+.sign-out-button,
+.cl-userButtonPopoverActionButton__signOut,
+.cl-userButtonPopoverActionButton__signOutAll {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--accent) 10%, var(--sidebar));
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.011em;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.sign-out-button:hover,
+.cl-userButtonPopoverActionButton__signOut:hover,
+.cl-userButtonPopoverActionButton__signOutAll:hover {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, var(--sidebar));
+  color: var(--ink);
+}
+
+.sign-out-button:active,
+.cl-userButtonPopoverActionButton__signOut:active,
+.cl-userButtonPopoverActionButton__signOutAll:active {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--line));
+  background: color-mix(in srgb, var(--accent) 26%, var(--sidebar));
+  color: var(--ink);
+}
+
+.sign-out-button:focus-visible,
+.cl-userButtonPopoverActionButton__signOut:focus-visible,
+.cl-userButtonPopoverActionButton__signOutAll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  color: var(--ink);
+}
+
+.cl-userButtonPopoverActionButton__signOut,
+.cl-userButtonPopoverActionButton__signOutAll {
+  width: calc(100% - 0.5rem);
+  margin: 0.375rem auto 0.125rem;
+}
+
+.cl-userButtonPopoverActionButton__signOut .cl-userButtonPopoverActionButtonIconBox,
+.cl-userButtonPopoverActionButton__signOutAll .cl-userButtonPopoverActionButtonIconBox {
+  flex-shrink: 0;
+}
+
+/* Compact desktop rail is 56px. Keep the control available, but only as a screen-reader target. */
+@media (min-width: 768px) {
+  .sign-out-button-rail {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    min-width: 1px;
+    min-height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}

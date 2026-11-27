@@ -42,6 +42,14 @@ const secondaryClass =
 const menuClass =
   "min-h-11 w-full rounded-md px-2 text-left text-sm text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)] focus-visible:bg-[var(--sidebar-active)] focus-visible:text-[var(--ink)]";
 
+/**
+ * Account-menu Sign out. Visual chrome lives in `.sign-out-button` so it wins
+ * over the menu-row utilities above. `shrink-0` and `whitespace-nowrap` keep
+ * the label on one line in the popover and the mobile account drawer.
+ */
+export const signOutButtonClass =
+  "sign-out-button inline-flex shrink-0 items-center justify-center whitespace-nowrap";
+
 const surface: Style = {
   backgroundColor: "var(--sidebar)",
   color: "var(--ink)",
@@ -188,6 +196,8 @@ const elements: Record<string, Style | string> = {
   userButtonPopoverMain: scroll,
   userButtonPopoverActions: { borderColor: "var(--line)" },
   userButtonPopoverActionButton: menuClass,
+  userButtonPopoverActionButton__signOut: signOutButtonClass,
+  userButtonPopoverActionButton__signOutAll: signOutButtonClass,
   userButtonPopoverActionButtonIcon: { color: "inherit" },
   userButtonPopoverFooter: {
     backgroundColor: "transparent",
@@ -280,6 +290,8 @@ export const studyBuddyClerkAppearance = {
     elements: {
       userButtonPopoverCard: popover,
       userButtonPopoverActionButton: menuClass,
+      userButtonPopoverActionButton__signOut: signOutButtonClass,
+      userButtonPopoverActionButton__signOutAll: signOutButtonClass,
     },
   },
   userProfile: {
