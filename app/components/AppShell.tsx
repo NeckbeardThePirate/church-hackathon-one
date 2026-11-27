@@ -3,6 +3,7 @@
 import { UserButton } from "@clerk/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
+import { signOutButtonClass } from "./clerk-appearance";
 import { defaultTitle, isLegacyProject, type Project } from "../lib/projects";
 import { statsFigures, type DailyGoalStatus, type LessonMastery } from "../lib/learn/learner-stats";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
@@ -270,8 +271,8 @@ export function AppShell({
           {archived.map((project) => renderItem(project))}
         </nav>
         <div
-          className={`mt-auto flex items-center gap-3 border-t border-[var(--line)] pt-3 ${
-            sidebarInnerCompact ? "hidden justify-center px-0 md:flex" : "px-2"
+          className={`relative mt-auto flex flex-nowrap items-center gap-3 border-t border-[var(--line)] pt-3 ${
+            sidebarInnerCompact ? "px-2 md:justify-center md:px-0" : "px-2"
           }`}
         >
           {clerkKey ? (
@@ -283,6 +284,8 @@ export function AppShell({
                     width: sidebarInnerCompact ? "2.25rem" : "2.5rem",
                     height: sidebarInnerCompact ? "2.25rem" : "2.5rem",
                   },
+                  userButtonPopoverActionButton__signOut: signOutButtonClass,
+                  userButtonPopoverActionButton__signOutAll: signOutButtonClass,
                 },
               }}
             />
@@ -299,7 +302,7 @@ export function AppShell({
                 window.location.assign("/");
               });
             }}
-            className={`min-h-11 text-xs text-[var(--ink-muted)] hover:text-[var(--ink)] ${sidebarInnerCompact ? "sr-only" : ""}`}
+            className={`${signOutButtonClass} ${sidebarInnerCompact ? "sign-out-button-rail" : ""}`}
           >
             Sign out
           </button>
