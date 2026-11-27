@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { bibleGatewayEsvUrl } from "../lib/bible/bible-gateway";
+import { visibleCitationNote } from "../lib/learn/citation-note";
 import { gradeShortAnswerLocal, type GradeResult } from "../lib/learn/grade-answer";
 import { lessonMasteryPercent, xpReason, type DailyGoalStatus, type XpEventKind } from "../lib/learn/learner-stats";
 import { postLearnAttempt } from "../lib/learn/post-attempt";
@@ -202,6 +203,12 @@ function ResourceCard({
   );
 }
 
+function CitationNote({ note }: { note: string }) {
+  const caption = visibleCitationNote(note);
+  if (!caption) return null;
+  return <p className="mt-2 text-sm italic text-[var(--ink-muted)]">{caption}</p>;
+}
+
 function LibraryCallout({ item }: { item: LibraryCitation }) {
   const heading = item.condemned ? `${item.label} · condemned` : item.label;
   const origin = item.textSource === "bundled" ? "bundled" : "retrieved";
@@ -215,7 +222,7 @@ function LibraryCallout({ item }: { item: LibraryCitation }) {
         {item.detail ? <span className="font-normal text-[var(--ink-muted)]"> · {item.detail}</span> : null}
       </p>
       <p className="mt-2 text-sm leading-relaxed text-[var(--ink)]">{item.text}</p>
-      {item.note ? <p className="mt-2 text-sm italic text-[var(--ink-muted)]">{item.note}</p> : null}
+      <CitationNote note={item.note} />
     </li>
   );
 }
@@ -244,7 +251,7 @@ function ScriptureCallout({ reading }: { reading: ScriptureReading }) {
         className="bible-callout-body text-sm leading-relaxed text-[var(--ink)]"
         dangerouslySetInnerHTML={{ __html: esc(reading.text) }}
       />
-      {reading.note ? <p className="mt-2 text-sm italic text-[var(--ink-muted)]">{reading.note}</p> : null}
+      <CitationNote note={reading.note} />
     </aside>
   );
 }

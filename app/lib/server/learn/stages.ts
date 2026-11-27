@@ -784,7 +784,7 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
   // Every passage the learner chose lands in a lesson (spread across lessons); text is from the Bible database.
   const own = info.options.includeScripture === "no" ? [] : passagesForLesson(passages, lesson.order, lessons.length);
   const readings = [
-    ...own.filter((p) => !verified.readings.some((r) => r.reference === p.reference)).map((p) => ({ ...p, note: "A passage you chose." })),
+    ...own.filter((p) => !verified.readings.some((r) => r.reference === p.reference)).map((p) => ({ ...p, note: "" })),
     ...verified.readings,
   ];
   const cited = scope.isFaithRelevant
