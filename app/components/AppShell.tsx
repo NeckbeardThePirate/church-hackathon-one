@@ -24,6 +24,9 @@ type AppShellProps = {
   onNext?: () => void;
   onShowProgress?: () => void;
   onRequestDelete?: (id: string) => void;
+  /** Empty workspace: the page is the only next step, so stats and progress stay hidden. */
+  focusMode?: boolean;
+  onReplayWelcome?: () => void;
 };
 
 const focusRing =
@@ -66,6 +69,8 @@ export function AppShell({
   onNext,
   onShowProgress,
   onRequestDelete,
+  focusMode = false,
+  onReplayWelcome,
 }: AppShellProps) {
   const { key: clerkKey } = useClerkKey();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -201,25 +206,29 @@ export function AppShell({
           </span>
         </button>
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">StudyBuddy</p>
-        <p
-          className="min-w-0 max-w-[5.5rem] truncate text-right text-[11px] tabular-nums text-[var(--ink-muted)]"
-          aria-label="Learner stats"
-          aria-busy={figures.busy}
-        >
-          {figures.busy ? (
-            <span className="study-shimmer inline-block h-3 w-12 rounded-full bg-[var(--line)]" aria-hidden />
-          ) : (
-            `${figures.xp} XP · ${figures.streak}d`
-          )}
-        </p>
-        <button
-          type="button"
-          onClick={openNewProject}
-          className={`inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] ${focusRing}`}
-          aria-label="New path"
-        >
-          <PlusIcon />
-        </button>
+        {focusMode ? null : (
+          <>
+            <p
+              className="min-w-0 max-w-[5.5rem] truncate text-right text-[11px] tabular-nums text-[var(--ink-muted)]"
+              aria-label="Learner stats"
+              aria-busy={figures.busy}
+            >
+              {figures.busy ? (
+                <span className="study-shimmer inline-block h-3 w-12 rounded-full bg-[var(--line)]" aria-hidden />
+              ) : (
+                `${figures.xp} XP · ${figures.streak}d`
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={openNewProject}
+              className={`inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] ${focusRing}`}
+              aria-label="New path"
+            >
+              <PlusIcon />
+            </button>
+          </>
+        )}
       </header>
 
       {mobileNavOpen ? (
@@ -257,7 +266,7 @@ export function AppShell({
           {railCollapsed ? null : (
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold leading-none tracking-[-0.011em] text-[var(--ink)]">StudyBuddy</p>
-              <p className="mt-1 truncate text-[11px] leading-none text-[var(--ink-muted)]">Learn paths</p>
+              {focusMode ? null : <p className="mt-1 truncate text-[11px] leading-none text-[var(--ink-muted)]">Learn paths</p>}
             </div>
           )}
           <div className={railCollapsed ? "flex flex-col items-center gap-1.5" : "flex shrink-0 items-center gap-1"}>
@@ -274,19 +283,21 @@ export function AppShell({
                 <SidebarToggleIcon collapsed />
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={openNewProject}
-              title="New path"
-              aria-label="New path"
-              className={`border border-[var(--line)] font-medium leading-none text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] hover:bg-[var(--sidebar-active)] ${focusRing} ${
-                railCollapsed
-                  ? "inline-flex size-9 items-center justify-center rounded-md"
-                  : "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-2.5 text-xs"
-              }`}
-            >
-              {railCollapsed ? <PlusIcon /> : "New path"}
-            </button>
+            {focusMode ? null : (
+              <button
+                type="button"
+                onClick={openNewProject}
+                title="New path"
+                aria-label="New path"
+                className={`border border-[var(--line)] font-medium leading-none text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] hover:bg-[var(--sidebar-active)] ${focusRing} ${
+                  railCollapsed
+                    ? "inline-flex size-9 items-center justify-center rounded-md"
+                    : "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-2.5 text-xs"
+                }`}
+              >
+                {railCollapsed ? <PlusIcon /> : "New path"}
+              </button>
+            )}
             {railCollapsed ? null : (
               <button
                 type="button"
@@ -303,24 +314,26 @@ export function AppShell({
           </div>
         </div>
 
-        <div className={railCollapsed ? "px-1 md:hidden" : "px-1"}>
-          <LearnerStatsPanel
-            pending={!stats}
-            xp={stats?.xp ?? 0}
-            streak={stats?.streak ?? 0}
-            lessons={mastery}
-            goal={stats ? goal : null}
-            nextLabel={nextLabel}
-            onNext={
-              onNext
-                ? () => {
-                    onNext();
-                    setMobileNavOpen(false);
-                  }
-                : undefined
-            }
-          />
-        </div>
+        {focusMode ? null : (
+          <div className={railCollapsed ? "px-1 md:hidden" : "px-1"}>
+            <LearnerStatsPanel
+              pending={!stats}
+              xp={stats?.xp ?? 0}
+              streak={stats?.streak ?? 0}
+              lessons={mastery}
+              goal={stats ? goal : null}
+              nextLabel={nextLabel}
+              onNext={
+                onNext
+                  ? () => {
+                      onNext();
+                      setMobileNavOpen(false);
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        )}
 
         <nav
           id="learn-paths-nav"
@@ -328,7 +341,7 @@ export function AppShell({
             railCollapsed ? "md:items-center md:gap-1.5 md:px-0 md:[scrollbar-gutter:stable_both-edges]" : ""
           }`}
         >
-          {onShowProgress ? (
+          {onShowProgress && !focusMode ? (
             <button
               type="button"
               onClick={() => {
@@ -342,7 +355,7 @@ export function AppShell({
               Progress
             </button>
           ) : null}
-          {paths.length === 0 && archived.length === 0 ? (
+          {paths.length === 0 && archived.length === 0 && !focusMode ? (
             <p className={`px-2 pb-1 pt-1 text-xs leading-5 text-[var(--ink-muted)] ${railCollapsed ? "md:hidden" : ""}`}>
               Your paths appear here.
             </p>
@@ -360,35 +373,51 @@ export function AppShell({
           {archived.map((project) => renderItem(project))}
         </nav>
 
-        <div
-          className={`relative mt-auto flex items-center gap-2 border-t border-[var(--line)] px-1 pt-3 ${
-            railCollapsed ? "md:justify-center md:px-0" : ""
-          }`}
-        >
-          {clerkKey ? (
-            <div className="sidebar-account flex size-9 shrink-0 items-center justify-center">
-              <UserButton
-                appearance={{
-                  elements: {
-                    rootBox: { width: "auto", height: "auto" },
-                    userButtonBox: { width: "2.25rem", height: "2.25rem" },
-                    userButtonTrigger: { width: "2.25rem", height: "2.25rem" },
-                    avatarBox: { width: "2.25rem", height: "2.25rem" },
-                    userButtonAvatarBox: { width: "2.25rem", height: "2.25rem" },
-                    userButtonPopoverActionButton__signOut: signOutButtonClass,
-                    userButtonPopoverActionButton__signOutAll: signOutButtonClass,
-                  },
+        <div className="mt-auto">
+          {onReplayWelcome ? (
+            <div className={railCollapsed ? "md:hidden" : ""}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  onReplayWelcome();
                 }}
-              />
+                className={`mx-1 mb-2 flex min-h-11 w-[calc(100%-0.5rem)] items-center rounded-md px-2 text-left text-xs text-[var(--ink-muted)] transition-colors hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)] md:min-h-9 ${focusRing}`}
+              >
+                Welcome
+              </button>
             </div>
           ) : null}
-          <button
-            type="button"
-            onClick={signOut}
-            className={`${signOutButtonClass} sign-out-button-sidebar ml-auto ${railCollapsed ? "sign-out-button-rail" : ""}`}
+          <div
+            className={`relative flex items-center gap-2 border-t border-[var(--line)] px-1 pt-3 ${
+              railCollapsed ? "md:justify-center md:px-0" : ""
+            }`}
           >
-            Sign out
-          </button>
+            {clerkKey ? (
+              <div className="sidebar-account flex size-9 shrink-0 items-center justify-center">
+                <UserButton
+                  appearance={{
+                    elements: {
+                      rootBox: { width: "auto", height: "auto" },
+                      userButtonBox: { width: "2.25rem", height: "2.25rem" },
+                      userButtonTrigger: { width: "2.25rem", height: "2.25rem" },
+                      avatarBox: { width: "2.25rem", height: "2.25rem" },
+                      userButtonAvatarBox: { width: "2.25rem", height: "2.25rem" },
+                      userButtonPopoverActionButton__signOut: signOutButtonClass,
+                      userButtonPopoverActionButton__signOutAll: signOutButtonClass,
+                    },
+                  }}
+                />
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={signOut}
+              className={`${signOutButtonClass} sign-out-button-sidebar ml-auto ${railCollapsed ? "sign-out-button-rail" : ""}`}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
 

@@ -79,7 +79,10 @@ test("resolved library wording comes from the stored row and a miss is dropped",
     assert.equal(resolved.citations[0]?.note, "Why it connects.");
     assert.equal(resolved.citations[1]?.source, "father");
     assert.equal(resolved.citations[1]?.text, "Retrieved father wording.");
-    assert.equal(resolved.citations[1]?.note, "From the retrieved commentary text.");
+    assert.equal(resolved.citations[1]?.note, "");
+    assert.equal(JSON.stringify(resolved).includes("Quoted from"), false);
+    assert.equal(JSON.stringify(resolved).includes("From the retrieved commentary"), false);
+    assert.equal(JSON.stringify(resolved).includes("Comment on"), false);
     assert.deepEqual(resolved.dropped, ["Invented Confession 9.9"]);
     assert.match(warnings.join("\n"), /Invented Confession 9\.9/);
     assert.equal(JSON.stringify(resolved).includes("The model must not supply"), false);
