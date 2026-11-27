@@ -39,7 +39,11 @@ export async function POST(
     const bytes = new Uint8Array(await object.arrayBuffer());
     const contentType = object.httpMetadata?.contentType ?? "image/jpeg";
 
-    const ocrPromise = runImageOcrFromBytes(env.AI, bytes, contentType);
+    const ocrPromise = runImageOcrFromBytes(
+      { AI: env.AI, AI_GATEWAY_ID: env.AI_GATEWAY_ID },
+      bytes,
+      contentType,
+    );
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error("OCR timed out after 2 minutes")), OCR_TIMEOUT_MS);
     });

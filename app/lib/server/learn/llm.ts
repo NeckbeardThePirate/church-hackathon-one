@@ -11,6 +11,7 @@
  * messages name drops the prefix and turns dots into hyphens (`claude-haiku-5-5`).
  * Anything else is a Workers AI model id.
  */
+import { isGatewayAuthError } from "../ai-gateway.ts";
 import { parseWorkersAiText } from "../ocr.ts";
 import { extractJson } from "./json-text.ts";
 import { mockModelText } from "./mock-llm.ts";
@@ -81,11 +82,6 @@ function gatewayOptions(env: LlmEnv, meta: LlmMeta, attempt: number): GatewayOpt
 
 let warnedNoGateway = false;
 let warnedGatewayAuth = false;
-
-function isGatewayAuthError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /401|403|unauthorized|authentication|cf-aig/i.test(message);
-}
 
 async function runWorkers(
   env: LlmEnv,
