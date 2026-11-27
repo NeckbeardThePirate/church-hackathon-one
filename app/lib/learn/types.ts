@@ -109,7 +109,7 @@ export type ScriptureReading = {
 /** Passage text retrieved from D1. The model does not write `text`. */
 export type LibraryCitation = {
   id: string;
-  source: "father" | "confession";
+  source: "father" | "confession" | "commentary";
   label: string;
   detail?: string;
   text: string;
@@ -118,6 +118,12 @@ export type LibraryCitation = {
   url?: string;
   textSource?: CitationTextSource;
 };
+
+export function librarySourceLabel(source: LibraryCitation["source"]): string {
+  if (source === "confession") return "Confession";
+  if (source === "commentary") return "Commentary";
+  return "Church father";
+}
 
 /** Output of S1 Scope. */
 export type ScopeResult = {

@@ -2,7 +2,7 @@
 /**
  * Backfill embeddings into Vectorize via the running app.
  *   npm run dev            (in another terminal)
- *   node --experimental-strip-types scripts/embed-bsb.mts --corpus=verses|fathers|confessions [--after=0] [--base=http://localhost:5173]
+ *   node --experimental-strip-types scripts/embed-bsb.mts --corpus=verses|fathers|confessions|commentaries [--after=0] [--base=http://localhost:5173]
  * Resumable: pass --after=<last cursor printed>. Upserts are idempotent.
  */
 const arg = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];

@@ -1,6 +1,6 @@
 # StudyBuddy
 
-StudyBuddy is a Learn Path app. Start from a topic, notes, a Bible passage, or a photo of a page, and it builds a step-by-step path of lessons, readings, and quizzes cited to Scripture (Berean Study Bible), the Reformed confessions, and the church fathers. Then you work through it with a tutor chat alongside.
+StudyBuddy is a Learn Path app. Start from a topic, notes, a Bible passage, or a photo of a page, and it builds a step-by-step path of lessons, readings, and quizzes cited to Scripture (Berean Study Bible), the Reformed confessions, public-domain commentaries, and the church fathers. Then you work through it with a tutor chat alongside.
 
 The start screen is the app. Paths you build are listed in the sidebar. Lesson and Study notes saved by earlier versions are not deleted: they stay in the workspace and open read-only under “Archived”.
 
@@ -14,6 +14,8 @@ It is a [vinext](https://github.com/cloudflare/vinext) app deployed as one Cloud
 - `npm run test` runs the unit tests.
 - `npm run build` writes the Worker bundle.
 - `npm run deploy` deploys the build from `npm run build` with `cf deploy --prebuilt --force`. Do not deploy from the stub `wrangler.jsonc`.
+- `npm run library:commentaries` downloads Matthew Henry's Volume V from CCEL and writes `data/matthew-henry.sql` (John, and Matthew 6).
+- `npm run library:commentaries:load` applies `migrations/0005_commentaries.sql`, that SQL, and `migrations/0006_wsc_prayer_anchors.sql` to the remote D1 database `church-hackathon-bible`. It does not deploy the Worker. Merging to `main` deploys the Worker.
 
 ## Auth
 

@@ -28,7 +28,7 @@ export async function POST(request: Request): Promise<Response> {
     const after = Number(url.searchParams.get("after") ?? 0) || 0;
     const limit = Math.min(1000, Number(url.searchParams.get("limit")) || 500);
     const result =
-      corpus === "fathers" || corpus === "confessions"
+      corpus === "fathers" || corpus === "confessions" || corpus === "commentaries"
         ? await embedLibraryPage(
             {
               AI: env.AI,
