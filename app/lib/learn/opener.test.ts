@@ -6,6 +6,7 @@ import {
   beginOpenerTurn,
   diagnosticBrief,
   freshOpener,
+  openerStep,
   openerSummary,
   openerUserPrompt,
   parseOpenerAction,
@@ -139,6 +140,29 @@ test("skip and model failure close the check without throwing away answers alrea
   const empty = reduceOpener(freshOpener(), { type: "fail" });
   assert.equal(empty.state.reason, "unavailable");
   assert.deepEqual(empty.state.diagnostic, { strengths: [], gaps: [] });
+
+  const again = beginOpenerTurn(empty.state, { type: "start" }, 1_000);
+  assert.equal(again.state.status, "open");
+  assert.equal(again.effects[0]?.type, "generate");
+
+  const skippedCheck = reduceOpener(freshOpener(), { type: "skip" }).state;
+  const stuck = beginOpenerTurn(skippedCheck, { type: "start" }, 1_000);
+  assert.equal(stuck.state.status, "closed");
+  assert.equal(stuck.state.reason, "skipped");
+  assert.deepEqual(stuck.effects, []);
+});
+
+test("the check card stays up until a question, a skip, or a finished diagnostic", () => {
+  assert.equal(openerStep(null), "wait");
+  assert.equal(openerStep({ status: "ready", answered: 0 }), "wait");
+  assert.equal(openerStep({ status: "closed", reason: "unavailable", answered: 0 }), "wait");
+  assert.equal(
+    openerStep({ status: "asking", answered: 0, question: { id: "q1", prompt: "How familiar is the prayer?", choices: [] } }),
+    "show",
+  );
+  assert.equal(openerStep({ status: "closed", reason: "skipped", answered: 0 }), "done");
+  assert.equal(openerStep({ status: "closed", reason: "complete", answered: 3 }), "done");
+  assert.equal(openerStep({ status: "closed", reason: "unavailable", answered: 2 }), "done");
 });
 
 test("a fresh generation lock blocks a second question, and a stale lock does not stick", () => {

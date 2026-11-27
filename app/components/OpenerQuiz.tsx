@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { OpenerPublic, OpenerPublicQuestion } from "../lib/learn/opener";
+import { openerStep, type OpenerPublic, type OpenerPublicQuestion } from "../lib/learn/opener";
 import { StudyShimmer } from "./StudyLamp";
 
 type Props = {
@@ -32,36 +32,13 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
   useEffect(() => {
     let live = true;
     settled.current = false;
-    const finish = (summary: string) => {
-      if (!live) return;
-      settle(summary);
-    };
+    const signal = { live: () => live && !settled.current };
 
-    const load = async () => {
-      try {
-        const current = await readOpener(planId).catch(() => null);
-        if (!live) return;
-        if (current?.status === "closed") {
-          finish(current.summary ?? "");
-          return;
-        }
-        if (current?.status === "asking" && current.question) {
-          setView(current);
-          return;
-        }
-        const next = await askNext(planId);
-        if (!live) return;
-        if (next.status === "closed" || !next.question) {
-          finish(next.summary ?? "");
-          return;
-        }
-        setView(next);
-      } catch {
-        finish("");
-      }
-    };
-
-    void load();
+    void pursueOpener(planId, signal).then((result) => {
+      if (!signal.live() || !result) return;
+      if (result.kind === "show") setView(result.body);
+      else settle(result.body.summary ?? "");
+    });
     return () => {
       live = false;
     };
@@ -90,14 +67,24 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
     try {
       const next = await postOpener(planId, { action: "answer", questionId: question.id, choiceId });
       if (settled.current) return;
-      if (next.status === "asking" && next.question) {
+      const stepped = openerStep(next);
+      if (stepped === "show") {
         setView(next);
         setBusy(false);
         return;
       }
-      settle(next.summary ?? "");
+      if (stepped === "done") {
+        settle(next.summary ?? "");
+        return;
+      }
+      setView(null);
+      setBusy(false);
+      const followed = await pursueOpener(planId, { live: () => !settled.current });
+      if (settled.current || !followed) return;
+      if (followed.kind === "show") setView(followed.body);
+      else settle(followed.body.summary ?? "");
     } catch {
-      settle("");
+      if (!settled.current) setBusy(false);
     }
   };
 
@@ -159,26 +146,57 @@ async function readOpener(planId: string): Promise<OpenerPublic> {
   return (await response.json()) as OpenerPublic;
 }
 
-async function askNext(planId: string): Promise<OpenerPublic> {
-  let started: OpenerPublic | null = null;
-  try {
-    started = await postOpener(planId, { action: "next" });
-  } catch {
-    started = null;
-  }
-  if (started && !(started.status === "ready" && started.pending)) return started;
-  // Another request may still be writing the question. Poll instead of giving up.
-  const deadline = Date.now() + 26_000;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    try {
-      const current = await readOpener(planId);
-      if (current.status === "closed" || (current.status === "asking" && current.question)) return current;
-    } catch {
-      // The read can time out while the model call is still in flight.
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type Pursuit = { kind: "show" | "done"; body: OpenerPublic };
+
+/**
+ * Keep asking until a question is on screen, the learner is done, or this view goes away.
+ * A close before any answer is a failed attempt, not a reason to hide the check.
+ */
+async function pursueOpener(planId: string, signal: { live: () => boolean }): Promise<Pursuit | null> {
+  let posts = 0;
+  while (signal.live()) {
+    const current = await readOpener(planId).catch(() => null);
+    if (!signal.live()) return null;
+    const seen = takeStep(current);
+    if (seen) return seen;
+    if (posts >= 5) {
+      await wait(3_000);
+      continue;
     }
+    posts += 1;
+    const next = await postOpener(planId, { action: "next" }).catch(() => null);
+    if (!signal.live()) return null;
+    const stepped = takeStep(next);
+    if (stepped) return stepped;
+    if (next?.status === "ready" && next.pending) {
+      const polled = await pollOpener(planId, signal, 26_000);
+      if (!signal.live()) return null;
+      const found = takeStep(polled);
+      if (found) return found;
+    }
+    await wait(800);
   }
-  return { status: "closed", reason: "unavailable", index: 0, answered: 0, limit: 4, summary: "" };
+  return null;
+}
+
+function takeStep(body: OpenerPublic | null): Pursuit | null {
+  const step = openerStep(body);
+  if (!body || step === "wait") return null;
+  return { kind: step, body };
+}
+
+async function pollOpener(planId: string, signal: { live: () => boolean }, ms: number): Promise<OpenerPublic | null> {
+  const deadline = Date.now() + ms;
+  while (signal.live() && Date.now() < deadline) {
+    await wait(800);
+    const current = await readOpener(planId).catch(() => null);
+    if (takeStep(current)) return current;
+  }
+  return null;
 }
 
 async function postOpener(planId: string, payload: { action: "next" | "skip" } | { action: "answer"; questionId: string; choiceId: string }): Promise<OpenerPublic> {
