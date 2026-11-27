@@ -5,11 +5,23 @@ import { bibleGatewayEsvUrl } from "../lib/bible/bible-gateway";
 import {
   GUEST_HONESTY_COPY,
   GUEST_OPEN_LESSON_ID,
-  GUEST_PATH_NODES,
   GUEST_PATH_TITLE,
+  GUEST_SAMPLE_CHECK_XP,
+  GUEST_SAMPLE_GAP_ID,
+  GUEST_SAMPLE_QUESTION,
+  guestChoiceVisual,
+  guestHighlightId,
   guestLesson,
+  guestPathNodes,
+  guestSampleFeedback,
+  guestSampleHeading,
+  guestSamplePhase,
+  initialGuestSample,
+  pickGuestSample,
+  revealGuestMiss,
   type GuestCitation,
   type GuestLessonPreview,
+  type GuestSampleState,
 } from "../lib/learn/guest-preview";
 import { LearnPathMap } from "./LearnPathMap";
 
@@ -20,6 +32,26 @@ const ctaClass =
 
 const quietCtaClass =
   "mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-[var(--line)] px-4 py-2.5 text-center text-sm font-medium text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:bg-[var(--sidebar-active)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] sm:w-auto";
+
+const textLinkClass =
+  "inline-flex min-h-11 items-center text-left text-sm font-medium text-[color-mix(in_srgb,var(--accent)_85%,var(--ink))] underline decoration-[color-mix(in_srgb,var(--accent)_40%,transparent)] underline-offset-[3px] hover:decoration-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
+
+const quietLinkClass =
+  "inline-flex min-h-11 items-center text-left text-sm text-[var(--ink-muted)] underline-offset-[3px] hover:text-[var(--ink)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
+
+type ScrollIntent = "panel" | "gap-node" | "check";
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function isDesktopPath(): boolean {
+  return window.matchMedia("(min-width: 1024px)").matches;
+}
+
+function scrollBehavior(): ScrollBehavior {
+  return prefersReducedMotion() ? "auto" : "smooth";
+}
 
 function SignInLink({ className }: { className: string }) {
   return (
@@ -87,7 +119,7 @@ function ConfessionCitation({ item }: { item: Extract<GuestCitation, { kind: "co
 function ReviewChip({ review, xp }: { review: string; xp: string }) {
   return (
     <p
-      className="mt-4 inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] px-3 py-1.5 text-xs"
+      className="mt-4 flex w-fit max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] px-3 py-1.5 text-xs"
       data-guest-chip
       aria-label={`${review}, ${xp}`}
     >
@@ -100,17 +132,130 @@ function ReviewChip({ review, xp }: { review: string; xp: string }) {
   );
 }
 
+function sampleChoiceClass(visual: "idle" | "correct" | "wrong"): string {
+  const base =
+    "flex min-h-11 w-full items-center rounded-lg border px-3 py-2.5 text-left text-sm leading-snug break-words transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-default";
+  switch (visual) {
+    case "correct":
+      return `${base} border-[color-mix(in_srgb,#6b9f7a_55%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_14%,var(--sidebar))] text-[var(--ink)]`;
+    case "wrong":
+      return `${base} border-[color-mix(in_srgb,#c97a7a_55%,var(--line))] bg-[color-mix(in_srgb,#c97a7a_12%,var(--sidebar))] text-[var(--ink)]`;
+    default:
+      return `${base} border-[var(--line)] bg-[var(--sidebar)] text-[var(--ink)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] enabled:hover:bg-[color-mix(in_srgb,var(--accent)_6%,var(--sidebar))]`;
+  }
+}
+
+function SampleCheck({
+  sample,
+  onPick,
+  onRevealMiss,
+  onReset,
+}: {
+  sample: GuestSampleState;
+  onPick: (choiceId: string) => void;
+  onRevealMiss: () => void;
+  onReset: () => void;
+}) {
+  const heading = guestSampleHeading(sample);
+  const feedback = guestSampleFeedback(sample);
+  const tone =
+    sample.correct === true
+      ? "border-[color-mix(in_srgb,#6b9f7a_40%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_8%,var(--canvas))]"
+      : sample.correct === false
+        ? "border-[color-mix(in_srgb,#c97a7a_40%,var(--line))] bg-[color-mix(in_srgb,#c97a7a_8%,var(--canvas))]"
+        : "border-[color-mix(in_srgb,var(--accent)_40%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_8%,var(--canvas))]";
+  const answered = sample.pickedId !== null || sample.gapSpawned;
+
+  return (
+    <section
+      id="guest-quick-check"
+      tabIndex={-1}
+      data-guest-check
+      data-guest-phase={guestSamplePhase(sample)}
+      aria-labelledby="guest-quick-check-title"
+      className="mt-5 scroll-mt-4 rounded-xl border border-[color-mix(in_srgb,var(--accent)_28%,var(--line))] bg-[color-mix(in_srgb,var(--canvas)_35%,var(--sidebar))] px-4 py-4 outline-none"
+    >
+      <h3 id="guest-quick-check-title" className="text-base font-semibold tracking-[-0.01em] text-[var(--ink)]">
+        Try a quick check
+      </h3>
+      <p className="mt-1 text-xs leading-relaxed text-[var(--ink-muted)]">One question from this lesson. It stays in the browser.</p>
+      <p className="mt-3 text-sm font-medium leading-relaxed text-[var(--ink)]">{GUEST_SAMPLE_QUESTION.prompt}</p>
+      <fieldset className="mt-3 space-y-2">
+        <legend className="sr-only">Choose one answer</legend>
+        {GUEST_SAMPLE_QUESTION.choices.map((choice) => (
+          <button
+            key={choice.id}
+            type="button"
+            data-guest-choice={choice.id}
+            aria-pressed={sample.pickedId === choice.id}
+            aria-disabled={sample.pickedId !== null || undefined}
+            onClick={() => onPick(choice.id)}
+            className={sampleChoiceClass(guestChoiceVisual(sample, choice.id))}
+          >
+            {choice.label}
+          </button>
+        ))}
+      </fieldset>
+      {heading && feedback ? (
+        <div role="status" data-guest-feedback className={`mt-3 rounded-lg border px-3 py-2.5 text-sm leading-relaxed break-words text-[var(--ink)] ${tone}`}>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <p className="font-medium">{heading}</p>
+            {sample.correct === true ? (
+              <p
+                key={sample.awardTick}
+                data-guest-xp-chip
+                className="guest-xp-pop inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-full border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] px-3 py-1.5 text-xs"
+                aria-label={`Sample award, plus ${GUEST_SAMPLE_CHECK_XP} XP`}
+              >
+                <span className="text-[var(--ink-muted)]">Sample</span>
+                <span aria-hidden="true" className="text-[var(--line)]">
+                  ·
+                </span>
+                <span className="font-semibold tabular-nums text-[var(--ink)]">+{GUEST_SAMPLE_CHECK_XP} XP</span>
+              </p>
+            ) : null}
+          </div>
+          <p className="mt-1 text-[var(--ink-muted)]">{feedback}</p>
+          {sample.correct === true && sample.gapSpawned ? (
+            <p className="mt-2 text-[var(--ink-muted)]">The practice step is on the path as well.</p>
+          ) : null}
+        </div>
+      ) : null}
+      {sample.gapSpawned ? null : (
+        <button type="button" onClick={onRevealMiss} data-guest-miss className={`${quietLinkClass} mt-3 flex w-fit`}>
+          See what happens when you miss
+        </button>
+      )}
+      {answered ? (
+        <button type="button" onClick={onReset} data-guest-reset className={`${textLinkClass} mt-1 flex w-fit`}>
+          Reset sample
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 function LessonPanel({
   lesson,
   titleId,
+  sample,
   onClose,
+  onPick,
+  onRevealMiss,
+  onReset,
 }: {
   lesson: GuestLessonPreview;
   titleId: string;
+  sample: GuestSampleState;
   onClose: () => void;
+  onPick: (choiceId: string) => void;
+  onRevealMiss: () => void;
+  onReset: () => void;
 }) {
+  const showCheck = lesson.id === GUEST_SAMPLE_QUESTION.lessonId;
+  const showGapReset = lesson.id === GUEST_SAMPLE_GAP_ID;
   return (
-    <article aria-labelledby={titleId}>
+    <article aria-labelledby={titleId} data-guest-lesson={lesson.id} data-guest-gap={showGapReset ? "open" : undefined}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">{lesson.kicker}</p>
@@ -127,6 +272,18 @@ function LessonPanel({
         </button>
       </div>
       <p className="mt-2 text-xs leading-relaxed text-[var(--ink-muted)]">Read-only preview. Nothing you open here is saved.</p>
+      {showCheck ? <SampleCheck sample={sample} onPick={onPick} onRevealMiss={onRevealMiss} onReset={onReset} /> : null}
+      {showGapReset ? (
+        <>
+          <p className="mt-4 text-sm leading-relaxed text-[var(--ink-muted)]" data-guest-honesty>
+            {GUEST_HONESTY_COPY}
+          </p>
+          <CitationList citations={lesson.citations} />
+          <button type="button" onClick={onReset} data-guest-reset className={`${textLinkClass} mt-4 flex w-fit`}>
+            Reset sample
+          </button>
+        </>
+      ) : null}
       <ReviewChip review={lesson.review} xp={lesson.xp} />
       <div className="mt-4 space-y-3">
         {lesson.excerpt.map((paragraph) => (
@@ -135,42 +292,71 @@ function LessonPanel({
           </p>
         ))}
       </div>
-      <p className="mt-5 text-sm leading-relaxed text-[var(--ink-muted)]" data-guest-honesty>
-        {GUEST_HONESTY_COPY}
-      </p>
-      <CitationList citations={lesson.citations} />
+      {showGapReset ? null : (
+        <>
+          <p className="mt-5 text-sm leading-relaxed text-[var(--ink-muted)]" data-guest-honesty>
+            {GUEST_HONESTY_COPY}
+          </p>
+          <CitationList citations={lesson.citations} />
+        </>
+      )}
       <SignInLink className={quietCtaClass} />
     </article>
   );
 }
 
-function EmptyPanel() {
+function EmptyPanel({ titleId, onCheck }: { titleId: string; onCheck: () => void }) {
   return (
     <div className="py-2">
-      <h2 className="text-base font-semibold text-[var(--ink)]">Choose a step</h2>
+      <h2 id={titleId} tabIndex={-1} className="text-base font-semibold text-[var(--ink)] outline-none">
+        Choose a step
+      </h2>
       <p className="mt-2 text-sm leading-relaxed text-[var(--ink-muted)]">
         Open a completed lesson, the current lesson, or Practice lesson ready. Locked steps stay closed until that work is done.
       </p>
+      <button type="button" onClick={onCheck} className={`${textLinkClass} mt-3`}>
+        Try a quick check
+      </button>
     </div>
   );
 }
 
 export function GuestPreview() {
   const [selectedId, setSelectedId] = useState<string | null>(GUEST_OPEN_LESSON_ID);
+  const [sample, setSample] = useState<GuestSampleState>(initialGuestSample);
   const panelRef = useRef<HTMLDivElement>(null);
-  const fromClick = useRef(false);
+  const intent = useRef<ScrollIntent | null>(null);
   const titleId = useId();
   const lesson = selectedId ? guestLesson(selectedId) : null;
+  const nodes = guestPathNodes(sample);
 
   useEffect(() => {
-    if (!fromClick.current) return;
-    fromClick.current = false;
-    const panel = panelRef.current;
-    if (!panel) return;
-    if (!window.matchMedia("(min-width: 1024px)").matches) {
-      panel.scrollIntoView({ block: "start" });
+    const action = intent.current;
+    if (!action) return;
+    intent.current = null;
+    const desktop = isDesktopPath();
+    const behavior = scrollBehavior();
+
+    if (action === "check") {
+      const check = document.getElementById("guest-quick-check");
+      if (check instanceof HTMLElement) {
+        if (!desktop) check.scrollIntoView({ block: "start", behavior });
+        check.focus({ preventScroll: true });
+      }
+      return;
     }
-    const heading = panel.querySelector("h2");
+
+    if (action === "gap-node" && !desktop) {
+      const node = document.querySelector(`[data-path-node="${GUEST_SAMPLE_GAP_ID}"]`);
+      if (node instanceof HTMLElement) {
+        node.scrollIntoView({ block: "start", behavior });
+        node.focus({ preventScroll: true });
+      }
+      return;
+    }
+
+    if (!desktop) panelRef.current?.scrollIntoView({ block: "start", behavior });
+    const heading = panelRef.current?.querySelector("h2");
     if (heading instanceof HTMLElement) heading.focus({ preventScroll: true });
   }, [selectedId]);
 
@@ -182,6 +368,49 @@ export function GuestPreview() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId]);
+
+  function openNode(id: string) {
+    intent.current = id === GUEST_SAMPLE_GAP_ID ? "gap-node" : "panel";
+    setSelectedId(id);
+  }
+
+  function openCheck() {
+    if (selectedId !== GUEST_SAMPLE_QUESTION.lessonId) {
+      intent.current = "check";
+      setSelectedId(GUEST_SAMPLE_QUESTION.lessonId);
+      return;
+    }
+    const check = document.getElementById("guest-quick-check");
+    if (!(check instanceof HTMLElement)) return;
+    if (!isDesktopPath()) check.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+    check.focus({ preventScroll: true });
+  }
+
+  function onPick(choiceId: string) {
+    const next = pickGuestSample(sample, choiceId);
+    if (next === sample) return;
+    setSample(next);
+    if (next.gapSpawned && !sample.gapSpawned) {
+      intent.current = "gap-node";
+      setSelectedId(GUEST_SAMPLE_GAP_ID);
+    }
+  }
+
+  function onRevealMiss() {
+    const next = revealGuestMiss(sample);
+    if (next === sample) return;
+    setSample(next);
+    intent.current = "gap-node";
+    setSelectedId(GUEST_SAMPLE_GAP_ID);
+  }
+
+  function onReset() {
+    setSample(initialGuestSample());
+    if (selectedId !== GUEST_OPEN_LESSON_ID) {
+      intent.current = "check";
+      setSelectedId(GUEST_OPEN_LESSON_ID);
+    }
+  }
 
   return (
     <div data-guest-landing className="safe-area-x flex h-dvh flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
@@ -201,7 +430,14 @@ export function GuestPreview() {
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--ink-muted)]" aria-label="Sample learner stats">
             <span className="font-medium uppercase tracking-[0.08em]">Sample</span>
             <span>
-              XP <strong className="tabular-nums font-semibold text-[var(--ink)]">60</strong>
+              XP{" "}
+              <strong
+                key={sample.awardTick}
+                data-guest-xp={sample.xp}
+                className={`inline-block tabular-nums font-semibold text-[var(--ink)]${sample.awardTick > 0 ? " guest-xp-pop" : ""}`}
+              >
+                {sample.xp}
+              </strong>
             </span>
             <span>
               Streak <strong className="tabular-nums font-semibold text-[var(--ink)]">4</strong> days
@@ -211,25 +447,25 @@ export function GuestPreview() {
           <h1 className="mt-2 text-4xl leading-[1.12] tracking-[-0.02em] text-[var(--ink)] sm:text-5xl" style={serif}>
             {GUEST_PATH_TITLE}
           </h1>
-          <p className="mt-3 text-balance text-sm leading-relaxed text-[var(--ink-muted)]">
-            5 lessons · one practice step · about 2 hours · Reformed
+          <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-relaxed text-[var(--ink-muted)]">
+            <span className="whitespace-nowrap">5 lessons</span>
+            <span className="whitespace-nowrap">· {sample.gapSpawned ? "two practice steps" : "one practice step"}</span>
+            <span className="whitespace-nowrap">· about 2 hours</span>
+            <span className="whitespace-nowrap">· Reformed</span>
           </p>
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-[var(--ink)]">
-            A read-only look at a StudyBuddy path. Open a lesson for the excerpt, the sources, and a spaced-review chip. This
-            copy is bundled so you can look around with no account. On your own path, Scripture and the confessions are retrieved
-            from the library.
+            A read-only look at a StudyBuddy path. Open a lesson for the excerpt, the sources, and a spaced-review chip. The
+            lesson in progress includes a quick check. This copy is bundled so you can look around with no account. On your own
+            path, Scripture and the confessions are retrieved from the library.
           </p>
+          <button type="button" onClick={openCheck} className={`${textLinkClass} mt-3 lg:hidden`}>
+            Try a quick check
+          </button>
 
           <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:gap-10">
             <section aria-label="Sample path map" className="min-w-0">
               <h2 className="text-base font-semibold text-[var(--ink)]">Path</h2>
-              <LearnPathMap
-                nodes={[...GUEST_PATH_NODES]}
-                onOpen={(id) => {
-                  fromClick.current = true;
-                  setSelectedId(id);
-                }}
-              />
+              <LearnPathMap nodes={nodes} highlightId={guestHighlightId(sample)} onOpen={openNode} />
             </section>
             <section
               ref={panelRef}
@@ -239,9 +475,17 @@ export function GuestPreview() {
               className="min-w-0 scroll-mt-4 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-4 sm:px-5 sm:py-5"
             >
               {lesson ? (
-                <LessonPanel lesson={lesson} titleId={titleId} onClose={() => setSelectedId(null)} />
+                <LessonPanel
+                  lesson={lesson}
+                  titleId={titleId}
+                  sample={sample}
+                  onClose={() => setSelectedId(null)}
+                  onPick={onPick}
+                  onRevealMiss={onRevealMiss}
+                  onReset={onReset}
+                />
               ) : (
-                <EmptyPanel />
+                <EmptyPanel titleId={titleId} onCheck={openCheck} />
               )}
             </section>
           </div>

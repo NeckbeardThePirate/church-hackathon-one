@@ -242,3 +242,46 @@ kbd {
 .learn-article em {
   font-style: italic;
 }
+
+@keyframes path-node-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes guest-xp-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.path-node-enter {
+  animation: path-node-enter 480ms ease both;
+}
+
+.guest-xp-pop {
+  animation: guest-xp-pop 480ms ease both;
+}
+
+@media (max-width: 1023px) {
+  .path-node-enter {
+    animation-delay: 220ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .path-node-enter,
+  .guest-xp-pop {
+    animation: none;
+  }
+}

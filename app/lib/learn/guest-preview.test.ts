@@ -5,7 +5,22 @@ import {
   GUEST_HONESTY_COPY,
   GUEST_OPEN_LESSON_ID,
   GUEST_PATH_NODES,
+  GUEST_SAMPLE_BASE_XP,
+  GUEST_SAMPLE_CHECK_XP,
+  GUEST_SAMPLE_GAP_ID,
+  GUEST_SAMPLE_GAP_NODE,
+  GUEST_SAMPLE_QUESTION,
+  guestChoiceVisual,
+  guestHighlightId,
   guestLesson,
+  guestPathNodes,
+  guestSampleFeedback,
+  guestSampleHeading,
+  guestSamplePhase,
+  initialGuestSample,
+  pickGuestSample,
+  revealGuestMiss,
+  resetGuestSample,
 } from "./guest-preview.ts";
 
 test("the sample path shows completed, active, and locked steps, plus a practice gap", () => {
@@ -58,6 +73,145 @@ test("the landing honesty line is the faithfulness copy", () => {
   );
 });
 
+test("the sample check starts idle, at the bundled XP, with no extra gap", () => {
+  const state = initialGuestSample();
+  assert.equal(guestSamplePhase(state), "idle");
+  assert.equal(state.pickedId, null);
+  assert.equal(state.correct, null);
+  assert.equal(state.gapSpawned, false);
+  assert.equal(state.xp, GUEST_SAMPLE_BASE_XP);
+  assert.equal(state.awardTick, 0);
+  assert.equal(guestSampleHeading(state), null);
+  assert.equal(guestSampleFeedback(state), null);
+  assert.equal(guestHighlightId(state), null);
+  assert.equal(GUEST_SAMPLE_QUESTION.lessonId, GUEST_OPEN_LESSON_ID);
+  assert.equal(GUEST_SAMPLE_QUESTION.correctId, "wings");
+
+  const path = guestPathNodes(state);
+  assert.equal(path.length, GUEST_PATH_NODES.length);
+  assert.equal(path.some((node) => node.id === GUEST_SAMPLE_GAP_ID), false);
+  assert.equal(GUEST_PATH_NODES.some((node) => node.id === GUEST_SAMPLE_GAP_ID), false);
+  for (const choice of GUEST_SAMPLE_QUESTION.choices) {
+    assert.equal(guestChoiceVisual(state, choice.id), "idle");
+  }
+});
+
+test("a right answer credits sample XP and does not spawn a gap", () => {
+  const start = initialGuestSample();
+  const right = pickGuestSample(start, "wings");
+  assert.notEqual(right, start);
+  assert.equal(guestSamplePhase(right), "correct");
+  assert.equal(right.correct, true);
+  assert.equal(right.pickedId, "wings");
+  assert.equal(right.gapSpawned, false);
+  assert.equal(right.xp, GUEST_SAMPLE_BASE_XP + GUEST_SAMPLE_CHECK_XP);
+  assert.equal(GUEST_SAMPLE_CHECK_XP, 5);
+  assert.equal(right.awardTick, 1);
+  assert.equal(guestSampleHeading(right), "That’s right");
+  assert.match(guestSampleFeedback(right) ?? "", /wings of the God of Israel/);
+  assert.equal(guestHighlightId(right), null);
+  assert.equal(guestPathNodes(right).some((node) => node.id === GUEST_SAMPLE_GAP_ID), false);
+  assert.equal(guestChoiceVisual(right, "wings"), "correct");
+  assert.equal(guestChoiceVisual(right, "gate"), "idle");
+
+  const again = pickGuestSample(right, "gate");
+  assert.equal(again, right);
+  assert.equal(again.xp, GUEST_SAMPLE_BASE_XP + GUEST_SAMPLE_CHECK_XP);
+  assert.equal(again.gapSpawned, false);
+});
+
+test("a wrong answer or the miss control spawns one new practice gap under the field", () => {
+  const bundled = GUEST_PATH_NODES.map((node) => node.id).join(",");
+  const wrong = pickGuestSample(initialGuestSample(), "roof");
+  assert.equal(guestSamplePhase(wrong), "missed");
+  assert.equal(wrong.correct, false);
+  assert.equal(wrong.xp, GUEST_SAMPLE_BASE_XP);
+  assert.equal(wrong.awardTick, 0);
+  assert.equal(wrong.gapSpawned, true);
+  assert.equal(guestSampleHeading(wrong), "A practice step opened");
+  assert.match(guestSampleFeedback(wrong) ?? "", /practice step is now on the path/);
+  assert.equal(guestChoiceVisual(wrong, "wings"), "correct");
+  assert.equal(guestChoiceVisual(wrong, "roof"), "wrong");
+  assert.equal(guestChoiceVisual(wrong, "gate"), "idle");
+
+  const path = guestPathNodes(wrong);
+  assert.equal(path.filter((node) => node.id === GUEST_SAMPLE_GAP_ID).length, 1);
+  const fieldAt = path.findIndex((node) => node.id === GUEST_OPEN_LESSON_ID);
+  const gapAt = path.findIndex((node) => node.id === GUEST_SAMPLE_GAP_ID);
+  assert.equal(gapAt, fieldAt + 1);
+  assert.equal(path[gapAt]?.parentId, GUEST_OPEN_LESSON_ID);
+  assert.equal(path[gapAt]?.kind, "gap");
+  assert.equal(path[gapAt]?.state, "available");
+  assert.equal(path[gapAt]?.title, "Practice: under his wings");
+  assert.equal(path[gapAt]?.unmet.length, 0);
+  assert.equal(guestHighlightId(wrong), GUEST_SAMPLE_GAP_ID);
+  assert.equal(new Set(path.map((node) => node.id)).size, path.length);
+  assert.equal(GUEST_PATH_NODES.map((node) => node.id).join(","), bundled);
+  assert.equal(revealGuestMiss(wrong), wrong);
+
+  const opened = revealGuestMiss(initialGuestSample());
+  assert.equal(guestSamplePhase(opened), "opened");
+  assert.equal(opened.pickedId, null);
+  assert.equal(opened.correct, null);
+  assert.equal(opened.gapSpawned, true);
+  assert.equal(opened.xp, GUEST_SAMPLE_BASE_XP);
+  assert.equal(guestSampleHeading(opened), "A practice step opened");
+  assert.match(guestSampleFeedback(opened) ?? "", /what a miss does/);
+  assert.equal(guestChoiceVisual(opened, "wings"), "idle");
+  assert.equal(guestPathNodes(opened).filter((node) => node.id === GUEST_SAMPLE_GAP_ID).length, 1);
+  assert.equal(revealGuestMiss(opened), opened);
+
+  const thenRight = pickGuestSample(opened, "wings");
+  assert.equal(thenRight.gapSpawned, true);
+  assert.equal(thenRight.correct, true);
+  assert.equal(thenRight.xp, GUEST_SAMPLE_BASE_XP + GUEST_SAMPLE_CHECK_XP);
+  assert.equal(guestSamplePhase(thenRight), "correct");
+  assert.equal(guestHighlightId(thenRight), GUEST_SAMPLE_GAP_ID);
+});
+
+test("an unknown choice is ignored and reset clears the sample", () => {
+  const start = initialGuestSample();
+  assert.equal(pickGuestSample(start, "nope"), start);
+  assert.equal(pickGuestSample(start, ""), start);
+
+  const missed = pickGuestSample(start, "gate");
+  const cleared = resetGuestSample();
+  assert.deepEqual(cleared, initialGuestSample());
+  assert.equal(cleared.gapSpawned, false);
+  assert.equal(guestPathNodes(cleared).some((node) => node.id === GUEST_SAMPLE_GAP_ID), false);
+  assert.equal(missed.gapSpawned, true);
+
+  const credited = pickGuestSample(start, "wings");
+  const afterMiss = revealGuestMiss(credited);
+  assert.equal(afterMiss.correct, true);
+  assert.equal(afterMiss.gapSpawned, true);
+  assert.equal(afterMiss.xp, credited.xp);
+  assert.equal(afterMiss.pickedId, "wings");
+  assert.deepEqual(resetGuestSample(), initialGuestSample());
+});
+
+test("the spawned practice lesson retrieves Ruth and the Westminster Confession", () => {
+  const lesson = guestLesson(GUEST_SAMPLE_GAP_ID);
+  assert.ok(lesson);
+  assert.equal(lesson.id, GUEST_SAMPLE_GAP_NODE.id);
+  assert.equal(lesson.title, GUEST_SAMPLE_GAP_NODE.title);
+  assert.equal(lesson.title, "Practice: under his wings");
+  assert.ok(lesson.excerpt.every((paragraph) => paragraph.trim().length > 40));
+  const scripture = lesson.citations.find((item) => item.kind === "scripture");
+  const confession = lesson.citations.find((item) => item.kind === "confession");
+  assert.ok(scripture && scripture.kind === "scripture");
+  assert.equal(scripture.reference, "Ruth 2:12");
+  assert.match(scripture.text, /under whose wings thou art come to trust/);
+  assert.ok(confession && confession.kind === "confession");
+  assert.match(confession.label, /Westminster Confession/);
+  assert.equal(confession.detail, "12.1");
+  assert.match(confession.text, /protected, provided for, and chastened by Him as by a Father/);
+  assert.equal(
+    GUEST_HONESTY_COPY,
+    "Lessons and quizzes are AI-generated; Scripture and historical sources are retrieved from the library.",
+  );
+});
+
 test("signed-out landing mounts the preview and leaves the signed-in branch alone", () => {
   const gate = readFileSync(new URL("../../components/AuthGate.tsx", import.meta.url), "utf8");
   const view = readFileSync(new URL("../../components/GuestPreview.tsx", import.meta.url), "utf8");
@@ -69,6 +223,25 @@ test("signed-out landing mounts the preview and leaves the signed-in branch alon
   assert.match(view, /href="\/sign-in"/);
   assert.match(view, /GUEST_HONESTY_COPY/);
   assert.match(view, /LearnPathMap/);
+  assert.match(view, /Try a quick check/);
+  assert.match(view, /See what happens when you miss/);
+  assert.match(view, /Reset sample/);
+  assert.match(view, /pickGuestSample/);
+  assert.match(view, /revealGuestMiss/);
+  assert.match(view, /guestPathNodes/);
+  assert.match(view, /guest-xp-pop/);
+  assert.match(view, /data-guest-xp-chip/);
+  assert.match(view, /data-guest-gap/);
+  assert.doesNotMatch(view, /fetch\(/);
   assert.doesNotMatch(`${gate}\n${view}`, /window\.(alert|confirm|prompt)/);
   assert.doesNotMatch(`${gate}\n${view}`, /<GuestPreview[\s\S]*session === "in"/);
+
+  const map = readFileSync(new URL("../../components/LearnPathMap.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../globals.css", import.meta.url), "utf8");
+  assert.match(map, /highlightId/);
+  assert.match(map, /path-node-enter/);
+  assert.match(map, /data-path-highlight/);
+  assert.match(css, /\.path-node-enter/);
+  assert.match(css, /\.guest-xp-pop/);
+  assert.match(css, /prefers-reduced-motion:\s*reduce/);
 });
