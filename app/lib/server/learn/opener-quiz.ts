@@ -16,7 +16,7 @@ import {
   type OpenerState,
   type OpenerSteer,
 } from "@/app/lib/learn/opener";
-import { LEARN_TEXT_MODEL, llmJson, type LlmEnv } from "./llm";
+import { LEARN_MAX_TOKENS, LEARN_TEXT_MODEL, llmJson, type LlmEnv } from "./llm";
 
 export const OPENER_TIMEOUT_MS = 25_000;
 
@@ -106,9 +106,9 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
       questions: state.questions,
       answers: state.answers,
     }),
-    // Haiku 5.5 counts adaptive thinking against max_tokens. 800 was used up
-    // before the JSON question was written, so the check closed with no text.
-    maxTokens: 4096,
+    // Haiku 5.5 counts adaptive thinking against max_tokens. The shared floor
+    // leaves room for thinking and the JSON question. Effort stays low.
+    maxTokens: LEARN_MAX_TOKENS,
     effort: "low",
     temperature: 0.4,
     meta: { planId, stage: "opener" },
