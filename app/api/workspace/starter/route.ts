@@ -13,7 +13,7 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const body = (await request.json().catch(() => ({}))) as { id?: unknown };
-    const starterId = typeof body.id === "string" && body.id.trim() ? body.id.trim() : "ruth";
+    const starterId = typeof body.id === "string" && body.id.trim() ? body.id.trim() : "john";
     const libraryEnv = env as unknown as LibraryEnv;
     const result = await seedStarterIntoWorkspace(userWorkspaceStub(auth.userId), libraryEnv, starterId, Date.now());
     if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
