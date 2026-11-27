@@ -46,7 +46,7 @@ export function LearnIntakeStep({
   const [starting, setStarting] = useState(false);
   const feedRef = useRef<HTMLOListElement>(null);
   const [heartbeat, setHeartbeat] = useState<Heartbeat | null>(null);
-  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(true);
   const [heartbeatReceivedAt, setHeartbeatReceivedAt] = useState<number | null>(null);
   const completedRef = useRef(false);
   const studyReadyRef = useRef(false);
@@ -114,10 +114,6 @@ export function LearnIntakeStep({
     };
   }, [planId, refresh, finish]);
 
-  useEffect(() => {
-    feedRef.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [events.length]);
-
   const start = useCallback(
     async ({ topic, notes, passages, photos, perspective, includeScripture, makeDefault }: StartPayload) => {
       setError(null);
@@ -175,8 +171,8 @@ export function LearnIntakeStep({
   const failed = snapshot?.status === "failed" || !!error;
 
   useEffect(() => {
-    if (failed) setNotesOpen(true);
-  }, [failed]);
+    feedRef.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [events.length, failed]);
 
   const feed = useMemo(() => events.filter((e) => e.message), [events]);
 
@@ -194,8 +190,14 @@ export function LearnIntakeStep({
       </header>
 
       {!failed && snapshot?.status !== "complete" && snapshot?.status !== "partial" ? (
-        <>
-          <PathBuildCard milestones={milestones} lessonOneReady={lessonOneReady} />
+        <div
+          className={`overflow-hidden rounded-2xl border bg-[var(--sidebar)] ${
+            lessonOneReady
+              ? "study-ready border-[color-mix(in_srgb,var(--accent)_55%,var(--line))]"
+              : "border-[var(--line)]"
+          }`}
+        >
+          <PathBuildCard embedded milestones={milestones} lessonOneReady={lessonOneReady} />
           <StillWorking
             hideLamp
             stage={currentStage}
@@ -203,31 +205,33 @@ export function LearnIntakeStep({
             heartbeatReceivedAt={heartbeatReceivedAt}
             startedAt={events[0]?.at ?? heartbeatReceivedAt ?? Date.now()}
           />
-        </>
+        </div>
       ) : null}
 
-      <details
-        className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--sidebar)]"
-        open={notesOpen}
-        onToggle={(event) => setNotesOpen(event.currentTarget.open)}
-      >
-        <summary className="flex min-h-11 cursor-pointer list-none items-center px-4 text-sm text-[var(--ink-muted)] [&::-webkit-details-marker]:hidden">
-          Stage notes
-        </summary>
-        <ol
-          ref={feedRef}
-          className="flex max-h-48 flex-col gap-1 overflow-x-clip overflow-y-auto border-t border-[var(--line)] p-4 font-mono text-xs leading-relaxed [scrollbar-gutter:stable] sm:max-h-[420px]"
-          aria-live="polite"
+      {failed ? (
+        <details
+          className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--sidebar)]"
+          open={notesOpen}
+          onToggle={(event) => setNotesOpen(event.currentTarget.open)}
         >
-          {feed.length === 0 ? <li className="text-[var(--ink-muted)]">Waiting for the first stage…</li> : null}
-          {feed.map((ev) => (
-            <li key={ev.seq} className="flex min-w-0 gap-3">
-              <span className="w-16 shrink-0 text-[var(--ink-muted)]">{ev.stage}</span>
-              <span className={`min-w-0 break-words ${ev.stage === "error" ? "text-[#c0533f]" : "text-[var(--ink)]"}`}>{ev.message}</span>
-            </li>
-          ))}
-        </ol>
-      </details>
+          <summary className="flex min-h-11 cursor-pointer list-none items-center px-4 text-sm text-[var(--ink-muted)] [&::-webkit-details-marker]:hidden">
+            Stage notes
+          </summary>
+          <ol
+            ref={feedRef}
+            className="flex max-h-48 flex-col gap-1 overflow-x-clip overflow-y-auto border-t border-[var(--line)] p-4 font-mono text-xs leading-relaxed [scrollbar-gutter:stable] sm:max-h-[420px]"
+            aria-live="polite"
+          >
+            {feed.length === 0 ? <li className="text-[var(--ink-muted)]">Waiting for the first stage…</li> : null}
+            {feed.map((ev) => (
+              <li key={ev.seq} className="flex min-w-0 gap-3">
+                <span className="w-16 shrink-0 text-[var(--ink-muted)]">{ev.stage}</span>
+                <span className={`min-w-0 break-words ${ev.stage === "error" ? "text-[#c0533f]" : "text-[var(--ink)]"}`}>{ev.message}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
 
       {failed ? (
         <div className="flex flex-col gap-3">

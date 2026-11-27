@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { Heartbeat, LearnStage } from "../lib/learn/types";
 
 /**
- * "Still working" indicator for plan generation.
- * Whimsy (lamp + captions) is decoration; the facts under it come from server heartbeats:
- * what is running right now, model/search call counts, and time since the server last did work.
- * If heartbeats stop, the lamp dims and the copy says so plainly.
+ * Live status for plan generation.
+ * The facts come from server heartbeats: what is running right now, and how long
+ * since the server last did work. Model-call counts stay secondary.
+ * If heartbeats stop, the copy says so plainly.
  */
 
 const CAPTIONS: Partial<Record<LearnStage, string[]>> = {
@@ -61,7 +61,7 @@ type Props = {
   /** Client receive time of the latest heartbeat (server clocks can drift). */
   heartbeatReceivedAt: number | null;
   startedAt: number;
-  /** The path card already shows the lamp. This strip keeps the live facts. */
+  /** Building screen: facts only, no illustrated lamp or rotating caption. */
   hideLamp?: boolean;
 };
 
@@ -76,10 +76,11 @@ export function StillWorking({ stage, heartbeat, heartbeatReceivedAt, startedAt,
 
   const captions = useMemo(() => (stage && CAPTIONS[stage]) || FALLBACK, [stage]);
   useEffect(() => {
+    if (hideLamp) return;
     setCaptionIndex(0);
     const t = setInterval(() => setCaptionIndex((i) => i + 1), 7000);
     return () => clearInterval(t);
-  }, [captions]);
+  }, [captions, hideLamp]);
   const caption = captions[captionIndex % captions.length];
 
   const silence = heartbeatReceivedAt ? now - heartbeatReceivedAt : now - startedAt;
@@ -102,9 +103,20 @@ export function StillWorking({ stage, heartbeat, heartbeatReceivedAt, startedAt,
   else if (idle !== null && idle > 20_000) status = `Between steps; next one is queued (${ago(idle)} since last activity).`;
   else status = "Handing off to the next step…";
 
+  const dot =
+    connection === "live" ? "bg-[#6aa77d]" : connection === "quiet" ? "bg-[#d4a84a]" : "bg-[#c0533f]";
+  const signal = connection === "live" ? "Live" : connection === "quiet" ? "Quiet" : "No signal";
+  const calls = heartbeat
+    ? `${heartbeat.calls.llm} model calls${heartbeat.calls.exa ? ` · ${heartbeat.calls.exa} searches` : ""}`
+    : null;
+
   return (
     <div
-      className="flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3"
+      className={
+        hideLamp
+          ? "border-t border-[var(--line)] px-4 py-3.5 sm:px-6"
+          : "flex items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3"
+      }
       role="status"
       aria-live="polite"
     >
@@ -131,30 +143,30 @@ export function StillWorking({ stage, heartbeat, heartbeatReceivedAt, startedAt,
       )}
 
       <div className="min-w-0 flex-1">
-        <p className="study-serif break-words text-sm italic text-[var(--ink)]" key={caption}>
-          {caption}
+        {hideLamp ? null : (
+          <p className="study-serif break-words text-sm italic text-[var(--ink)]" key={caption}>
+            {caption}
+          </p>
+        )}
+        <p className={`${hideLamp ? "text-sm leading-relaxed" : "mt-0.5 text-xs"} ${connection === "lost" ? "text-[#c0533f]" : hideLamp ? "text-[var(--ink)]" : "text-[var(--ink-muted)]"}`}>
+          {status}
         </p>
-        <p className={`mt-0.5 text-xs ${connection === "lost" ? "text-[#c0533f]" : "text-[var(--ink-muted)]"}`}>{status}</p>
-        <p className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-[var(--ink-muted)]">
-          <span className="flex items-center gap-1.5">
-            <span
-              className={`inline-block size-1.5 rounded-full ${
-                connection === "live" ? "bg-[#6aa77d]" : connection === "quiet" ? "bg-[#d4a84a]" : "bg-[#c0533f]"
-              }`}
-            />
-            {connection === "live" ? "Live" : connection === "quiet" ? "Quiet" : "No signal"}
+        <p className={`${hideLamp ? "mt-2" : "mt-1"} flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] leading-relaxed text-[var(--ink-muted)]`}>
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`inline-block size-1.5 rounded-full ${dot}`} />
+            {signal}
           </span>
-          {heartbeat ? (
-            <span>
-              {heartbeat.calls.llm} model calls{heartbeat.calls.exa ? ` · ${heartbeat.calls.exa} searches` : ""}
-            </span>
-          ) : null}
           {heartbeat?.lessonsTotal ? (
             <span>
               {heartbeat.lessonsDone}/{heartbeat.lessonsTotal} lessons
             </span>
           ) : null}
           <span>{ago(now - startedAt)} elapsed</span>
+          {calls ? (
+            <span className={hideLamp ? "text-[10px] tracking-[0.01em] text-[color-mix(in_srgb,var(--ink-muted)_58%,transparent)]" : undefined}>
+              {calls}
+            </span>
+          ) : null}
         </p>
       </div>
     </div>
