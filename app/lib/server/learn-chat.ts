@@ -1,3 +1,4 @@
+import { runWorkersAi, workersGatewayCall } from "./ai-gateway";
 import { callAnthropic, learnModelId, readAnthropicText, type LlmEnv } from "./learn/llm";
 import { SOURCE_TEXT_RULE } from "./learn/source-policy";
 import type { LearnChatContext, LearnChatInput, LearnChatMessage, SerializedLesson } from "../learn/agent-context";
@@ -226,14 +227,16 @@ export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Prom
     return onceText(await readAnthropicText(result));
   }
 
-  const upstream = (await env.AI.run(
-    model as Parameters<Ai["run"]>[0],
+  const upstream = (await runWorkersAi(
+    env.AI,
+    model,
     {
       messages: [{ role: "system", content: system }, ...history],
       stream: true,
       max_tokens: 1800,
       temperature: 0.45,
-    } as never,
+    },
+    workersGatewayCall(env.AI_GATEWAY_ID, { stage: "chat" }),
   )) as unknown as ReadableStream<Uint8Array>;
 
   return textStreamFrom(upstream);

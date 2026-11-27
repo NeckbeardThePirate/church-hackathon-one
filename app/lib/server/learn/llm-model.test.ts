@@ -82,3 +82,41 @@ test("scope JSON accepts a fenced Haiku gateway response", async () => {
   assert.equal(sentModel, "claude-haiku-5-5");
   assert.equal(sentAuth, true);
 });
+
+test("Workers AI JSON calls forward the gateway and fall back on auth errors", async () => {
+  const calls: unknown[] = [];
+  const env = {
+    AI_GATEWAY_ID: "study-buddy",
+    LEARN_MODEL_PLANNER: "@cf/example/model",
+    AI: {
+      async run(_model: string, _input: unknown, options?: unknown) {
+        calls.push(options);
+        if (calls.length === 1) throw new Error("401 cf-aig unauthorized");
+        return { response: '{"topic":"prayer"}' };
+      },
+    },
+  } as unknown as LlmEnv;
+
+  const value = await llmJson(env, {
+    role: "planner",
+    system: "Return scope JSON.",
+    user: "How to pray the Psalms",
+    meta: { planId: "plan-1", stage: "scope" },
+    validate: (raw) => {
+      const record = raw as { topic?: string };
+      if (record.topic !== "prayer") throw new Error("topic mismatch");
+      return record;
+    },
+  });
+
+  assert.equal(value.topic, "prayer");
+  assert.deepEqual(calls[0], {
+    gateway: {
+      id: "study-buddy",
+      skipCache: false,
+      metadata: { planId: "plan-1", stage: "scope", lessonId: null, attempt: 1 },
+    },
+  });
+  assert.equal(calls[1], undefined);
+  assert.equal(calls.length, 2);
+});

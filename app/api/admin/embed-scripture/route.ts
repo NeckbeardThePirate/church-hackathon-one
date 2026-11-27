@@ -30,13 +30,23 @@ export async function POST(request: Request): Promise<Response> {
     const result =
       corpus === "fathers" || corpus === "confessions"
         ? await embedLibraryPage(
-            { AI: env.AI, BIBLE: env.BIBLE, LIBRARY_VECTORS: env.LIBRARY_VECTORS },
+            {
+              AI: env.AI,
+              AI_GATEWAY_ID: env.AI_GATEWAY_ID,
+              BIBLE: env.BIBLE,
+              LIBRARY_VECTORS: env.LIBRARY_VECTORS,
+            },
             corpus,
             after,
             limit,
           )
         : await embedVersePage(
-            { AI: env.AI, BIBLE: env.BIBLE, SCRIPTURE_VECTORS: env.SCRIPTURE_VECTORS },
+            {
+              AI: env.AI,
+              AI_GATEWAY_ID: env.AI_GATEWAY_ID,
+              BIBLE: env.BIBLE,
+              SCRIPTURE_VECTORS: env.SCRIPTURE_VECTORS,
+            },
             after,
             limit,
           );
