@@ -3,17 +3,18 @@
  * Static on purpose: no D1 read, no session, and nothing to write.
  * The quick check is client state on top of that bundle. A miss only
  * adds a sample gap to the map in memory.
- * Scripture is the King James Version. Confession lines are the Westminster Confession.
+ * Scripture is the Berean Study Bible. Library lines are Matthew Henry,
+ * the Westminster Confession, and Augustine on this Gospel.
  */
 
 import type { PathMapNode } from "./path-map.ts";
 
 export const GUEST_HONESTY_COPY = "This lesson is partially AI generated.";
 
-export const GUEST_PATH_TITLE = "The Book of Ruth";
+export const GUEST_PATH_TITLE = "The Gospel of John";
 
 /** The step a judge sees open when the landing first paints. */
-export const GUEST_OPEN_LESSON_ID = "ruth-field";
+export const GUEST_OPEN_LESSON_ID = "john-written";
 
 /** Header XP before the sample check awards anything. */
 export const GUEST_SAMPLE_BASE_XP = 60;
@@ -22,7 +23,7 @@ export const GUEST_SAMPLE_BASE_XP = 60;
 export const GUEST_SAMPLE_CHECK_XP = 5;
 
 /** Practice gap that exists only after a miss. Not part of the bundled path. */
-export const GUEST_SAMPLE_GAP_ID = "gap-ruth-wings";
+export const GUEST_SAMPLE_GAP_ID = "gap-john-believe";
 
 export type GuestCheckChoice = {
   id: string;
@@ -39,20 +40,20 @@ export type GuestSampleQuestion = {
   opened: string;
 };
 
-/** One bundled question from The field of Boaz. Graded in the browser. */
+/** One bundled question from Written that you may believe. Graded in the browser. */
 export const GUEST_SAMPLE_QUESTION: GuestSampleQuestion = {
   lessonId: GUEST_OPEN_LESSON_ID,
-  prompt: "Boaz says Ruth has come to trust under what?",
+  prompt: "John says these signs were written so that you may believe Jesus is what?",
   choices: [
-    { id: "wings", label: "The wings of the God of Israel" },
-    { id: "gate", label: "The gate of the nearer kinsman" },
-    { id: "roof", label: "The roof of her mother’s house" },
+    { id: "christ", label: "The Christ, the Son of God" },
+    { id: "prophet", label: "A prophet only, until the temple is rebuilt" },
+    { id: "priest", label: "The high priest of Aaron’s line" },
   ],
-  correctId: "wings",
+  correctId: "christ",
   encourage:
-    "Yes. Boaz is naming the God she has come to trust. She is under the wings of the God of Israel.",
-  miss: "Not that one. The blessing in the field is the wings of the God of Israel. A practice step is now on the path for that line.",
-  opened: "This is what a miss does. A practice step is now on the path for the wings of the God of Israel.",
+    "Yes. The signs are written so that you may believe that Jesus is the Christ, the Son of God, and that by believing you may have life in His name.",
+  miss: "Not that one. John names the Christ, the Son of God. A practice step is now on the path for that line.",
+  opened: "This is what a miss does. A practice step is now on the path for the Christ, the Son of God.",
 };
 
 export type GuestSamplePhase = "idle" | "correct" | "missed" | "opened";
@@ -72,7 +73,7 @@ export type GuestSampleState = {
 export const GUEST_SAMPLE_GAP_NODE: PathMapNode = {
   id: GUEST_SAMPLE_GAP_ID,
   kind: "gap",
-  title: "Practice: under his wings",
+  title: "Practice: that you may believe",
   order: 3,
   state: "available",
   unmet: [],
@@ -91,15 +92,16 @@ export type GuestScriptureCitation = {
   note: string;
 };
 
-export type GuestConfessionCitation = {
-  kind: "confession";
+export type GuestLibraryCitation = {
+  kind: "library";
+  source: "confession" | "father" | "commentary";
   label: string;
   detail: string;
   text: string;
   note: string;
 };
 
-export type GuestCitation = GuestScriptureCitation | GuestConfessionCitation;
+export type GuestCitation = GuestScriptureCitation | GuestLibraryCitation;
 
 export type GuestLessonPreview = {
   id: string;
@@ -115,9 +117,9 @@ export type GuestLessonPreview = {
 
 export const GUEST_PATH_NODES: readonly PathMapNode[] = [
   {
-    id: "ruth-bethlehem",
+    id: "john-word",
     kind: "core",
-    title: "Out of Bethlehem",
+    title: "The Word with God",
     order: 1,
     state: "mastered",
     unmet: [],
@@ -127,9 +129,9 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     building: false,
   },
   {
-    id: "ruth-vow",
+    id: "john-flesh",
     kind: "core",
-    title: "Ruth's vow",
+    title: "The Word made flesh",
     order: 2,
     state: "mastered",
     unmet: [],
@@ -139,21 +141,21 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     building: false,
   },
   {
-    id: "gap-ruth-hesed",
+    id: "gap-john-flesh",
     kind: "gap",
     title: "Practice lesson ready",
     order: 2,
     state: "available",
     unmet: [],
-    parentId: "ruth-vow",
+    parentId: "john-flesh",
     current: false,
     estimatedMinutes: 20,
     building: false,
   },
   {
-    id: "ruth-field",
+    id: "john-written",
     kind: "core",
-    title: "The field of Boaz",
+    title: "Written that you may believe",
     order: 3,
     state: "in-progress",
     unmet: [],
@@ -163,24 +165,24 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     building: false,
   },
   {
-    id: "ruth-gate",
+    id: "john-sea",
     kind: "core",
-    title: "The nearer kinsman",
+    title: "Breakfast by the sea",
     order: 4,
     state: "locked",
-    unmet: [{ id: "ruth-field", title: "The field of Boaz" }],
+    unmet: [{ id: "john-written", title: "Written that you may believe" }],
     parentId: null,
     current: false,
     estimatedMinutes: 30,
     building: false,
   },
   {
-    id: "ruth-line",
+    id: "john-sheep",
     kind: "core",
-    title: "The line of David",
+    title: "Feed my sheep",
     order: 5,
     state: "locked",
-    unmet: [{ id: "ruth-gate", title: "The nearer kinsman" }],
+    unmet: [{ id: "john-sea", title: "Breakfast by the sea" }],
     parentId: null,
     current: false,
     estimatedMinutes: 25,
@@ -193,9 +195,9 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     order: 6,
     state: "locked",
     unmet: [
-      { id: "ruth-field", title: "The field of Boaz" },
-      { id: "ruth-gate", title: "The nearer kinsman" },
-      { id: "ruth-line", title: "The line of David" },
+      { id: "john-written", title: "Written that you may believe" },
+      { id: "john-sea", title: "Breakfast by the sea" },
+      { id: "john-sheep", title: "Feed my sheep" },
     ],
     parentId: null,
     current: false,
@@ -204,105 +206,109 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
 ];
 
 const LESSONS: Record<string, GuestLessonPreview> = {
-  "ruth-bethlehem": {
-    id: "ruth-bethlehem",
+  "john-word": {
+    id: "john-word",
     kicker: "Lesson 1 · mastered",
-    title: "Out of Bethlehem",
+    title: "The Word with God",
     excerpt: [
-      "A famine sends Elimelech’s family from Bethlehem into Moab. The story does not hurry past the cost. Elimelech dies, then both sons, and Naomi is left with two Moabite daughters-in-law and no heir to carry the name home.",
-      "When she walks back into town she asks to be called Mara, bitter. This lesson stays with that sentence. It does not tidy her grief. The verse underneath is the text she speaks, retrieved for the lesson rather than written over it.",
+      "John opens before Bethlehem. The first sentence does not start with a birth. It starts with the Word, who already was. The reading says the Word was with God, and the Word was God, and that all things were made through Him.",
+      "Those are two claims, not one. “With God” keeps a distinction. “Was God” refuses to make the Word a lesser being. Matthew Henry, on this opening, keeps both. He says a turn to Christ is not a turn away from God, because Christ is with God and is God. The lesson sets that sentence beside the verse and does not let the commentary replace it.",
     ],
     citations: [
       {
         kind: "scripture",
-        reference: "Ruth 1:20-21",
-        text: "And she said unto them, Call me not Naomi, call me Mara: for the Almighty hath dealt very bitterly with me. I went out full, and the LORD hath brought me home again empty: why then call ye me Naomi, seeing the LORD hath testified against me, and the Almighty hath afflicted me?",
-        note: "Naomi’s own words at the gate of Bethlehem. King James Version.",
+        reference: "John 1:1-3",
+        text: "In the beginning was the Word, and the Word was with God, and the Word was God. He was with God in the beginning. Through Him all things were made, and without Him nothing was made that has been made.",
+        note: "The opening claims: the Word was with God, and the Word was God, and all things were made through Him. Berean Study Bible.",
       },
       {
-        kind: "confession",
-        label: CONFESSION,
-        detail: "5.1",
-        text: "God the great Creator of all things doth uphold, direct, dispose, and govern all creatures, actions, and things, from the greatest even to the least, by His most wise and holy providence.",
-        note: "The confession’s chapter on providence. The lesson sets Naomi’s cry beside it and does not pretend the confession erases the verse.",
+        kind: "library",
+        source: "commentary",
+        label: "Matthew Henry",
+        detail: "John 1:1–4",
+        text: "The Word was with God, and the Word was God. Let none say that when we invite them to Christ we would draw them from God, for Christ is with God and is God; it is repeated in v. 2: the same, the very same that we believe in and preach, was in the beginning with God, that is, he was so from eternity. In the beginning the world was from God, as it was created by him; but the Word was with God, as ever with him.",
+        note: "Commentary on the Whole Bible, on this prologue. Henry is not a second author of the verse. The lesson places his sentence beside it.",
       },
     ],
     review: "Spaced review · due in 6 days",
     xp: "30 XP",
   },
-  "ruth-vow": {
-    id: "ruth-vow",
+  "john-flesh": {
+    id: "john-flesh",
     kicker: "Lesson 2 · mastered",
-    title: "Ruth's vow",
+    title: "The Word made flesh",
     excerpt: [
-      "Orpah turns back toward Moab. Ruth does not. Her speech binds her to Naomi’s road, Naomi’s people, and Naomi’s God, before anyone has promised her a husband or a field.",
-      "One word from that world did not stay put on the quiz: hesed, the loyal love that keeps a bond. The practice step under this lesson is ready for that word. The rest of the path waits until you are done with the field.",
+      "Later in the same chapter the Word became flesh and made His dwelling among us. Became, here, is a real human life, not a costume. Hold the two claims together. The Word was God, and the Word became flesh.",
+      "One check on this lesson did not stay put: whether “became flesh” withdraws “was God.” It does not. The practice step under this lesson is ready for that claim. The confession beside the verse is about Christ the Mediator, not a commentary written on John.",
     ],
     citations: [
       {
         kind: "scripture",
-        reference: "Ruth 1:16",
-        text: "And Ruth said, Intreat me not to leave thee, or to return from following after thee: for whither thou goest, I will go; and where thou lodgest, I will lodge: thy people shall be my people, and thy God my God.",
-        note: "The vow, in the King James Version, as the lesson cites it.",
+        reference: "John 1:14",
+        text: "The Word became flesh and made His dwelling among us. We have seen His glory, the glory of the one and only Son from the Father, full of grace and truth.",
+        note: "The Word became flesh and dwelt among us. Berean Study Bible.",
       },
       {
-        kind: "confession",
+        kind: "library",
+        source: "confession",
         label: CONFESSION,
-        detail: "26.1",
-        text: "All saints, that are united to Jesus Christ their Head, by His Spirit, and by faith, have fellowship with Him in His graces, sufferings, death, resurrection, and glory.",
-        note: "Communion of saints. Ruth joins a people; the confession is about those united to Christ. The lesson keeps those two sentences distinct.",
+        detail: "8.2",
+        text: "The Son of God, the second person in the Trinity, being very and eternal God, of one substance and equal with the Father, did, when the fullness of time was come, take upon him man's nature, with all the essential properties, and common infirmities thereof, yet without sin; being conceived by the power of the Holy Ghost, in the womb of the virgin Mary, of her substance. So that two whole, perfect, and distinct natures, the Godhead and the manhood, were inseparably joined together in one person, without conversion, composition, or confusion. Which person is very God, and very man, yet one Christ, the only Mediator between God and man.",
+        note: "Of Christ the Mediator. Two natures in one person. It is not a commentary on John 1. The lesson sets the claim next to “was God” and “became flesh.”",
       },
     ],
     review: "Spaced review · due tomorrow",
     xp: "20 XP",
   },
-  "gap-ruth-hesed": {
-    id: "gap-ruth-hesed",
-    kicker: "Gap lesson · hesed",
+  "gap-john-flesh": {
+    id: "gap-john-flesh",
+    kicker: "Gap lesson · made flesh",
     title: "Practice lesson ready",
     excerpt: [
-      "This short practice stays on the idea the quiz missed. Hesed is not a mood that passes. In Ruth it is the love that stays: Ruth with Naomi, and the kindness Naomi names in Boaz, toward the living and the dead.",
-      "On a signed-in path the practice would end in a few questions drawn from this lesson. Here you can read the excerpt and the sources. Nothing is graded, and nothing is stored.",
+      "This short practice stays on the claim the earlier check missed. The Word was God and became flesh. “Was God” is not withdrawn when “became flesh” is added. Nothing in the verse says he stopped being God.",
+      "Augustine, preaching this Gospel, says the Word was not ashamed to be born of man, and that the Word made flesh became a medicine, so that as by earth we were made blind, by earth we might be healed. He is preaching the incarnation. He does not replace the verse. On a signed-in path the practice would end in a few questions drawn from this lesson. Here you can read the excerpt and the sources. Nothing is graded, and nothing is stored.",
     ],
     citations: [
       {
         kind: "scripture",
-        reference: "Ruth 2:20",
-        text: "And Naomi said unto her daughter in law, Blessed be he of the LORD, who hath not left off his kindness to the living and to the dead.",
-        note: "Naomi names Boaz’s kindness with the same family of words as Ruth’s loyalty. King James Version.",
+        reference: "John 1:14",
+        text: "The Word became flesh and made His dwelling among us. We have seen His glory, the glory of the one and only Son from the Father, full of grace and truth.",
+        note: "The same flesh verse, retrieved again for the practice. Berean Study Bible.",
       },
       {
-        kind: "confession",
-        label: CONFESSION,
-        detail: "7.3",
-        text: "Man, by his fall, having made himself incapable of life by that covenant, the Lord was pleased to make a second, commonly called the covenant of grace.",
-        note: "The confession’s name for the bond God keeps. The practice uses it as a retrieved line, not as a sentence the model invented.",
+        kind: "library",
+        source: "father",
+        label: "Augustine",
+        detail: "Tractates on the Gospel of John",
+        text: "If the Word was not ashamed to be born of man, are men ashamed to be born of God? And because He did this, He cured us; and because He cured us, we see. For this, “that the Word was made flesh, and dwelt among us,” became a medicine unto us, so that as by earth we were made blind, by earth we might be healed; and having been healed, might behold what? “And we beheld,” he says, “His glory, the glory as of the Only-begotten of the Father, full of grace and truth.”",
+        note: "Augustine on this Gospel: the Word made flesh became a medicine. He is preaching John, not replacing the verse.",
       },
     ],
     review: "Spaced review · ready when you are",
     xp: "40 XP",
   },
-  "ruth-field": {
-    id: "ruth-field",
+  "john-written": {
+    id: "john-written",
     kicker: "Lesson 3 · in progress",
-    title: "The field of Boaz",
+    title: "Written that you may believe",
     excerpt: [
-      "Ruth gleans behind the reapers in a field that turns out to be Boaz’s. He has heard what she did for Naomi. He tells the young men not to touch her, and he leaves her water, grain, and a place to work.",
-      "The blessing he speaks is a picture. She has come under the wings of the God of Israel. Read that sentence before the later lessons name the redeemer at the gate. This step is the one in progress.",
+      "John does not say he wrote down every work of Jesus. He says Jesus performed many other signs in the presence of His disciples, which are not written in this book. The ones that are written have a purpose.",
+      "The purpose is the next verse. These are written so that you may believe that Jesus is the Christ, the Son of God, and that by believing you may have life in His name. The lesson keeps both halves: who Jesus is, and the life that believing brings. This step is the one in progress.",
     ],
     citations: [
       {
         kind: "scripture",
-        reference: "Ruth 2:12",
-        text: "The LORD recompense thy work, and a full reward be given thee of the LORD God of Israel, under whose wings thou art come to trust.",
-        note: "Boaz’s blessing over Ruth in his field. King James Version.",
+        reference: "John 20:30-31",
+        text: "Jesus performed many other signs in the presence of His disciples, which are not written in this book. But these are written so that you may believe that Jesus is the Christ, the Son of God, and that by believing you may have life in His name.",
+        note: "Why the signs were written: that you may believe, and that by believing you may have life. Berean Study Bible.",
       },
       {
-        kind: "confession",
+        kind: "library",
+        source: "confession",
         label: CONFESSION,
-        detail: "8.1",
-        text: "It pleased God, in His eternal purpose, to choose and ordain the Lord Jesus, His only begotten Son, to be the Mediator between God and man.",
-        note: "Of Christ the Mediator. Boaz shelters Ruth; the confession speaks of Christ. The lesson places them side by side and does not swap one for the other.",
+        detail: "14.2",
+        text: "By this faith, a Christian believeth to be true whatsoever is revealed in the Word, for the authority of God himself speaking therein; and acteth differently upon that which each particular passage thereof containeth; yielding obedience to the commands, trembling at the threatenings, and embracing the promises of God for this life, and that which is to come. But the principal acts of saving faith are accepting, receiving, and resting upon Christ alone for justification, sanctification, and eternal life, by virtue of the covenant of grace.",
+        note: "Of Saving Faith. The principal acts rest on Christ for eternal life. Not a commentary on John 20. The lesson sets that line beside the book’s purpose and does not swap one for the other.",
       },
     ],
     review: "Spaced review · after the quiz",
@@ -313,22 +319,23 @@ const LESSONS: Record<string, GuestLessonPreview> = {
     kicker: "Gap lesson · just opened",
     title: GUEST_SAMPLE_GAP_NODE.title,
     excerpt: [
-      "This practice stays on the line the check missed. Boaz does not bless Ruth for a gate or a roof. He blesses her for coming to trust under the wings of the God of Israel.",
+      "This practice stays on the line the check missed. John does not say the signs were written to name a prophet only, or a priest of Aaron’s line. He says they were written so that you may believe that Jesus is the Christ, the Son of God, and that by believing you may have life in His name.",
       "On a signed-in path, a miss queues a short lesson like this and cites the library. Here the step is a sample. Nothing is graded, and nothing is stored.",
     ],
     citations: [
       {
         kind: "scripture",
-        reference: "Ruth 2:12",
-        text: "The LORD recompense thy work, and a full reward be given thee of the LORD God of Israel, under whose wings thou art come to trust.",
-        note: "Boaz’s blessing in the field, retrieved again for the line this check is about. King James Version.",
+        reference: "John 20:31",
+        text: "But these are written so that you may believe that Jesus is the Christ, the Son of God, and that by believing you may have life in His name.",
+        note: "The purpose verse, retrieved again for the line this check is about. Berean Study Bible.",
       },
       {
-        kind: "confession",
-        label: CONFESSION,
-        detail: "12.1",
-        text: "All those that are justified, God vouchsafeth, in and for His only Son Jesus Christ, to make partakers of the grace of adoption, by which they are taken into the number, and enjoy the liberties and privileges of the children of God, have His name put upon them, receive the spirit of adoption, have access to the throne of grace with boldness, are enabled to cry, Abba, Father, are pitied, protected, provided for, and chastened by Him as by a Father.",
-        note: "Of Adoption. The practice sets Boaz’s wings beside the confession’s line that the children of God are protected by Him as by a Father. It does not swap Ruth’s verse for the confession.",
+        kind: "library",
+        source: "commentary",
+        label: "Matthew Henry",
+        detail: "John 20:26–31",
+        text: "Here is the design of those that wrote the gospel. Some write books for their diversion, and publish them for their profit or applause, others to oblige the Athenian humour, others to instruct the world in arts and sciences for their secular advantage; but the evangelists wrote without any view of temporal benefit to themselves or others, but to bring men to Christ and heaven, and, in order to this, to persuade men to believe; and for this they took the most fitting methods, they brought to the world a divine revelation, supported with its due evidences.",
+        note: "Commentary on the Whole Bible, on John 20:31. Henry says the evangelists wrote to persuade men to believe. The practice sets that sentence beside the verse. It does not swap John’s line for the commentary.",
       },
     ],
     review: "Spaced review · after this practice",

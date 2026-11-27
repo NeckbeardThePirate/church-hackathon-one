@@ -23,6 +23,7 @@ import {
   type GuestLessonPreview,
   type GuestSampleState,
 } from "../lib/learn/guest-preview";
+import { librarySourceLabel } from "../lib/learn/types";
 import { LearnPathMap } from "./LearnPathMap";
 import { LegalLinks } from "./LegalLinks";
 
@@ -71,8 +72,8 @@ function CitationList({ citations }: { citations: readonly GuestCitation[] }) {
             <ScriptureCitation item={item} />
           </li>
         ) : (
-          <li key={`confession-${item.detail}`}>
-            <ConfessionCitation item={item} />
+          <li key={`${item.source}-${item.label}-${item.detail}`}>
+            <LibraryCitation item={item} />
           </li>
         ),
       )}
@@ -87,14 +88,14 @@ function ScriptureCitation({ item }: { item: Extract<GuestCitation, { kind: "scr
       aria-label={`Scripture: ${item.reference}`}
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Scripture · retrieved</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Berean Study Bible · retrieved</p>
         <a
           href={bibleGatewayEsvUrl(item.reference)}
           target="_blank"
           rel="noopener noreferrer"
           className="font-medium text-[color-mix(in_srgb,var(--accent)_85%,var(--ink))] underline-offset-2 hover:underline"
         >
-          <span className="break-words">{item.reference} on Bible Gateway</span>
+          <span className="break-words">{item.reference} (ESV on Bible Gateway)</span>
         </a>
       </div>
       <p className="text-sm leading-relaxed text-[var(--ink)]">{item.text}</p>
@@ -103,10 +104,12 @@ function ScriptureCitation({ item }: { item: Extract<GuestCitation, { kind: "scr
   );
 }
 
-function ConfessionCitation({ item }: { item: Extract<GuestCitation, { kind: "confession" }> }) {
+function LibraryCitation({ item }: { item: Extract<GuestCitation, { kind: "library" }> }) {
   return (
     <div className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--sidebar)_90%,var(--canvas))] px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Confession · retrieved</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
+        {librarySourceLabel(item.source)} · retrieved
+      </p>
       <p className="mt-1 text-sm font-medium text-[var(--ink)]">
         {item.label}
         <span className="font-normal text-[var(--ink-muted)]"> · {item.detail}</span>
@@ -457,7 +460,7 @@ export function GuestPreview() {
           <p className="mt-3 max-w-xl text-sm leading-relaxed text-[var(--ink)]">
             A read-only look at a StudyBuddy path. Open a lesson for the excerpt, the sources, and a spaced-review chip. The
             lesson in progress includes a quick check. This copy is bundled so you can look around with no account. On your own
-            path, Scripture and the confessions are retrieved from the library.
+            path, Scripture and historical sources are retrieved from the library.
           </p>
           <button type="button" onClick={openCheck} className={`${textLinkClass} mt-3 lg:hidden`}>
             Try a quick check
