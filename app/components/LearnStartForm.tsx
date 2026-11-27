@@ -26,6 +26,8 @@ type Props = {
   starting: boolean;
   error: string | null;
   onStart: (payload: StartPayload) => void;
+  /** Inside the first-run page. The parent already introduced the task. */
+  embedded?: boolean;
 };
 
 type Photo = {
@@ -42,7 +44,7 @@ const FIELD =
 
 const LABEL = "text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]";
 
-export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
+export function LearnStartForm({ projectId, starting, error, onStart, embedded = false }: Props) {
   const [topic, setTopic] = useState("");
   const [notes, setNotes] = useState("");
   const [passageInput, setPassageInput] = useState("");
@@ -198,15 +200,23 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={onDrop}
-      className={`mx-auto flex w-full max-w-[640px] flex-col gap-6 overflow-x-clip px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-4 sm:px-10 sm:pt-8 ${
-        dragging ? "rounded-2xl outline-dashed outline-2 outline-offset-[-8px] outline-[var(--accent)]" : ""
-      }`}
+      className={
+        embedded
+          ? `flex w-full flex-col gap-5 overflow-x-clip ${
+              dragging ? "rounded-2xl outline-dashed outline-2 outline-offset-[-8px] outline-[var(--accent)]" : ""
+            }`
+          : `mx-auto flex w-full max-w-[640px] flex-col gap-6 overflow-x-clip px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-4 sm:px-10 sm:pt-8 ${
+              dragging ? "rounded-2xl outline-dashed outline-2 outline-offset-[-8px] outline-[var(--accent)]" : ""
+            }`
+      }
     >
-      <header className="flex flex-col gap-2">
-        <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">New learn path</p>
-        <h1 className="break-words text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-4xl">What do you want to learn?</h1>
-        <SourceNote place="intake" />
-      </header>
+      {embedded ? null : (
+        <header className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">New learn path</p>
+          <h1 className="break-words text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-4xl">What do you want to learn?</h1>
+          <SourceNote place="intake" />
+        </header>
+      )}
 
       <div className="flex flex-col gap-5">
         <input
@@ -223,7 +233,7 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
           aria-label="Notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          rows={9}
+          rows={embedded ? 5 : 9}
           maxLength={MAX_NOTES}
           placeholder="Notes, goals, or what you already know"
           className={`${FIELD} min-h-48 resize-y [scrollbar-gutter:stable]`}

@@ -218,6 +218,18 @@ test("MOCK_AI builds one tagged gap lesson after its parent and ignores a second
   assert.equal(gap.estimatedMinutes, 20);
   assert.equal(gap.objectives[0], "Review Faith");
   assert.ok(gap.quiz.length >= 3 && gap.quiz.length <= 4);
+  assert.ok(gap.quiz.some((item) => item.kind === "mc"));
+  assert.ok(gap.quiz.some((item) => item.kind === "short"));
+  const slots = gap.quiz.flatMap((item) =>
+    item.kind === "mc" && item.choices ? [item.choices.indexOf(item.answer)] : [],
+  );
+  assert.ok(slots.length >= 2);
+  assert.equal(slots.every((slot) => slot === 1), false);
+  assert.ok(new Set(slots).size > 1);
+  for (const item of gap.quiz) {
+    if (item.kind !== "mc" || !item.choices) continue;
+    assert.ok(item.choices.includes(item.answer));
+  }
   for (const item of gap.quiz) {
     assert.equal(item.conceptId, "l1-faith");
     assert.equal(item.conceptLabel, "Faith");

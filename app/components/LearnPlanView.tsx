@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { bibleGatewayEsvUrl } from "../lib/bible/bible-gateway";
+import { visibleCitationNote } from "../lib/learn/citation-note";
 import { gradeShortAnswerLocal, type GradeResult } from "../lib/learn/grade-answer";
 import { lessonMasteryPercent, xpReason, type DailyGoalStatus, type XpEventKind } from "../lib/learn/learner-stats";
 import { postLearnAttempt } from "../lib/learn/post-attempt";
@@ -202,6 +203,12 @@ function ResourceCard({
   );
 }
 
+function CitationNote({ note }: { note: string }) {
+  const caption = visibleCitationNote(note);
+  if (!caption) return null;
+  return <p className="mt-2 text-sm italic text-[var(--ink-muted)]">{caption}</p>;
+}
+
 function LibraryCallout({ item }: { item: LibraryCitation }) {
   const heading = item.condemned ? `${item.label} · condemned` : item.label;
   const origin = item.textSource === "bundled" ? "bundled" : "retrieved";
@@ -215,7 +222,7 @@ function LibraryCallout({ item }: { item: LibraryCitation }) {
         {item.detail ? <span className="font-normal text-[var(--ink-muted)]"> · {item.detail}</span> : null}
       </p>
       <p className="mt-2 text-sm leading-relaxed text-[var(--ink)]">{item.text}</p>
-      {item.note ? <p className="mt-2 text-sm italic text-[var(--ink-muted)]">{item.note}</p> : null}
+      <CitationNote note={item.note} />
     </li>
   );
 }
@@ -244,7 +251,7 @@ function ScriptureCallout({ reading }: { reading: ScriptureReading }) {
         className="bible-callout-body text-sm leading-relaxed text-[var(--ink)]"
         dangerouslySetInnerHTML={{ __html: esc(reading.text) }}
       />
-      {reading.note ? <p className="mt-2 text-sm italic text-[var(--ink-muted)]">{reading.note}</p> : null}
+      <CitationNote note={reading.note} />
     </aside>
   );
 }
@@ -787,7 +794,7 @@ function LessonBody({
 
       {lesson.objectives.length ? (
         <div className="mt-6" data-read-section>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.06em] text-[var(--ink-muted)]">You will be able to</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.06em] text-[var(--ink-muted)]">What you'll learn</h2>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-[var(--ink)]">
             {lesson.objectives.map((o, i) => (
               <li key={i}>{o}</li>
@@ -1196,7 +1203,6 @@ export function LearnPlanView({
 
   const [progress, setProgress] = useState<LearnPlanProgress>(hydrated);
   const [location, setLocation] = useState<LearnLocation>(() => resolveLocation(plan.lessons, hydrated.location));
-  const [homeView, setHomeView] = useState<"map" | "list">("map");
   const [reviewFocus, setReviewFocus] = useState<LearnReviewFocus | null>(null);
   const [buildStage, setBuildStage] = useState<LearnStage | undefined>(undefined);
   const [buildCounts, setBuildCounts] = useState<{ done: number; total: number } | null>(null);
@@ -1794,12 +1800,6 @@ export function LearnPlanView({
       }),
     };
   }, [plan.lessons, buildStage, buildCounts]);
-  const lessonsArrived = useIdsLeft(
-    plan.lessons
-      .filter((lesson) => lesson.status === "pending")
-      .map((lesson) => lesson.id)
-      .join(","),
-  );
 
   const openPractice = useCallback((lessonId: string) => goLesson(lessonId, "top"), [goLesson]);
   const generatePractice = useCallback(
@@ -1969,108 +1969,21 @@ export function LearnPlanView({
             ) : null}
 
             <section className="mt-10">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-base font-semibold text-[var(--ink)]">Lessons</h2>
-                <div className="flex rounded-lg border border-[var(--line)] p-0.5" role="group" aria-label="Lesson view">
-                  <button
-                    type="button"
-                    aria-pressed={homeView === "map"}
-                    onClick={() => setHomeView("map")}
-                    className={`min-h-11 rounded-md px-3 text-xs font-medium ${
-                      homeView === "map"
-                        ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
-                        : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
-                    }`}
-                  >
-                    Path
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={homeView === "list"}
-                    onClick={() => setHomeView("list")}
-                    className={`min-h-11 rounded-md px-3 text-xs font-medium ${
-                      homeView === "list"
-                        ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
-                        : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
-                    }`}
-                  >
-                    List
-                  </button>
-                </div>
-              </div>
-              {homeView === "map" ? (
-                <LearnPathMap
-                  nodes={derivePathMap({
-                    lessons: plan.lessons,
-                    finalAssessment: plan.finalAssessment,
-                    progress,
-                    scope,
-                    now: Date.now(),
-                  })}
-                  onOpen={(nodeId) => {
-                    if (nodeId === FINAL_LESSON_ID) goFinal();
-                    else goLesson(nodeId);
-                  }}
-                />
-              ) : (
-                <ul className="mt-4 space-y-2">
-                  {plan.lessons.map((lesson) => {
-                    const done = isLessonStepComplete(scope, lesson.id, lesson.quiz.length > 0, progress);
-                    const readPct = readScrollFor(progress, scope, lesson.id);
-                    const quiz = normalizeQuiz(lessonQuizFor(progress, scope, lesson.id), lesson.quiz.length);
-                    const quizAnswered = lesson.quiz.length ? quiz.answers.filter((a) => a.correct !== null).length : 0;
-                    return (
-                      <li key={lesson.id}>
-                        <button
-                          type="button"
-                          onClick={() => goLesson(lesson.id)}
-                          aria-busy={lesson.status === "pending" || undefined}
-                          className={`flex min-h-11 w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-[background-color,border-color,box-shadow] duration-500 sm:px-4 ${
-                            lessonsArrived.has(lesson.id) ? "study-ready " : ""
-                          }${
-                            lesson.status === "pending"
-                              ? "border-dashed border-[color-mix(in_srgb,var(--accent)_50%,var(--line))] bg-[color-mix(in_srgb,var(--sidebar)_88%,var(--canvas))]"
-                              : "border-[var(--line)] bg-[var(--sidebar)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))]"
-                          }`}
-                        >
-                          <StepMark done={done} />
-                          <span className="min-w-0 flex-1">
-                            <span className={`block break-words text-sm font-medium ${lesson.status === "pending" ? "text-[var(--ink-muted)]" : "text-[var(--ink)]"}`}>
-                              Lesson {lesson.order}: {lesson.title}
-                            </span>
-                            <span className="mt-1 block text-xs text-[var(--ink-muted)]">
-                              {lesson.status === "pending"
-                                ? "Building"
-                                : done
-                                  ? "Complete"
-                                  : readPct > 0
-                                    ? `${readPct}% read${lesson.quiz.length ? ` · quiz ${quizAnswered}/${lesson.quiz.length}` : ""}`
-                                    : `${lesson.estimatedMinutes} min${lesson.quiz.length ? ` · ${lesson.quiz.length} quiz questions` : ""}`}
-                            </span>
-                            {lesson.status === "pending" ? (
-                              <span className="study-shimmer mt-2 block h-1 w-24 max-w-full rounded-full bg-[var(--line)]" />
-                            ) : null}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+              <h2 className="text-base font-semibold text-[var(--ink)]">Lessons</h2>
+              <LearnPathMap
+                nodes={derivePathMap({
+                  lessons: plan.lessons,
+                  finalAssessment: plan.finalAssessment,
+                  progress,
+                  scope,
+                  now: Date.now(),
+                })}
+                onOpen={(nodeId) => {
+                  if (nodeId === FINAL_LESSON_ID) goFinal();
+                  else goLesson(nodeId);
+                }}
+              />
             </section>
-
-            {homeView === "list" && hasFinal ? (
-              <section className="mt-8">
-                <button
-                  type="button"
-                  onClick={goFinal}
-                  className="flex w-full items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3 text-left hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))]"
-                >
-                  <StepMark done={isFinalStepComplete(scope, progress, true)} />
-                  <span className="text-sm font-medium text-[var(--ink)]">Final assessment</span>
-                </button>
-              </section>
-            ) : null}
 
             {plan.warnings.length ? (
               <aside className="mt-12 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3 text-sm text-[var(--ink-muted)]">

@@ -2,14 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createProject, defaultTitle, isEmptyLearnPath, isLegacyProject, type Project } from "../lib/projects";
-import { deleteRemoteProject, loadUserWorkspace, putProject } from "../lib/workspace-sync";
+import { deleteRemoteProject, fetchWelcomeStatus, loadUserWorkspace, putProject, saveWelcomeStatus } from "../lib/workspace-sync";
 import { applyXpAwards, dailyGoalStatus, emptyStats, lessonMasteryList, type StatsSnapshot, type XpEvent, type XpEventKind } from "../lib/learn/learner-stats";
 import { claimLegacyProgress, mergeLearnProgress, type LearnLocation, type LearnPlanProgress } from "../lib/learn/plan-progress";
 import { actionTarget, nextLearningAction, pathSummaries, type NextAction } from "../lib/learn/progress-dashboard";
 import { scopeFromProject } from "../lib/learn/progress-scope";
 import { parsePathUrl } from "../lib/learn/path-url";
 import { shouldOfferStarterPath } from "../lib/learn/starter-offer";
-import { isStarterPathId, type StarterPathId } from "../lib/learn/starters";
+import { type StarterPathId } from "../lib/learn/starters";
+import {
+  parseWelcomeStatus,
+  readStoredWelcomeStatus,
+  reconcileWelcomeStatus,
+  shouldShowWelcomeIntro,
+  writeStoredWelcomeStatus,
+  type WelcomeStatus,
+} from "../lib/learn/welcome";
 import { AppShell } from "./AppShell";
 import { ProgressDashboard } from "./ProgressDashboard";
 import type { LearnPlan } from "../lib/learn/types";
@@ -17,8 +25,8 @@ import { ArchivedProjectView } from "./ArchivedProjectView";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { LearnIntakeStep } from "./LearnIntakeStep";
 import { LearnPlanView } from "./LearnPlanView";
-import { StarterPathCard } from "./StarterPathCard";
 import { StudyLoading } from "./StudyLoading";
+import { FirstRunHome, WelcomeOrientation, WelcomePending, WelcomeReplayDialog } from "./WelcomeWalkthrough";
 
 /** "start" is the new-path screen. "building" follows a started (or resumed) plan. */
 type WorkspaceView = "start" | "building" | "path";
@@ -77,9 +85,64 @@ export function WorkspaceApp() {
   const [missingPath, setMissingPath] = useState(false);
   const [starterBusy, setStarterBusy] = useState<StarterPathId | null>(null);
   const [starterError, setStarterError] = useState<string | null>(null);
+  const [welcomeStatus, setWelcomeStatus] = useState<WelcomeStatus>("unseen");
+  const [welcomeReady, setWelcomeReady] = useState(false);
+  const [replayWelcome, setReplayWelcome] = useState(false);
+  const [orienting, setOrienting] = useState(false);
+  const launchedFromGuide = useRef(false);
+  const welcomeStatusRef = useRef<WelcomeStatus>("unseen");
   const persistedRef = useRef<Map<string, string>>(new Map());
   const writeGenRef = useRef<Map<string, number>>(new Map());
   const syncReadyRef = useRef(false);
+
+  const persistWelcome = useCallback((status: Exclude<WelcomeStatus, "unseen">) => {
+    welcomeStatusRef.current = status;
+    setWelcomeStatus(status);
+    writeStoredWelcomeStatus(status);
+    void saveWelcomeStatus(status).catch(() => {
+      /* This browser still remembers the choice if the account save fails. */
+    });
+  }, []);
+
+  const noteGuideLaunch = useCallback(() => {
+    if (!launchedFromGuide.current) return;
+    launchedFromGuide.current = false;
+    setReplayWelcome(false);
+    setOrienting(true);
+    persistWelcome("completed");
+  }, [persistWelcome]);
+
+  const hideWelcomeIntro = useCallback(() => {
+    launchedFromGuide.current = false;
+    setReplayWelcome(false);
+    if (welcomeStatus === "unseen") persistWelcome("dismissed");
+  }, [persistWelcome, welcomeStatus]);
+
+  useEffect(() => {
+    let live = true;
+    const local = readStoredWelcomeStatus();
+    welcomeStatusRef.current = local;
+    setWelcomeStatus(local);
+    if (local !== "unseen") setWelcomeReady(true);
+    void fetchWelcomeStatus()
+      .then((remote) => {
+        if (!live) return;
+        const result = reconcileWelcomeStatus(welcomeStatusRef.current, parseWelcomeStatus(remote));
+        welcomeStatusRef.current = result.status;
+        setWelcomeStatus(result.status);
+        writeStoredWelcomeStatus(result.status);
+        if (result.push) void saveWelcomeStatus(result.push).catch(() => {});
+      })
+      .catch(() => {
+        /* Keep the choice already stored on this browser. */
+      })
+      .finally(() => {
+        if (live) setWelcomeReady(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,6 +275,7 @@ export function WorkspaceApp() {
         const body = (await response.json().catch(() => null)) as { project?: Project; error?: string } | null;
         const project = body?.project;
         if (!response.ok || !project || project.kind !== "learn" || !project.learnPlan || !project.importComplete) {
+          launchedFromGuide.current = false;
           setStarterError(body?.error || "Could not open the starter path.");
           return;
         }
@@ -222,13 +286,15 @@ export function WorkspaceApp() {
         setActiveProjectId(project.id);
         setView(viewForProject(project));
         writePathUrl(project.id, "push");
+        noteGuideLaunch();
       } catch {
+        launchedFromGuide.current = false;
         setStarterError("Could not open the starter path.");
       } finally {
         setStarterBusy(null);
       }
     },
-    [starterBusy, writePathUrl],
+    [noteGuideLaunch, starterBusy, writePathUrl],
   );
 
   const openAction = useCallback(
@@ -432,8 +498,9 @@ export function WorkspaceApp() {
       setActiveProjectId(draft.id);
       setView("building");
       writePathUrl(draft.id, "push");
+      noteGuideLaunch();
     },
-    [draft, writePathUrl],
+    [draft, noteGuideLaunch, writePathUrl],
   );
 
   const updateProject = useCallback((projectId: string, patch: Partial<Project>) => {
@@ -525,6 +592,22 @@ export function WorkspaceApp() {
   const nextAction = useMemo(() => nextLearningAction(dashboardProjects, Date.now()), [dashboardProjects]);
   const goal = dailyGoalStatus(stats, Date.now());
 
+  const noPaths = shouldOfferStarterPath(projects);
+  const quietHome = noPaths && (view === "start" || !activeProject);
+  const showIntro = welcomeReady && shouldShowWelcomeIntro(welcomeStatus, !noPaths, replayWelcome);
+  const welcomePending = quietHome && !welcomeReady;
+
+  const launchStarter = (id: StarterPathId) => {
+    if (starterBusy) return;
+    launchedFromGuide.current = true;
+    void openStarter(id);
+  };
+
+  const launchOwn = (planId: string, topic: string) => {
+    launchedFromGuide.current = true;
+    startedPlan(planId, topic);
+  };
+
   const rebuildPath = useCallback(() => {
     if (!activeProjectId) return;
     updateProject(activeProjectId, { importComplete: false, learnPlanId: undefined });
@@ -588,23 +671,36 @@ export function WorkspaceApp() {
         onNext={() => openAction(nextAction)}
         onShowProgress={showStart}
         onRequestDelete={setPendingDeleteId}
+        focusMode={quietHome}
+        onReplayWelcome={quietHome ? undefined : () => setReplayWelcome(true)}
       >
-        {missingPath && (view === "start" || !activeProject) ? (
+        {orienting && !quietHome ? (
+          <WelcomeOrientation building={view === "building"} onClose={() => setOrienting(false)} />
+        ) : null}
+        {missingPath && (view === "start" || !activeProject) && !quietHome ? (
           <p className="mx-auto w-full max-w-[720px] px-4 pt-14 text-sm text-[var(--ink-muted)] sm:px-10">
             That path isn’t in this workspace.
           </p>
         ) : null}
-        {view === "start" || !activeProject ? (
+        {quietHome ? (
+          welcomePending ? (
+            <WelcomePending />
+          ) : (
+            <FirstRunHome
+              showIntro={showIntro}
+              projectId={draft.id}
+              starterBusy={starterBusy}
+              starterError={starterError}
+              onChooseStarter={launchStarter}
+              onStarted={launchOwn}
+              onComplete={completeLearnPlan}
+              onStudyReady={studyWhileBuilding}
+              onHideIntro={hideWelcomeIntro}
+              onReplayIntro={showIntro ? undefined : () => setReplayWelcome(true)}
+            />
+          )
+        ) : view === "start" || !activeProject ? (
           <div>
-            {shouldOfferStarterPath(projects) ? (
-              <StarterPathCard
-                busyId={starterBusy}
-                error={starterError}
-                onChoose={(id) => {
-                  if (isStarterPathId(id)) void openStarter(id);
-                }}
-              />
-            ) : null}
             <ProgressDashboard
               xp={stats?.xp ?? 0}
               streak={stats?.streak ?? 0}
@@ -664,6 +760,22 @@ export function WorkspaceApp() {
           />
         )}
       </AppShell>
+      {replayWelcome && !quietHome ? (
+        <WelcomeReplayDialog onClose={() => setReplayWelcome(false)}>
+          <FirstRunHome
+            showIntro
+            framed
+            projectId={draft.id}
+            starterBusy={starterBusy}
+            starterError={starterError}
+            onChooseStarter={launchStarter}
+            onStarted={launchOwn}
+            onComplete={completeLearnPlan}
+            onStudyReady={studyWhileBuilding}
+            onHideIntro={() => setReplayWelcome(false)}
+          />
+        </WelcomeReplayDialog>
+      ) : null}
       {pendingDelete ? (
         <ConfirmDialog
           title="Remove this path?"

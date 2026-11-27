@@ -61,12 +61,16 @@ test("a starter with no Bible library uses bundled wording, a gap lesson, and gr
   assert.ok(lessons.every((lesson) => lesson.quiz.length > 0 && lesson.scripture.length > 0 && (lesson.library?.length ?? 0) > 0));
   const hesed = shortItem(lessons, /hesed/i);
   assert.equal(gradeShortAnswerLocal(HESED_PARAPHRASE, hesed.answer).correct, true);
+  for (const lesson of lessons) assertSlotsVary(lesson.quiz, lesson.id);
+  assertSlotsVary(ruth.learnPlan?.finalAssessment ?? [], "ruth final");
 
   const lords = await materializeStarter("lords-prayer", {}, 40);
   assert.equal(lords.title, "The Lord’s Prayer");
   const compare = shortItem(lords.learnPlan?.lessons ?? [], /shared and one varying/i);
   assert.equal(gradeShortAnswerLocal(LORDS_PARAPHRASE, compare.answer).correct, true);
   assert.ok((lords.learnPlan?.finalAssessment.length ?? 0) >= 3);
+  for (const lesson of lords.learnPlan?.lessons ?? []) assertSlotsVary(lesson.quiz, lesson.id);
+  assertSlotsVary(lords.learnPlan?.finalAssessment ?? [], "lords final");
   assert.equal(lords.learnPlan?.lessons.some((lesson) => lesson.kind === "gap" && lesson.title.includes("Line-by-line")), true);
 });
 
@@ -247,6 +251,15 @@ test("the starter route rejects signed-out callers, seeds an empty workspace, an
   assert.equal(workspace.getProject("starter-ruth"), null);
   assert.equal(workspace.getProject("owned")?.title, "Already mine");
 });
+
+function assertSlotsVary(items: readonly { kind: string; choices?: string[]; answer: string }[], label: string) {
+  const slots = items.flatMap((item) => (item.kind === "mc" && item.choices ? [item.choices.indexOf(item.answer)] : []));
+  if (slots.length < 2) return;
+  assert.ok(new Set(slots).size > 1, `${label} correct answers share one slot: ${slots.join(",")}`);
+  for (const item of items) {
+    if (item.kind === "mc" && item.choices) assert.ok(item.choices.includes(item.answer), label);
+  }
+}
 
 function shortItem(lessons: LearnLesson[], question: RegExp): QuizItem {
   const item = lessons.flatMap((lesson) => lesson.quiz).find((quiz) => quiz.kind === "short" && question.test(quiz.question));

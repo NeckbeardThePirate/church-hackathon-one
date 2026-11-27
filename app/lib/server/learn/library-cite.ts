@@ -1,4 +1,5 @@
 import { findBibleReferences } from "@/app/lib/bible/parse-reference";
+import { visibleCitationNote } from "@/app/lib/learn/citation-note";
 import type { LibraryCitation, Perspective } from "@/app/lib/learn/types";
 import { searchConfessions, searchFathers, type ConfessionHit, type FatherHit, type LibraryEnv } from "../library-search";
 import { rankForPerspective } from "./library-rank";
@@ -17,7 +18,7 @@ function toFather(hit: FatherHit): LibraryCitation {
     label: hit.author,
     detail: [hit.work, hit.passage].filter(Boolean).join(" · "),
     text: clip(hit.text, 1200),
-    note: hit.passage ? `Comment on ${hit.passage}.` : "From the retrieved commentary text.",
+    note: "",
     ...(hit.condemned ? { condemned: true } : {}),
     ...(hit.sourceUrl ? { url: hit.sourceUrl } : {}),
   };
@@ -31,7 +32,7 @@ function toConfession(hit: ConfessionHit): LibraryCitation {
     label: label || hit.document,
     detail: hit.title ?? undefined,
     text: clip(hit.text, 1200),
-    note: "Quoted from the confession text stored for this section.",
+    note: "",
     ...(hit.document ? {} : {}),
   };
 }
@@ -173,10 +174,10 @@ function warnDropped(reference: string): void {
   console.warn(`[learn] library reference dropped (did not resolve): ${reference}`);
 }
 
-function connectionNote(note: string, fallback: string, stored: string): string {
+function connectionNote(note: string, stored: string): string {
   const trimmed = note.replace(/\s+/g, " ").trim();
-  if (!trimmed || trimmed.length > 240 || trimmed === stored.replace(/\s+/g, " ").trim()) return fallback;
-  return trimmed;
+  if (!trimmed || trimmed.length > 240 || trimmed === stored.replace(/\s+/g, " ").trim()) return "";
+  return visibleCitationNote(trimmed);
 }
 
 async function lookupLibraryRef(db: D1Database, reference: string, note: string): Promise<LibraryCitation | null> {
@@ -200,7 +201,7 @@ async function lookupLibraryRef(db: D1Database, reference: string, note: string)
       label: label || confessionRow.doc_title,
       detail: confessionRow.title ?? undefined,
       text: clip(confessionRow.text, 1200),
-      note: connectionNote(note, "Quoted from the confession text stored for this section.", confessionRow.text),
+      note: connectionNote(note, confessionRow.text),
     };
   }
   const father = await db
@@ -220,7 +221,7 @@ async function lookupLibraryRef(db: D1Database, reference: string, note: string)
     label: fatherRow.author,
     detail: fatherRow.work ?? undefined,
     text: clip(fatherRow.text, 1200),
-    note: connectionNote(note, "From the retrieved commentary text.", fatherRow.text),
+    note: connectionNote(note, fatherRow.text),
     ...(fatherRow.condemned === 1 ? { condemned: true } : {}),
     ...(fatherRow.source_url ? { url: fatherRow.source_url } : {}),
   };
