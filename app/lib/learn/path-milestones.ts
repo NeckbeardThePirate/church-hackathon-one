@@ -16,6 +16,8 @@ export type MilestoneInput = {
   lessonsDone: number;
   lessonsTotal: number;
   lessonOneReady: boolean;
+  /** Order of the lesson that can actually be opened. Omitted means lesson 1. */
+  readyLessonOrder?: number;
 };
 
 const PAST_OUTLINE = new Set<LearnStage>(["research", "verify", "review", "teach", "check", "critic", "assemble", "done"]);
@@ -68,14 +70,15 @@ export function pathMilestones(input: MilestoneInput): PathMilestone[] {
     state: input.lessonOneReady ? "done" : writing ? "active" : "waiting",
   };
 
+  const openName = `Lesson ${input.readyLessonOrder && input.readyLessonOrder > 0 ? input.readyLessonOrder : 1}`;
   let restDetail = "The later lessons wait until Lesson 1 can be opened.";
   if (pathBound) restDetail = "The path is bound.";
   else if (input.lessonOneReady && remaining > 1) {
-    restDetail = `Lesson 1 is open. ${remaining} lessons are still being written.`;
+    restDetail = `${openName} is open. ${remaining} lessons are still being written.`;
   } else if (input.lessonOneReady && remaining === 1) {
-    restDetail = "Lesson 1 is open. One lesson is still being written.";
+    restDetail = `${openName} is open. One lesson is still being written.`;
   } else if (input.lessonOneReady) {
-    restDetail = "Lesson 1 is open. The last pages are being gathered.";
+    restDetail = `${openName} is open. The last pages are being gathered.`;
   }
 
   const rest: PathMilestone = {

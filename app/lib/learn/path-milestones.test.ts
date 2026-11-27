@@ -46,7 +46,21 @@ test("Lesson 1 ready keeps the rest of the path in the background", () => {
   assert.equal(steps[2]?.state, "done");
   assert.equal(steps[2]?.detail, "Ready to start now.");
   assert.equal(steps[3]?.state, "active");
+  assert.match(steps[3]?.detail ?? "", /Lesson 1 is open/);
   assert.match(steps[3]?.detail ?? "", /3 lessons are still being written/);
+});
+
+test("a later lesson opening first is named, not called Lesson 1", () => {
+  const detail = pathMilestones({
+    lessonsDone: 1,
+    lessonsTotal: 4,
+    lessonOneReady: true,
+    readyLessonOrder: 2,
+    stage: "teach",
+    status: "running",
+  })[3]?.detail;
+  assert.match(detail ?? "", /Lesson 2 is open/);
+  assert.equal(detail?.includes("Lesson 1 is open"), false);
 });
 
 test("a finished path binds the last beat", () => {

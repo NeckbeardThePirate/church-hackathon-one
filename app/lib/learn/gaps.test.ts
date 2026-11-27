@@ -12,6 +12,7 @@ import {
   missedGapConcepts,
   parseGapRequest,
   adoptLiveGapLessons,
+  adoptLivePlan,
   practiceCardHeading,
   practiceCards,
   preserveGapLessons,
@@ -183,6 +184,27 @@ test("a plan snapshot missing a gap lesson plus a live gap renders ready, not Ge
     { ...liveGap, id: "gap-l1-2", status: "pending", teaching: [] },
   ]);
   assert.deepEqual(pending.map((lesson) => lesson.id), ["l1", "l2"]);
+});
+
+test("a pending core lesson picks up the written page from the live plan", () => {
+  const snapshot = {
+    id: "plan-1",
+    lessons: [
+      { id: "l1", kind: "core", status: "pending", teaching: [], quiz: [] },
+      { id: "l2", kind: "core", status: "ok", teaching: ["later"], quiz: ["q"] },
+    ],
+  };
+  const adopted = adoptLivePlan(snapshot, {
+    id: "plan-1",
+    lessons: [
+      { id: "l1", kind: "core", status: "ok", teaching: ["I am the bread of life."], quiz: ["check"] },
+      { id: "l2", kind: "core", status: "pending", teaching: [], quiz: [] },
+    ],
+  });
+  assert.equal(adopted.lessons[0]?.status, "ok");
+  assert.equal(adopted.lessons[0]?.teaching?.[0], "I am the bread of life.");
+  assert.equal(adopted.lessons[1]?.status, "ok");
+  assert.equal(adopted.lessons[1]?.teaching?.[0], "later");
 });
 
 test("a newer plan save keeps a gap lesson it left out", () => {

@@ -303,6 +303,7 @@ type StoredGapLesson = GapLessonRef & {
   title?: string;
   status?: string;
   teaching?: readonly unknown[];
+  quiz?: readonly unknown[];
 };
 
 /** A gap on the live plan is ready once check has saved it. A reserved ticket is not on the plan yet. */
@@ -344,13 +345,45 @@ export function adoptLiveGapLessons<T extends StoredGapLesson>(snapshot: readonl
   return next ?? snapshot;
 }
 
-/** Keep every other plan field. Only the lesson list can gain a live gap. */
+/** A written core lesson replaces a pending shell that has less of the page. */
+function liveCoreRicher(current: StoredGapLesson, live: StoredGapLesson): boolean {
+  if (lessonKind(current) === "gap" || lessonKind(live) === "gap") return false;
+  const currentTeaching = current.teaching?.length ?? 0;
+  const liveTeaching = live.teaching?.length ?? 0;
+  if (liveTeaching > currentTeaching) return true;
+  const currentQuiz = current.quiz?.length ?? 0;
+  const liveQuiz = live.quiz?.length ?? 0;
+  if (current.status === "pending" && liveQuiz > currentQuiz) return true;
+  return current.status === "pending" && live.status != null && live.status !== "pending" && liveTeaching > 0;
+}
+
+/**
+ * Replace a pending core lesson when the live plan has its teaching.
+ * A thinner live copy never overwrites a page that is already written.
+ */
+export function adoptLiveCoreLessons<T extends StoredGapLesson>(snapshot: readonly T[], live: readonly T[]): readonly T[] {
+  let next: T[] | null = null;
+  for (const lesson of live) {
+    if (lessonKind(lesson) === "gap") continue;
+    const list: readonly T[] = next ?? snapshot;
+    const index = list.findIndex((item) => item.id === lesson.id);
+    if (index < 0) continue;
+    if (!liveCoreRicher(list[index]!, lesson)) continue;
+    const copy: T[] = list.slice();
+    copy[index] = lesson;
+    next = copy;
+  }
+  return next ?? snapshot;
+}
+
+/** Keep every other plan field. The lesson list can gain a live gap or a finished core page. */
 export function adoptLivePlan<T extends { id: string; lessons: readonly StoredGapLesson[] }>(
   snapshot: T,
   live: { id?: string; lessons?: readonly StoredGapLesson[] } | null | undefined,
 ): T {
   if (!live || live.id !== snapshot.id || !live.lessons) return snapshot;
-  const lessons = adoptLiveGapLessons(snapshot.lessons, live.lessons as readonly T["lessons"][number][]);
+  const withGaps = adoptLiveGapLessons(snapshot.lessons, live.lessons as readonly T["lessons"][number][]);
+  const lessons = adoptLiveCoreLessons(withGaps, live.lessons as readonly T["lessons"][number][]);
   if (lessons === snapshot.lessons) return snapshot;
   return { ...snapshot, lessons: lessons as T["lessons"] };
 }

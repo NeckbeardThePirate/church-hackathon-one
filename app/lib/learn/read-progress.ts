@@ -37,3 +37,11 @@ export function combineReadPercent(scrollPct: number, sectionPct: number | null,
 export function readPercentMarksDone(percent: number): boolean {
   return percent >= 92;
 }
+
+/** A placeholder page is not a lesson the learner has read. */
+export function lessonCanBeMarkedRead(
+  lesson: { status?: string; teaching?: readonly unknown[] } | null | undefined,
+): boolean {
+  if (!lesson || lesson.status === "pending") return false;
+  return (lesson.teaching?.length ?? 0) > 0;
+}
