@@ -8,6 +8,8 @@ import { claimLegacyProgress, mergeLearnProgress, type LearnLocation, type Learn
 import { actionTarget, nextLearningAction, pathSummaries, type NextAction } from "../lib/learn/progress-dashboard";
 import { scopeFromProject } from "../lib/learn/progress-scope";
 import { parsePathUrl } from "../lib/learn/path-url";
+import { shouldOfferStarterPath } from "../lib/learn/starter-offer";
+import { isStarterPathId, type StarterPathId } from "../lib/learn/starters";
 import { AppShell } from "./AppShell";
 import { ProgressDashboard } from "./ProgressDashboard";
 import type { LearnPlan } from "../lib/learn/types";
@@ -15,6 +17,7 @@ import { ArchivedProjectView } from "./ArchivedProjectView";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { LearnIntakeStep } from "./LearnIntakeStep";
 import { LearnPlanView } from "./LearnPlanView";
+import { StarterPathCard } from "./StarterPathCard";
 import { StudyLoading } from "./StudyLoading";
 
 /** "start" is the new-path screen. "building" follows a started (or resumed) plan. */
@@ -72,6 +75,8 @@ export function WorkspaceApp() {
   const [liveProgress, setLiveProgress] = useState<LearnPlanProgress | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [missingPath, setMissingPath] = useState(false);
+  const [starterBusy, setStarterBusy] = useState<StarterPathId | null>(null);
+  const [starterError, setStarterError] = useState<string | null>(null);
   const persistedRef = useRef<Map<string, string>>(new Map());
   const writeGenRef = useRef<Map<string, number>>(new Map());
   const syncReadyRef = useRef(false);
@@ -187,9 +192,44 @@ export function WorkspaceApp() {
     setActiveProjectId(null);
     setLiveProgress(null);
     setMissingPath(false);
+    setStarterError(null);
     setView("start");
     writePathUrl(null, "push");
   }, [writePathUrl]);
+
+  const openStarter = useCallback(
+    async (id: StarterPathId) => {
+      if (starterBusy) return;
+      setStarterBusy(id);
+      setStarterError(null);
+      try {
+        const response = await fetch("/api/workspace/starter", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        const body = (await response.json().catch(() => null)) as { project?: Project; error?: string } | null;
+        const project = body?.project;
+        if (!response.ok || !project || project.kind !== "learn" || !project.learnPlan || !project.importComplete) {
+          setStarterError(body?.error || "Could not open the starter path.");
+          return;
+        }
+        persistedRef.current.set(project.id, JSON.stringify(project));
+        setProjects((prev) => [project, ...prev.filter((item) => item.id !== project.id)]);
+        setMissingPath(false);
+        setLiveProgress(null);
+        setActiveProjectId(project.id);
+        setView(viewForProject(project));
+        writePathUrl(project.id, "push");
+      } catch {
+        setStarterError("Could not open the starter path.");
+      } finally {
+        setStarterBusy(null);
+      }
+    },
+    [starterBusy, writePathUrl],
+  );
 
   const openAction = useCallback(
     (action: NextAction) => {
@@ -556,6 +596,15 @@ export function WorkspaceApp() {
         ) : null}
         {view === "start" || !activeProject ? (
           <div>
+            {shouldOfferStarterPath(projects) ? (
+              <StarterPathCard
+                busyId={starterBusy}
+                error={starterError}
+                onChoose={(id) => {
+                  if (isStarterPathId(id)) void openStarter(id);
+                }}
+              />
+            ) : null}
             <ProgressDashboard
               xp={stats?.xp ?? 0}
               streak={stats?.streak ?? 0}

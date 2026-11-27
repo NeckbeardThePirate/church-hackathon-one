@@ -90,7 +90,21 @@ export type BookResource = ResourceBase & {
 };
 /** A passage the learner chose, resolved from the Bible database. */
 export type SourcePassage = { reference: string; text: string };
-export type ScriptureReading = { reference: string; text: string; note: string };
+
+/**
+ * Where a stored citation's wording came from.
+ * Pipeline plans omit this: their scripture is Berean text from D1, and their library rows were retrieved.
+ * Starter paths set it so a public-domain fallback is not labeled as the Berean library text.
+ */
+export type CitationTextSource = "d1" | "bundled";
+
+export type ScriptureReading = {
+  reference: string;
+  text: string;
+  note: string;
+  /** Absent on pipeline plans, which store Berean text retrieved from D1. */
+  textSource?: CitationTextSource;
+};
 
 /** Passage text retrieved from D1. The model does not write `text`. */
 export type LibraryCitation = {
@@ -102,6 +116,7 @@ export type LibraryCitation = {
   note: string;
   condemned?: boolean;
   url?: string;
+  textSource?: CitationTextSource;
 };
 
 /** Output of S1 Scope. */

@@ -69,6 +69,7 @@ import {
   type PersistedQuizAnswer,
 } from "../lib/learn/plan-progress";
 import { courseContinue } from "../lib/learn/progress-dashboard";
+import { isStarterPlanId } from "../lib/learn/starters";
 import { attemptPassed, derivePathMap } from "../lib/learn/path-map";
 import { lessonIsStudyable, pathMilestones } from "../lib/learn/path-milestones";
 import {
@@ -203,10 +204,11 @@ function ResourceCard({
 
 function LibraryCallout({ item }: { item: LibraryCitation }) {
   const heading = item.condemned ? `${item.label} · condemned` : item.label;
+  const origin = item.textSource === "bundled" ? "bundled" : "retrieved";
   return (
     <li className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--sidebar)_90%,var(--canvas))] px-4 py-3">
       <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
-        {item.source === "confession" ? "Confession" : "Church father"} · retrieved
+        {item.source === "confession" ? "Confession" : "Church father"} · {origin}
       </p>
       <p className="mt-1 break-words text-sm font-medium text-[var(--ink)]">
         {item.url ? <ExternalLink href={item.url}>{heading}</ExternalLink> : heading}
@@ -218,6 +220,10 @@ function LibraryCallout({ item }: { item: LibraryCitation }) {
   );
 }
 
+function scriptureEyebrow(reading: ScriptureReading): string {
+  return reading.textSource === "bundled" ? "King James Version · bundled" : "Berean Study Bible · retrieved";
+}
+
 function ScriptureCallout({ reading }: { reading: ScriptureReading }) {
   const gatewayUrl = bibleGatewayEsvUrl(reading.reference);
   return (
@@ -226,9 +232,12 @@ function ScriptureCallout({ reading }: { reading: ScriptureReading }) {
       aria-label={`Scripture: ${reading.reference}`}
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Berean Study Bible · retrieved</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">{scriptureEyebrow(reading)}</p>
         <ExternalLink href={gatewayUrl}>
-          <span className="break-words">{reading.reference} (ESV on Bible Gateway)</span>
+          <span className="break-words">
+            {reading.reference}
+            {reading.textSource === "bundled" ? " · compare the ESV" : " (ESV on Bible Gateway)"}
+          </span>
         </ExternalLink>
       </div>
       <div
@@ -1227,6 +1236,8 @@ export function LearnPlanView({
 
   useEffect(() => {
     if (buildingPlanId && buildingPlanId === incomingPlan.id) return;
+    // A starter path is already complete in the workspace. There is no plan object to refresh.
+    if (isStarterPlanId(incomingPlan.id)) return;
     let cancelled = false;
     const planId = incomingPlan.id;
     void fetch(`/api/learn/plans/${planId}?view=plan`, { credentials: "same-origin" })
