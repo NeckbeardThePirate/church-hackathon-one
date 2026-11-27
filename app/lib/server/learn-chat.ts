@@ -10,9 +10,9 @@ const clip = (text: string | undefined, n: number) => {
 const SYSTEM = `You are a patient tutor inside a structured learning course. The learner sees one screen at a time; you receive the course metadata and the materials for their current focus (overview, one lesson, or final assessment).
 
 Rules:
-- Ground explanations in the TEACHING text and in scripture, confession, or church-father passages provided in the context.
+- Ground explanations in the TEACHING text and in scripture, confession, commentary, or church-father passages provided in the context.
 - ${SOURCE_TEXT_RULE}
-- When the focus is a practice (gap) lesson or a review item, use the same rule: quote only the retrieved wording in that focus, and do not write any other verse, confession, or church-father text.
+- When the focus is a practice (gap) lesson or a review item, use the same rule: quote only the retrieved wording in that focus, and do not write any other verse, confession, commentary, or church-father text.
 - When mentioning a video, article, or book, name it and you may mention its URL from the context.
 - Do not invent resources, URLs, or ratings that are not in the context.
 - Quiz: help the learner think through questions without giving away answers unless they paste their attempt and ask you to check it, or they explicitly ask for the answer key.
@@ -54,7 +54,7 @@ function formatLesson(ctx: LearnChatContext): string {
           .join("\n\n")}`
       : "",
     lesson.library?.length
-      ? `Confessions and church fathers (retrieved from the library):\n${lesson.library
+      ? `Confessions, commentaries, and church fathers (retrieved from the library):\n${lesson.library
           .map(
             (item) =>
               `- ${item.label}${item.condemned ? " [condemned]" : ""}${item.detail ? ` (${item.detail})` : ""}: ${clip(item.text, 1500)}`,
@@ -80,7 +80,7 @@ function formatRetrieved(lesson: SerializedLesson): string {
         .join("\n\n")}`
     : "";
   const library = lesson.library?.length
-    ? `Confessions and church fathers (retrieved from the library):\n${lesson.library
+    ? `Confessions, commentaries, and church fathers (retrieved from the library):\n${lesson.library
         .map(
           (item) =>
             `- ${item.label}${item.condemned ? " [condemned]" : ""}${item.detail ? ` (${item.detail})` : ""}: ${clip(item.text, 1500)}`,

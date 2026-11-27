@@ -522,7 +522,7 @@ Each quiz item must copy conceptId and conceptLabel from the missed list. Do not
 For each conceptId you use, put "alternate" on exactly one item for that concept. The alternate is a second question with the same conceptId, conceptLabel, and objectiveIndex, and it must not contain its own alternate.
 objectiveIndex is the 0-based index of that concept in the missed list.
 scriptureRefs: ${scope.isFaithRelevant ? "0-2 references, or an empty array" : "always an empty array"}.
-libraryRefs: ${scope.isFaithRelevant ? "0-2 confession or church-father references, or an empty array" : "always an empty array"}.
+libraryRefs: ${scope.isFaithRelevant ? "0-2 confession, catechism, commentary, or church-father references, or an empty array" : "always an empty array"}.
 ${SOURCE_TEXT_RULE}
 ${perspectiveRules(scope.isFaithRelevant, info.options.perspective)}`,
     user: `Course: ${scope.title} (${scope.complexity})
@@ -727,7 +727,7 @@ and end with a heading2 "Discuss" followed by 2-3 bullet discussion questions. K
 quiz: ${band.quiz[0]}-${band.quiz[1]} items. ${QUIZ_RULES}
 ${teachConceptRules(lesson.order)}
 scriptureRefs: ${scope.isFaithRelevant ? "1-3 passages central to this lesson" : "always an empty array"}.
-libraryRefs: ${scope.isFaithRelevant ? "0-2 confession or church-father references, or an empty array" : "always an empty array"}.
+libraryRefs: ${scope.isFaithRelevant ? "0-2 confession, catechism, commentary, or church-father references, or an empty array" : "always an empty array"}.
 ${
   repair
     ? `A reviewer asked for a fix. If the fix requires changing what the lesson covers, also return "objectives": [2-4 revised, verb-first objectives] and write the teaching and quiz against those. objectiveIndex refers to the revised list.`
@@ -850,7 +850,7 @@ function retrievedSources(lesson: LearnLesson | undefined): string {
     .join("\n");
   return [
     scripture ? `Scripture already retrieved from the library. Quote only this wording:\n${scripture}` : "",
-    library ? `Confessions and church fathers already retrieved from the library. Quote only this wording:\n${library}` : "",
+    library ? `Confessions, commentaries, and church fathers already retrieved from the library. Quote only this wording:\n${library}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");

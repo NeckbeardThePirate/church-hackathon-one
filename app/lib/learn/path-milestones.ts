@@ -57,7 +57,7 @@ export function pathMilestones(input: MilestoneInput): PathMilestone[] {
     label: "Retrieving library passages",
     detail: writing
       ? "Passages, confessions, and the fathers are in hand."
-      : "Looking up Scripture, the confessions, and the church fathers.",
+      : "Looking up Scripture, the confessions, commentaries, and the church fathers.",
     state: !outlined ? "waiting" : writing ? "done" : "active",
   };
 

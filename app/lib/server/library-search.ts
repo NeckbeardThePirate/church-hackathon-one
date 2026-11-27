@@ -31,6 +31,20 @@ export type ConfessionHit = {
   sources: HitSource[];
 };
 
+export type CommentaryHit = {
+  id: string;
+  author: string;
+  year: number | null;
+  work: string;
+  section: string | null;
+  sourceUrl: string | null;
+  attribution: string | null;
+  passage: string;
+  text: string;
+  score: number;
+  sources: HitSource[];
+};
+
 export type LibraryEnv = { AI?: Ai; BIBLE?: D1Database; LIBRARY_VECTORS?: VectorizeIndex };
 
 type FatherRow = {
@@ -55,6 +69,21 @@ type ConfessionRow = {
   year: string | null;
   label: string | null;
   title: string | null;
+  text: string;
+};
+
+type CommentaryRow = {
+  rowid?: number;
+  id: string;
+  author: string;
+  year: number | null;
+  work: string;
+  section_label: string | null;
+  source_url: string | null;
+  attribution: string | null;
+  book_id: number;
+  loc_start: number;
+  loc_end: number;
   text: string;
 };
 
@@ -88,7 +117,7 @@ function fuse(lists: { ids: string[]; source: HitSource; weight?: number }[]) {
   return [...fused.entries()].sort((a, b) => b[1].score - a[1].score);
 }
 
-async function semanticIds(env: LibraryEnv, query: string, kind: "f" | "c", k: number): Promise<string[]> {
+async function semanticIds(env: LibraryEnv, query: string, kind: "f" | "c" | "m", k: number): Promise<string[]> {
   if (!env.AI || !env.LIBRARY_VECTORS) return [];
   const [vector] = await embedTexts(env.AI, [query.slice(0, 2000)]);
   if (!vector) return [];
@@ -218,7 +247,8 @@ export async function searchConfessions(
     idsForRefs(
       db,
       `SELECT DISTINCT section_id AS id FROM confession_proofs
-       WHERE book_id = ? AND loc_start <= ? AND loc_end >= ? LIMIT 8`,
+       WHERE book_id = ? AND loc_start <= ? AND loc_end >= ?
+       ORDER BY (loc_end - loc_start) ASC, section_id ASC LIMIT 16`,
       refs,
     ),
   ]);
@@ -247,10 +277,68 @@ export async function searchConfessions(
   });
 }
 
-/** Embed + upsert one page of fathers or confessions into LIBRARY_VECTORS. */
+export async function searchCommentaries(
+  env: LibraryEnv,
+  query: string,
+  { k = 8, refs = [], mode = "hybrid" }: { k?: number; refs?: ParsedBibleReference[]; mode?: "hybrid" | "semantic" | "text" } = {},
+): Promise<CommentaryHit[]> {
+  const db = env.BIBLE;
+  if (!db) throw new Error("BIBLE D1 binding unavailable");
+  const pool = Math.max(k * 2, 20);
+  const fts = mode !== "semantic" ? toFtsQuery(query) : null;
+
+  const [sem, text, verse] = await Promise.all([
+    mode !== "text" ? semanticIds(env, query, "m", pool).catch(() => []) : [],
+    fts
+      ? db
+          .prepare(
+            `SELECT c.id FROM commentary_entries_fts f JOIN commentary_entries c ON c.rowid = f.rowid
+             WHERE commentary_entries_fts MATCH ? ORDER BY bm25(commentary_entries_fts) LIMIT ?`,
+          )
+          .bind(fts, pool)
+          .all<{ id: string }>()
+          .then((r) => (r.results ?? []).map((row) => row.id))
+          .catch(() => [] as string[])
+      : [],
+    idsForRefs(
+      db,
+      `SELECT id FROM commentary_entries WHERE book_id = ? AND loc_start <= ? AND loc_end >= ?
+       ORDER BY (loc_end - loc_start) ASC, length(text) DESC LIMIT 8`,
+      refs,
+    ).catch(() => [] as string[]),
+  ]);
+
+  const top = fuse([
+    { ids: verse, source: "verse", weight: 1.5 },
+    { ids: sem, source: "semantic" },
+    { ids: text, source: "text" },
+  ]).slice(0, k);
+  const rows = await byIds<CommentaryRow>(db, "commentary_entries", top.map(([id]) => id)).catch(() => new Map<string, CommentaryRow>());
+  return top.flatMap(([id, { score, sources }]) => {
+    const row = rows.get(id);
+    if (!row) return [];
+    return [
+      {
+        id: row.id,
+        author: row.author,
+        year: row.year,
+        work: row.work,
+        section: row.section_label,
+        sourceUrl: row.source_url,
+        attribution: row.attribution,
+        passage: locLabel(row.book_id, row.loc_start, row.loc_end),
+        text: row.text,
+        score,
+        sources: [...sources],
+      },
+    ];
+  });
+}
+
+/** Embed + upsert one page of fathers, confessions, or commentaries into LIBRARY_VECTORS. */
 export async function embedLibraryPage(
   env: { AI: Ai; BIBLE: D1Database; LIBRARY_VECTORS: VectorizeIndex },
-  corpus: "fathers" | "confessions",
+  corpus: "fathers" | "confessions" | "commentaries",
   afterRowid: number,
   limit: number,
 ): Promise<{ processed: number; nextCursor: number | null }> {
@@ -268,6 +356,19 @@ export async function embedLibraryPage(
       id: `f:${row.id}`,
       year: row.year ?? 0,
       input: `${row.author}${row.work ? `, ${row.work}` : ""} on ${locLabel(row.book_id, row.loc_start, row.loc_end)}: ${row.text}`,
+    }));
+  } else if (corpus === "commentaries") {
+    const { results } = await env.BIBLE.prepare(
+      `SELECT rowid, id, author, year, work, section_label, book_id, loc_start, loc_end, substr(text, 1, 1500) AS text
+       FROM commentary_entries WHERE rowid > ? ORDER BY rowid LIMIT ?`,
+    )
+      .bind(afterRowid, limit)
+      .all<CommentaryRow & { rowid: number }>();
+    items = (results ?? []).map((row) => ({
+      rowid: row.rowid,
+      id: `m:${row.id}`.slice(0, 64),
+      year: row.year ?? 0,
+      input: `${row.author}, ${row.work}${row.section_label ? ` (${row.section_label})` : ""}: ${row.text}`,
     }));
   } else {
     const { results } = await env.BIBLE.prepare(
@@ -293,7 +394,7 @@ export async function embedLibraryPage(
       slice.map((item, j) => ({
         id: item.id,
         values: vectors[j]!,
-        metadata: { kind: corpus === "fathers" ? "f" : "c", year: item.year },
+        metadata: { kind: corpus === "fathers" ? "f" : corpus === "commentaries" ? "m" : "c", year: item.year },
       })),
     );
   }

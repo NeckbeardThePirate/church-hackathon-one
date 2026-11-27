@@ -102,6 +102,7 @@ import {
   type PlanSnapshot,
   type ProgressEvent,
   type QuizItem,
+  librarySourceLabel,
   type LibraryCitation,
   type ScriptureReading,
   type TeachBlock,
@@ -215,7 +216,7 @@ function LibraryCallout({ item }: { item: LibraryCitation }) {
   return (
     <li className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--sidebar)_90%,var(--canvas))] px-4 py-3">
       <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
-        {item.source === "confession" ? "Confession" : "Church father"} · {origin}
+        {librarySourceLabel(item.source)} · {origin}
       </p>
       <p className="mt-1 break-words text-sm font-medium text-[var(--ink)]">
         {item.url ? <ExternalLink href={item.url}>{heading}</ExternalLink> : heading}
@@ -867,7 +868,7 @@ function LessonBody({
 
       {lesson.library?.length ? (
         <div className="mt-8" data-read-section>
-          <h2 className="text-base font-semibold text-[var(--ink)]">Confessions and church fathers</h2>
+          <h2 className="text-base font-semibold text-[var(--ink)]">Confessions, commentaries, and church fathers</h2>
           <ul className="mt-3 space-y-3">
             {lesson.library.map((item) => (
               <LibraryCallout key={`${item.source}-${item.id}`} item={item} />
