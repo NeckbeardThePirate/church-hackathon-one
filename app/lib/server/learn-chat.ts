@@ -69,7 +69,6 @@ function formatLesson(ctx: LearnChatContext): string {
           })
           .join("\n")}`
       : "",
-    lesson.warnings.length ? `Builder notes:\n${lesson.warnings.map((w) => `- ${w}`).join("\n")}` : "",
   ];
   return parts.filter(Boolean).join("\n\n");
 }

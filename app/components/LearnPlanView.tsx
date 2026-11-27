@@ -884,17 +884,6 @@ function LessonBody({
           ))}
         </div>
       ) : null}
-
-      {lesson.warnings.length ? (
-        <aside className="mt-8 rounded-xl border border-[color-mix(in_srgb,var(--accent)_25%,var(--line))] bg-[color-mix(in_srgb,var(--sidebar)_80%,var(--canvas))] px-4 py-3 text-sm text-[var(--ink-muted)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em]">Notes from the plan builder</p>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            {lesson.warnings.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </aside>
-      ) : null}
     </>
   );
 }
