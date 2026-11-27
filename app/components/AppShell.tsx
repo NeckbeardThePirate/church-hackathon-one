@@ -23,6 +23,9 @@ type AppShellProps = {
   onNext?: () => void;
   onShowProgress?: () => void;
   onRequestDelete?: (id: string) => void;
+  /** Empty workspace: the page is the only next step, so stats and progress stay hidden. */
+  focusMode?: boolean;
+  onReplayWelcome?: () => void;
 };
 
 export function AppShell({
@@ -39,6 +42,8 @@ export function AppShell({
   onNext,
   onShowProgress,
   onRequestDelete,
+  focusMode = false,
+  onReplayWelcome,
 }: AppShellProps) {
   const { key: clerkKey } = useClerkKey();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -152,25 +157,29 @@ export function AppShell({
           </span>
         </button>
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">StudyBuddy</p>
-        <p
-          className="min-w-0 max-w-[5.5rem] truncate text-right text-[11px] tabular-nums text-[var(--ink-muted)]"
-          aria-label="Learner stats"
-          aria-busy={figures.busy}
-        >
-          {figures.busy ? (
-            <span className="study-shimmer inline-block h-3 w-12 rounded-full bg-[var(--line)]" aria-hidden />
-          ) : (
-            `${figures.xp} XP · ${figures.streak}d`
-          )}
-        </p>
-        <button
-          type="button"
-          onClick={openNewProject}
-          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-lg leading-none text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
-          aria-label="New path"
-        >
-          <span aria-hidden>+</span>
-        </button>
+        {focusMode ? null : (
+          <>
+            <p
+              className="min-w-0 max-w-[5.5rem] truncate text-right text-[11px] tabular-nums text-[var(--ink-muted)]"
+              aria-label="Learner stats"
+              aria-busy={figures.busy}
+            >
+              {figures.busy ? (
+                <span className="study-shimmer inline-block h-3 w-12 rounded-full bg-[var(--line)]" aria-hidden />
+              ) : (
+                `${figures.xp} XP · ${figures.streak}d`
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={openNewProject}
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-lg leading-none text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
+              aria-label="New path"
+            >
+              <span aria-hidden>+</span>
+            </button>
+          </>
+        )}
       </header>
 
       {mobileNavOpen ? (
@@ -209,22 +218,24 @@ export function AppShell({
           {!sidebarInnerCompact ? (
             <div className="hidden min-w-0 md:block">
               <p className="truncate text-sm font-semibold text-[var(--ink)]">StudyBuddy</p>
-              <p className="mt-1 text-xs text-[var(--ink-muted)]">Learn paths</p>
+              {focusMode ? null : <p className="mt-1 text-xs text-[var(--ink-muted)]">Learn paths</p>}
             </div>
           ) : null}
-          <button
-            type="button"
-            onClick={openNewProject}
-            title="New path"
-            aria-label="New path"
-            className={`hidden shrink-0 rounded-md border border-[var(--line)] font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] md:inline-flex ${
-              sidebarInnerCompact ? "size-11 items-center justify-center p-0 text-lg leading-none" : "min-h-11 px-3 py-2 text-xs"
-            }`}
-          >
-            {sidebarInnerCompact ? "+" : "New path"}
-          </button>
+          {focusMode ? null : (
+            <button
+              type="button"
+              onClick={openNewProject}
+              title="New path"
+              aria-label="New path"
+              className={`hidden shrink-0 rounded-md border border-[var(--line)] font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] md:inline-flex ${
+                sidebarInnerCompact ? "size-11 items-center justify-center p-0 text-lg leading-none" : "min-h-11 px-3 py-2 text-xs"
+              }`}
+            >
+              {sidebarInnerCompact ? "+" : "New path"}
+            </button>
+          )}
         </div>
-        {!sidebarInnerCompact ? (
+        {!sidebarInnerCompact && !focusMode ? (
           <div className="px-2">
             <LearnerStatsPanel
               pending={!stats}
@@ -261,7 +272,7 @@ export function AppShell({
             sidebarInnerCompact ? "hidden items-center gap-1.5 px-0 md:flex" : "gap-0.5 px-1"
           }`}
         >
-          {paths.length === 0 && archived.length === 0 && !sidebarInnerCompact ? (
+          {paths.length === 0 && archived.length === 0 && !sidebarInnerCompact && !focusMode ? (
             <p className="px-2 py-2 text-xs leading-relaxed text-[var(--ink-muted)]">Your paths appear here.</p>
           ) : null}
           {paths.map((project) => renderItem(project))}
@@ -270,11 +281,26 @@ export function AppShell({
           ) : null}
           {archived.map((project) => renderItem(project))}
         </nav>
-        <div
-          className={`relative mt-auto flex flex-nowrap items-center gap-3 border-t border-[var(--line)] pt-3 ${
-            sidebarInnerCompact ? "px-2 md:justify-center md:px-0" : "px-2"
-          }`}
-        >
+        <div className="mt-auto">
+          {onReplayWelcome ? (
+            <div className={sidebarInnerCompact ? "md:hidden" : ""}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  onReplayWelcome();
+                }}
+                className="mx-2 mb-2 flex min-h-11 w-[calc(100%-1rem)] items-center rounded-md px-2 text-left text-xs text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+              >
+                Welcome
+              </button>
+            </div>
+          ) : null}
+          <div
+            className={`relative flex flex-nowrap items-center gap-3 border-t border-[var(--line)] pt-3 ${
+              sidebarInnerCompact ? "px-2 md:justify-center md:px-0" : "px-2"
+            }`}
+          >
           {clerkKey ? (
             <UserButton
               appearance={{
@@ -306,6 +332,7 @@ export function AppShell({
           >
             Sign out
           </button>
+          </div>
         </div>
       </aside>
 

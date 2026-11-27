@@ -23,6 +23,8 @@ type Props = {
   onStudyReady?: (plan: LearnPlan) => void;
   onMarkFailed?: () => void;
   onRequestRemove?: () => void;
+  /** First-run page: the form sits under the welcome, without a second title. */
+  embedded?: boolean;
 };
 
 function planReadyToStudy(snap: PlanSnapshot): snap is PlanSnapshot & { plan: LearnPlan } {
@@ -38,6 +40,7 @@ export function LearnIntakeStep({
   onStudyReady,
   onMarkFailed,
   onRequestRemove,
+  embedded = false,
 }: Props) {
   const [planId, setPlanId] = useState<string | undefined>(learnPlanId);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
@@ -181,7 +184,15 @@ export function LearnIntakeStep({
   const feed = useMemo(() => events.filter((e) => e.message), [events]);
 
   if (!planId) {
-    return <LearnStartForm projectId={projectId} starting={starting} error={error} onStart={(payload) => void start(payload)} />;
+    return (
+      <LearnStartForm
+        embedded={embedded}
+        projectId={projectId}
+        starting={starting}
+        error={error}
+        onStart={(payload) => void start(payload)}
+      />
+    );
   }
 
   return (
