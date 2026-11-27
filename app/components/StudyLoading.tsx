@@ -35,7 +35,7 @@ export function StudyLoading({ title, caption }: ScreenProps) {
 
   return (
     <div
-      className="safe-area-x flex min-h-dvh flex-col items-center justify-center bg-[var(--canvas)] px-6 text-center"
+      className="flex min-h-dvh flex-col items-center justify-center bg-[var(--canvas)] py-8 text-center pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]"
       role="status"
       aria-live="polite"
     >
