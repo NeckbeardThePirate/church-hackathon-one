@@ -171,6 +171,17 @@ test("question parsing keeps a quick unsure choice and rejects a short list", ()
   assert.equal(parsed.choices.at(-1)?.reading, "unsure");
   assert.equal(parsed.choices.length, 3);
   assert.throws(() => parseOpenerQuestion({ prompt: "Hi", probe: "adoption", choices: [{ id: "a", label: "Only one", reading: "gap", concept: "adoption" }] }));
+  const bornAgain = parseOpenerQuestion({
+    prompt: "How familiar is being born again?",
+    probe: "being born again",
+    choices: [
+      { id: "a", label: "I can explain it", reading: "strong", concept: "being born again" },
+      { id: "b", label: "I mix it up with baptism", reading: "gap", concept: "being born again" },
+      { id: "c", label: "I don't know", reading: "strength|gap|unsure", concept: "being born again" },
+    ],
+  });
+  assert.equal(bornAgain.choices[0]?.reading, "strength");
+  assert.equal(bornAgain.choices.find((choice) => choice.label === "I don't know")?.reading, "unsure");
   assert.deepEqual(parseOpenerAction({ action: "skip" }), { ok: true, action: { type: "skip" } });
   assert.equal(parseOpenerAction({ action: "answer", choiceId: "a" }).ok, false);
 });

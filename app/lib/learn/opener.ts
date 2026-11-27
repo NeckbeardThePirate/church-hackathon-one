@@ -159,6 +159,15 @@ export function parseOpenerAction(body: unknown): { ok: true; action: OpenerActi
   return { ok: false, error: "Unknown opener action." };
 }
 
+function readingOf(value: unknown, label: string): OpenerReading | null {
+  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (text === "strength" || text === "strong") return "strength";
+  if (text === "gap" || text === "weak" || text === "missing") return "gap";
+  if (text === "unsure" || text === "unknown" || text === "not sure" || text === "not-sure") return "unsure";
+  if (/not sure|unsure|don'?t know|do not know/i.test(label)) return "unsure";
+  return null;
+}
+
 /** Validate one model question. Throws so the caller can retry or close the check. */
 export function parseOpenerQuestion(value: unknown): OpenerQuestionDraft {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("opener question must be an object");
@@ -176,7 +185,7 @@ export function parseOpenerQuestion(value: unknown): OpenerQuestionDraft {
     const id = clipText(row.id, 24);
     const label = clipText(row.label, 160);
     const concept = clipText(row.concept, 80) || probe;
-    const reading = row.reading === "strength" || row.reading === "gap" || row.reading === "unsure" ? row.reading : null;
+    const reading = readingOf(row.reading, label);
     if (!id || !label || !reading || seen.has(id)) continue;
     seen.add(id);
     choices.push({ id, label, reading, concept });

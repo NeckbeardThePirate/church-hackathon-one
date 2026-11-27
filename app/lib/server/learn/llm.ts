@@ -40,6 +40,9 @@ export type LlmEnv = {
 
 export type LlmMeta = { planId: string; stage: string; lessonId?: string };
 
+/** Anthropic effort. Low keeps a short check from spending the output budget on thinking. */
+export type LlmEffort = "low" | "medium" | "high";
+
 type JsonCall<T> = {
   role: LlmRole;
   /** Catalog id. The opener check pins {@link LEARN_TEXT_MODEL}; other stages use the role default. */
@@ -49,6 +52,8 @@ type JsonCall<T> = {
   meta: LlmMeta;
   maxTokens?: number;
   temperature?: number;
+  /** Sent as `output_config.effort` on Anthropic messages. Omitted for Workers AI. */
+  effort?: LlmEffort;
   /** Throw to reject the output; the message is fed back to the model on retry. */
   validate: (value: unknown) => T;
   /** Plan owner. Used only to look up a stored ChatGPT token for fallback compute. */
@@ -123,6 +128,7 @@ async function complete(
   maxTokens: number,
   temperature: number,
   userId?: string,
+  effort?: LlmEffort,
 ): Promise<string> {
   if (env.MOCK_AI === "1") return mockModelText(system, user, meta);
 
@@ -133,16 +139,15 @@ async function complete(
 
   if (model.startsWith("anthropic/")) {
     // Haiku 5.5's messages schema has no temperature (newer Claude models reject it).
-    const result = await callAnthropic(
-      env,
-      model,
-      {
-        max_tokens: maxTokens,
-        system: `${system}\nReturn ONLY one JSON object. No prose, no code fences.`,
-        messages: [{ role: "user", content: user }],
-      },
-      attempt > 1 ? { "cf-aig-skip-cache": "true" } : undefined,
-    );
+    // Thinking tokens count against max_tokens. A low effort keeps a short JSON check
+    // from spending the whole budget before the answer is written.
+    const query: Record<string, unknown> = {
+      max_tokens: maxTokens,
+      system: `${system}\nReturn ONLY one JSON object. No prose, no code fences.`,
+      messages: [{ role: "user", content: user }],
+    };
+    if (effort) query.output_config = { effort };
+    const result = await callAnthropic(env, model, query, attempt > 1 ? { "cf-aig-skip-cache": "true" } : undefined);
     return readAnthropicText(result);
   }
 
@@ -215,13 +220,22 @@ export async function readAnthropicText(result: unknown): Promise<string> {
       const detail = (await result.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 500);
       throw new Error(`Anthropic via gateway: ${result.status}${detail ? ` ${detail}` : ""}`);
     }
-    const text = parseWorkersAiText(await result.json().catch(() => null));
-    if (!text) throw new Error("Anthropic via gateway returned no text.");
+    const payload = await result.json().catch(() => null);
+    const text = parseWorkersAiText(payload);
+    if (!text) throw missingAnthropicText(payload);
     return text;
   }
   const text = parseWorkersAiText(result);
-  if (!text) throw new Error("Anthropic via gateway returned no text.");
+  if (!text) throw missingAnthropicText(result);
   return text;
+}
+
+function missingAnthropicText(payload: unknown): Error {
+  const stop =
+    payload && typeof payload === "object" && typeof (payload as { stop_reason?: unknown }).stop_reason === "string"
+      ? (payload as { stop_reason: string }).stop_reason
+      : "";
+  return new Error(`Anthropic via gateway returned no text${stop ? ` (stop_reason: ${stop})` : ""}.`);
 }
 
 /** JSON call with schema validation and up to 2 corrective retries (§3). */
@@ -241,6 +255,7 @@ export async function llmJson<T>(env: LlmEnv, call: JsonCall<T>): Promise<T> {
         call.maxTokens ?? 4096,
         call.temperature ?? 0.3,
         call.userId,
+        call.effort,
       );
       return call.validate(extractJson(raw));
     } catch (error) {

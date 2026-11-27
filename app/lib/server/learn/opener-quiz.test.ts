@@ -189,14 +189,18 @@ test("skip and a timed-out Haiku call finish the check without failing the path"
 test("the opener call uses the Haiku catalog id through the gateway", async () => {
   const plan = await bootPlan();
   let sent = "";
+  let sentMax = 0;
+  let sentEffort = "";
   const env = {
     AI_GATEWAY_ID: "study-buddy",
     AI: {
       gateway(id: string) {
         assert.equal(id, "study-buddy");
         return {
-          async run(request: { query?: { model?: string } }) {
+          async run(request: { query?: { model?: string; max_tokens?: number; output_config?: { effort?: string } } }) {
             sent = request.query?.model ?? "";
+            sentMax = request.query?.max_tokens ?? 0;
+            sentEffort = request.query?.output_config?.effort ?? "";
             return new Response(
               JSON.stringify({
                 content: [
@@ -226,6 +230,8 @@ test("the opener call uses the Haiku catalog id through the gateway", async () =
 
   const opened = await runOpenerAction(env, plan, { type: "next" });
   assert.equal(sent, "claude-haiku-5-5");
+  assert.equal(sentMax, 4096);
+  assert.equal(sentEffort, "low");
   assert.equal(opened.body.status, "asking");
   assert.equal(opened.body.question?.prompt, "How familiar is justification by faith?");
   assert.equal((await plan.info()).status, "queued");

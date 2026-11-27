@@ -83,6 +83,41 @@ test("scope JSON accepts a fenced Haiku gateway response", async () => {
   assert.equal(sentAuth, true);
 });
 
+test("a thinking-only Haiku answer names the stop reason", async () => {
+  const env = {
+    AI_GATEWAY_ID: "study-buddy",
+    AI: {
+      gateway() {
+        return {
+          async run() {
+            return new Response(
+              JSON.stringify({
+                stop_reason: "max_tokens",
+                content: [{ type: "thinking", thinking: "The learner may already know this." }],
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          },
+        };
+      },
+    },
+  } as unknown as LlmEnv;
+
+  await assert.rejects(
+    () =>
+      llmJson(env, {
+        role: "worker",
+        model: LEARN_TEXT_MODEL,
+        system: "Return one question.",
+        user: "John 3",
+        meta: { planId: "plan-1", stage: "opener" },
+        maxTokens: 800,
+        validate: () => ({}),
+      }),
+    /stop_reason: max_tokens/,
+  );
+});
+
 test("Workers AI JSON calls forward the gateway and fall back on auth errors", async () => {
   const calls: unknown[] = [];
   const env = {
