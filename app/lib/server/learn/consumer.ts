@@ -18,6 +18,7 @@ import {
   runScope,
   runTeach,
 } from "./stages";
+import { recordNewLessonWarnings } from "./plan-builder-log";
 import {
   enqueue,
   idempotencyKey,
@@ -110,10 +111,12 @@ async function degradeOrFail(env: LearnEnv, msg: LearnMessage, reason: string): 
   if (LESSON_STAGES.has(msg.stage) && msg.lessonId) {
     const lesson = await stub.getLesson(msg.lessonId);
     if (lesson) {
+      const warnings = [...lesson.warnings, reason];
+      await recordNewLessonWarnings(env, { planId: msg.planId, stage: msg.stage, lesson, warnings });
       await stub.putLesson({
         ...lesson,
         status: "degraded",
-        warnings: [...lesson.warnings, reason],
+        warnings,
       });
     }
     await stub.event(msg.stage, `L${lesson?.order ?? "?"} degraded: ${reason}`, msg.lessonId);

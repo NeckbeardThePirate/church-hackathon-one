@@ -179,7 +179,26 @@ test("MOCK_AI builds one tagged gap lesson after its parent and ignores a second
   assert.equal(await plan.begin(`gap:teach:${reserved.lessonId}:r0`), true);
 
   const teach = { planId: PLAN_ID, stage: "teach" as const, lessonId: reserved.lessonId, round: 0, job: "gap" as const };
-  await runTeach({ env: env as never, msg: teach, stub: plan as never });
+  const builderLogs: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    builderLogs.push(args);
+  };
+  try {
+    await runTeach({ env: env as never, msg: teach, stub: plan as never });
+  } finally {
+    console.warn = originalWarn;
+  }
+  const libraryLog = builderLogs.find((args) => {
+    if (args[0] !== "[learn] plan builder note" || !args[1] || typeof args[1] !== "object") return false;
+    const detail = args[1] as { note?: string; planId?: string; lessonId?: string; stage?: string; kind?: string };
+    return detail.kind === "library_reference_dropped";
+  })?.[1] as { note: string; planId: string; lessonId: string; stage: string; kind: string } | undefined;
+  assert.ok(libraryLog);
+  assert.equal(libraryLog.planId, PLAN_ID);
+  assert.equal(libraryLog.lessonId, reserved.lessonId);
+  assert.equal(libraryLog.stage, "teach");
+  assert.match(libraryLog.note, /Library reference dropped \(did not resolve\): Westminster Confession of Faith 11\.1/);
   assert.deepEqual(sent.map((message) => message.stage), ["check"]);
   assert.equal(sent[0]?.job, "gap");
   assert.equal(sent.some((message) => message.stage === "research" || message.stage === "critic" || message.stage === "assemble"), false);
