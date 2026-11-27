@@ -48,7 +48,7 @@ export function LessonVideoPlayer({ video, meta, reviewNote, playing, onPlay }: 
               />
             )}
             <span className="absolute inset-0 bg-black/30 transition-colors group-hover:bg-black/40" />
-            <span className="absolute left-1/2 top-1/2 grid size-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[color-mix(in_srgb,var(--accent)_88%,#1a1a1a)] text-[var(--canvas)] shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition-transform group-hover:scale-105">
+            <span className="absolute left-1/2 top-1/2 grid size-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[color-mix(in_srgb,var(--accent)_88%,#1a1a1a)] text-[var(--canvas)] shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition-transform group-hover:scale-105 sm:size-16">
               <PlayIcon />
             </span>
           </button>
@@ -65,7 +65,7 @@ export function LessonVideoPlayer({ video, meta, reviewNote, playing, onPlay }: 
       </div>
       <div className="px-4 py-3">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-medium leading-snug text-[var(--ink)]">{video.title}</p>
+          <p className="min-w-0 break-words text-sm font-medium leading-snug text-[var(--ink)]">{video.title}</p>
           <a
             href={video.url}
             target="_blank"

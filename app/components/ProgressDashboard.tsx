@@ -3,6 +3,7 @@
 import { statsFigures, type DailyGoalStatus } from "../lib/learn/learner-stats";
 import type { NextAction, PathSummary } from "../lib/learn/progress-dashboard";
 import { SourceNote } from "./SourceNote";
+import { StudyShimmer } from "./StudyLamp";
 
 export function DailyGoalBar({ earned, target, met, percent }: DailyGoalStatus) {
   const shown = Math.min(earned, target);
@@ -46,25 +47,41 @@ export function ProgressDashboard({ xp, streak, pending = false, goal, summaries
   const figures = statsFigures(pending ? null : { xp, streak });
   const reviewsDue = summaries.reduce((sum, path) => sum + path.reviewsDue, 0);
   return (
-    <section aria-label="Progress" className="mx-auto w-full max-w-[640px] px-4 pt-4 sm:px-10 sm:pt-8">
+    <section aria-label="Progress" className="mx-auto w-full max-w-[640px] overflow-x-clip px-4 pt-4 sm:px-10 sm:pt-8">
       <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Progress</h2>
       <SourceNote place="progress" />
       <div className="mt-3 grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-3 py-3">
           <p className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">XP</p>
-          <p className="mt-1 truncate text-2xl font-semibold tabular-nums text-[var(--ink)]" aria-busy={figures.busy}>
-            {figures.xp}
-          </p>
+          {figures.busy ? (
+            <StudyShimmer className="mt-2 h-8 w-16" />
+          ) : (
+            <p className="mt-1 truncate text-2xl font-semibold tabular-nums text-[var(--ink)]">{figures.xp}</p>
+          )}
         </div>
         <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-3 py-3">
           <p className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">Streak</p>
-          <p className="mt-1 truncate text-2xl font-semibold tabular-nums text-[var(--ink)]" aria-busy={figures.busy}>
-            {figures.busy ? figures.streak : `${figures.streak} ${streak === 1 ? "day" : "days"}`}
-          </p>
+          {figures.busy ? (
+            <StudyShimmer className="mt-2 h-8 w-20" />
+          ) : (
+            <p className="mt-1 truncate text-2xl font-semibold tabular-nums text-[var(--ink)]">
+              {figures.streak} {streak === 1 ? "day" : "days"}
+            </p>
+          )}
         </div>
       </div>
-      <div className="mt-2 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-3 py-3">
-        <DailyGoalBar {...goal} />
+      <div className="mt-2 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-3 py-3" aria-busy={figures.busy || undefined}>
+        {figures.busy ? (
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">Daily goal</span>
+              <StudyShimmer className="h-3 w-14" />
+            </div>
+            <StudyShimmer className="mt-2 h-2 w-full rounded-full" />
+          </div>
+        ) : (
+          <DailyGoalBar {...goal} />
+        )}
       </div>
       <button
         type="button"

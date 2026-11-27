@@ -61,9 +61,11 @@ type Props = {
   /** Client receive time of the latest heartbeat (server clocks can drift). */
   heartbeatReceivedAt: number | null;
   startedAt: number;
+  /** The path card already shows the lamp. This strip keeps the live facts. */
+  hideLamp?: boolean;
 };
 
-export function StillWorking({ stage, heartbeat, heartbeatReceivedAt, startedAt }: Props) {
+export function StillWorking({ stage, heartbeat, heartbeatReceivedAt, startedAt, hideLamp = false }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const [captionIndex, setCaptionIndex] = useState(0);
 
@@ -106,38 +108,30 @@ export function StillWorking({ stage, heartbeat, heartbeatReceivedAt, startedAt 
       role="status"
       aria-live="polite"
     >
-      <style>{`
-        @keyframes lamp-flicker { 0%,100% { transform: scale(1,1) rotate(-1deg); opacity:.95 } 25% { transform: scale(.94,1.06) rotate(1.5deg) } 50% { transform: scale(1.04,.95) rotate(-2deg); opacity:1 } 75% { transform: scale(.97,1.03) rotate(1deg) } }
-        @keyframes lamp-flare { 0% { transform: scale(1.35); opacity:1 } 100% { transform: scale(1); opacity:.9 } }
-        .lamp-flame { transform-origin: 50% 90%; animation: lamp-flicker 1.4s ease-in-out infinite; }
-        .lamp-glow { transform-origin: 50% 60%; }
-        .lamp-flare { animation: lamp-flare .9s ease-out; }
-        @media (prefers-reduced-motion: reduce) { .lamp-flame, .lamp-flare { animation: none } }
-      `}</style>
-      <svg width="56" height="44" viewBox="0 0 56 44" aria-hidden className="shrink-0">
-        {/* glow re-mounts on each heartbeat so it flares, then settles */}
-        <g key={heartbeat?.at ?? 0} className={`lamp-glow ${connection === "live" ? "lamp-flare" : ""}`}>
-          <circle
-            cx="40"
-            cy="14"
-            r="12"
-            fill="#f2b84b"
-            opacity={connection === "live" ? 0.22 : connection === "quiet" ? 0.1 : 0.03}
-          />
-        </g>
-        <g className="lamp-flame" style={{ opacity: connection === "lost" ? 0.25 : connection === "quiet" ? 0.6 : 1 }}>
-          <path d="M40 4 C44 10 45 14 40 19 C35 14 36 10 40 4 Z" fill="#f2b84b" />
-          <path d="M40 9 C42 12 42 15 40 17 C38 15 38 12 40 9 Z" fill="#fff1c9" />
-        </g>
-        {/* clay lamp: body, spout, handle */}
-        <path d="M6 28 C6 22 16 19 28 19 C34 19 38 20 41 22 L44 20 C46 19 47 21 45 23 L40 28 C38 33 31 36 23 36 C13 36 6 33 6 28 Z" fill="#b8734a" />
-        <path d="M9 28 C12 32 20 33 26 33 C32 33 36 31 38 28" stroke="#8f5536" strokeWidth="1.2" fill="none" />
-        <ellipse cx="23" cy="24" rx="5" ry="1.8" fill="#6e3f27" />
-        <path d="M6 27 C2 26 1 22 4 21" stroke="#b8734a" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-      </svg>
+      {hideLamp ? null : (
+        <svg width="56" height="44" viewBox="0 0 56 44" aria-hidden className="shrink-0">
+          <g key={heartbeat?.at ?? 0} className={`study-breathe ${connection === "live" ? "study-flare" : ""}`}>
+            <circle
+              cx="40"
+              cy="14"
+              r="12"
+              fill="#c9b896"
+              opacity={connection === "live" ? 0.22 : connection === "quiet" ? 0.1 : 0.03}
+            />
+          </g>
+          <g className={connection === "lost" ? undefined : "study-flicker"} style={{ opacity: connection === "lost" ? 0.25 : connection === "quiet" ? 0.6 : 1 }}>
+            <path d="M40 4 C44 10 45 14 40 19 C35 14 36 10 40 4 Z" fill="#e7c56a" />
+            <path d="M40 9 C42 12 42 15 40 17 C38 15 38 12 40 9 Z" fill="#fff1c9" />
+          </g>
+          <path d="M6 28 C6 22 16 19 28 19 C34 19 38 20 41 22 L44 20 C46 19 47 21 45 23 L40 28 C38 33 31 36 23 36 C13 36 6 33 6 28 Z" fill="#b8734a" />
+          <path d="M9 28 C12 32 20 33 26 33 C32 33 36 31 38 28" stroke="#8f5536" strokeWidth="1.2" fill="none" />
+          <ellipse cx="23" cy="24" rx="5" ry="1.8" fill="#6e3f27" />
+          <path d="M6 27 C2 26 1 22 4 21" stroke="#b8734a" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+        </svg>
+      )}
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm italic text-[var(--ink)]" key={caption}>
+        <p className="study-serif break-words text-sm italic text-[var(--ink)]" key={caption}>
           {caption}
         </p>
         <p className={`mt-0.5 text-xs ${connection === "lost" ? "text-[#c0533f]" : "text-[var(--ink-muted)]"}`}>{status}</p>

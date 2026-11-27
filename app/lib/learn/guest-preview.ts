@@ -80,6 +80,7 @@ export const GUEST_SAMPLE_GAP_NODE: PathMapNode = {
   parentId: GUEST_OPEN_LESSON_ID,
   current: false,
   estimatedMinutes: 20,
+  building: false,
 };
 
 const CONFESSION = "Westminster Confession of Faith";
@@ -124,6 +125,7 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     parentId: null,
     current: false,
     estimatedMinutes: 25,
+    building: false,
   },
   {
     id: "ruth-vow",
@@ -135,6 +137,7 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     parentId: null,
     current: false,
     estimatedMinutes: 25,
+    building: false,
   },
   {
     id: "gap-ruth-hesed",
@@ -146,6 +149,7 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     parentId: "ruth-vow",
     current: false,
     estimatedMinutes: 20,
+    building: false,
   },
   {
     id: "ruth-field",
@@ -157,6 +161,7 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     parentId: null,
     current: true,
     estimatedMinutes: 30,
+    building: false,
   },
   {
     id: "ruth-gate",
@@ -168,6 +173,7 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     parentId: null,
     current: false,
     estimatedMinutes: 30,
+    building: false,
   },
   {
     id: "ruth-line",
@@ -179,6 +185,7 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     parentId: null,
     current: false,
     estimatedMinutes: 25,
+    building: false,
   },
   {
     id: "final",
@@ -193,6 +200,7 @@ export const GUEST_PATH_NODES: readonly PathMapNode[] = [
     ],
     parentId: null,
     current: false,
+    building: false,
   },
 ];
 

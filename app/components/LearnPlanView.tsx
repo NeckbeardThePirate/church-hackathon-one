@@ -70,6 +70,7 @@ import {
 } from "../lib/learn/plan-progress";
 import { courseContinue } from "../lib/learn/progress-dashboard";
 import { attemptPassed, derivePathMap } from "../lib/learn/path-map";
+import { lessonIsStudyable, pathMilestones } from "../lib/learn/path-milestones";
 import {
   articleDoneFor,
   articleScrollFor,
@@ -92,8 +93,10 @@ import {
   type ArticleResource,
   type BookResource,
   type GapJobEvent,
+  type Heartbeat,
   type LearnLesson,
   type LearnPlan,
+  type LearnStage,
   type PlanSnapshot,
   type ProgressEvent,
   type QuizItem,
@@ -106,6 +109,10 @@ import type { LearnReviewFocus } from "../lib/learn/agent-context";
 import { ArticleReadWindow } from "./ArticleReadWindow";
 import { LearnAgentFloat } from "./LearnAgentFloat";
 import { LearnPathMap } from "./LearnPathMap";
+import { PathBuildCard } from "./PathBuildCard";
+import { StudyLamp } from "./StudyLamp";
+import { StudyPlaceholder } from "./StudyLoading";
+import { useIdsLeft } from "./useIdsLeft";
 import { LearnReviewPanel } from "./LearnReviewPanel";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
 import { LessonVideoPlayer } from "./LessonVideoPlayer";
@@ -180,7 +187,7 @@ function ResourceCard({
 }) {
   return (
     <li className="rounded-xl border border-[var(--line)] bg-[color-mix(in_srgb,var(--sidebar)_90%,var(--canvas))] px-4 py-3">
-      <p className="text-sm font-medium leading-snug text-[var(--ink)]">
+      <p className="break-words text-sm font-medium leading-snug text-[var(--ink)]">
         <ExternalLink href={href}>{title}</ExternalLink>
       </p>
       {meta ? <p className="mt-1 text-xs text-[var(--ink-muted)]">{meta}</p> : null}
@@ -201,7 +208,7 @@ function LibraryCallout({ item }: { item: LibraryCitation }) {
       <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">
         {item.source === "confession" ? "Confession" : "Church father"} · retrieved
       </p>
-      <p className="mt-1 text-sm font-medium text-[var(--ink)]">
+      <p className="mt-1 break-words text-sm font-medium text-[var(--ink)]">
         {item.url ? <ExternalLink href={item.url}>{heading}</ExternalLink> : heading}
         {item.detail ? <span className="font-normal text-[var(--ink-muted)]"> · {item.detail}</span> : null}
       </p>
@@ -317,7 +324,7 @@ async function gradeFreeText(planId: string, item: QuizItem, given: string): Pro
 
 function choiceButtonClass(state: "idle" | "picked" | "correct" | "wrong"): string {
   const base =
-    "w-full rounded-lg border px-3 py-2.5 text-left text-sm leading-snug transition-colors disabled:cursor-default";
+    "flex min-h-11 w-full items-center rounded-lg border px-3 py-2.5 text-left text-sm leading-snug transition-colors disabled:cursor-default";
   switch (state) {
     case "correct":
       return `${base} border-[color-mix(in_srgb,#6b9f7a_55%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_14%,var(--sidebar))] text-[var(--ink)]`;
@@ -462,12 +469,12 @@ function QuizQuestion({
             }
             disabled={state.shortSubmitted || grading}
             placeholder="Type your answer"
-            className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))] disabled:opacity-70"
+            className="min-h-11 min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2 text-base text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))] disabled:opacity-70"
           />
           <button
             type="submit"
             disabled={!state.shortText.trim() || state.shortSubmitted || grading}
-            className="shrink-0 rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] disabled:cursor-not-allowed disabled:opacity-45"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] disabled:cursor-not-allowed disabled:opacity-45"
           >
             {grading ? "Checking…" : "Check"}
           </button>
@@ -502,6 +509,7 @@ function PracticeList({
   onGenerate: (sourceLessonId: string, concepts: GapConcept[]) => void;
   onOpen: (lessonId: string) => void;
 }) {
+  const arrived = useIdsLeft(cards.filter((card) => !card.gapLessonId).map((card) => card.key).join(","));
   if (!cards.length) return null;
   return (
     <div className="mt-4 flex flex-col gap-2">
@@ -511,7 +519,9 @@ function PracticeList({
         return (
           <div
             key={card.key}
-            className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-4 py-3"
+            className={`rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-4 py-3 transition-[box-shadow,border-color] duration-500 ${
+              arrived.has(card.key) ? "study-ready" : ""
+            }`}
           >
             {card.gapLessonId ? (
               <button
@@ -537,9 +547,18 @@ function PracticeList({
                 </button>
               </>
             ) : status ? (
-              <p role="status" className="text-sm text-[var(--ink-muted)]">
-                {status.message || `Building a short practice lesson${labels ? ` for ${labels}` : ""}…`}
-              </p>
+              <div role="status" aria-live="polite" className="study-rise flex items-start gap-3">
+                <StudyLamp size={40} live />
+                <div className="min-w-0 flex-1">
+                  <p className="study-serif text-sm italic leading-snug text-[var(--ink)]">
+                    Writing a short practice lesson
+                  </p>
+                  <p className="mt-1 break-words text-xs leading-relaxed text-[var(--ink-muted)]">
+                    {status.message || `For what you missed${labels ? `: ${labels}` : ""}.`}
+                  </p>
+                  <span className="study-shimmer mt-3 block h-1 w-28 max-w-full rounded-full bg-[var(--line)]" />
+                </div>
+              </div>
             ) : (
               <button
                 type="button"
@@ -736,6 +755,15 @@ function LessonBody({
   useEffect(() => {
     setPlayingVideo(null);
   }, [lesson.id]);
+  if (lesson.status === "pending") {
+    return (
+      <StudyPlaceholder
+        kicker={`Lesson ${lesson.order} of ${total}`}
+        title={lesson.title || "This lesson"}
+        caption="The teaching is still being written. It will open here as soon as the page is ready."
+      />
+    );
+  }
   return (
     <>
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">
@@ -867,7 +895,7 @@ function ReadingProgressBar({ percent, done, onMarkRead }: { percent: number; do
             type="button"
             aria-pressed={done}
             onClick={onMarkRead}
-            className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+            className={`min-h-11 rounded-md border px-3 text-xs font-medium ${
               done
                 ? "border-[color-mix(in_srgb,#6b9f7a_50%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_18%,var(--sidebar))] text-[color-mix(in_srgb,#6b9f7a_85%,var(--ink))]"
                 : "border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] text-[var(--ink)]"
@@ -1172,6 +1200,8 @@ export function LearnPlanView({
   const [location, setLocation] = useState<LearnLocation>(() => resolveLocation(plan.lessons, hydrated.location));
   const [homeView, setHomeView] = useState<"map" | "list">("map");
   const [reviewFocus, setReviewFocus] = useState<LearnReviewFocus | null>(null);
+  const [buildStage, setBuildStage] = useState<LearnStage | undefined>(undefined);
+  const [buildCounts, setBuildCounts] = useState<{ done: number; total: number } | null>(null);
 
   const saveTimerRef = useRef<number | null>(null);
   const lessonScrollIntentRef = useRef<LessonScrollIntent>("restore");
@@ -1291,7 +1321,13 @@ export function LearnPlanView({
     });
     source.addEventListener("progress", (event) => {
       const progressEvent = JSON.parse((event as MessageEvent).data) as ProgressEvent;
+      if (!closed) setBuildStage(progressEvent.stage);
       if (progressEvent.stage === "check" || progressEvent.stage === "assemble") pull(true);
+    });
+    source.addEventListener("heartbeat", (event) => {
+      if (closed) return;
+      const beat = JSON.parse((event as MessageEvent).data) as Heartbeat;
+      setBuildCounts({ done: beat.lessonsDone, total: beat.lessonsTotal });
     });
     source.onerror = () => {
       if (!closed) pull(true);
@@ -1743,6 +1779,28 @@ export function LearnPlanView({
     return { cards, finalSources: new Set(groupMissesBySource(plan.lessons, finalMisses).map((request) => request.sourceLessonId)) };
   }, [hasFinal, plan.finalAssessment, plan.lessons, progress, scope]);
 
+  const buildMilestones = useMemo(() => {
+    const core = plan.lessons.filter((lesson) => lessonKind(lesson) === "core");
+    const readyCore = core.filter((lesson) => lesson.status !== "pending").length;
+    const starter = core.filter(lessonIsStudyable).sort((a, b) => a.order - b.order)[0];
+    return {
+      starter,
+      milestones: pathMilestones({
+        stage: buildStage,
+        status: "running",
+        lessonsDone: Math.max(buildCounts?.done ?? 0, readyCore),
+        lessonsTotal: Math.max(buildCounts?.total ?? 0, core.length),
+        lessonOneReady: Boolean(starter),
+      }),
+    };
+  }, [plan.lessons, buildStage, buildCounts]);
+  const lessonsArrived = useIdsLeft(
+    plan.lessons
+      .filter((lesson) => lesson.status === "pending")
+      .map((lesson) => lesson.id)
+      .join(","),
+  );
+
   const openPractice = useCallback((lessonId: string) => goLesson(lessonId, "top"), [goLesson]);
   const generatePractice = useCallback(
     (sourceLessonId: string, concepts: GapConcept[]) => {
@@ -1770,7 +1828,10 @@ export function LearnPlanView({
                   <StepMark done={done} />
                   <span className="min-w-0 flex-1">
                     <span className="text-xs tabular-nums">{lesson.order}.</span> {lesson.title}
-                    {!done && (readPct > 0 || lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress }) > 0) ? (
+                    {lesson.status === "pending" ? (
+                      <span className="mt-0.5 block text-[10px] text-[var(--ink-muted)]">Building</span>
+                    ) : null}
+                    {lesson.status !== "pending" && !done && (readPct > 0 || lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress }) > 0) ? (
                       <span className="mt-0.5 block text-[10px] tabular-nums text-[var(--ink-muted)]">
                         {lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress })}% mastery
                         {readPct > 0 ? ` · ${readPct}% read` : ""}
@@ -1793,8 +1854,8 @@ export function LearnPlanView({
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-[1120px] gap-10 px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] pt-14 sm:px-8 sm:pt-[72px] sm:pb-24">
-      <div className="learn-article min-w-0 flex-1 [scrollbar-gutter:stable]">
+    <div className="mx-auto flex w-full max-w-[1120px] gap-10 overflow-x-clip px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] pt-5 sm:px-8 sm:pt-[72px] sm:pb-24">
+      <div className="learn-article min-w-0 flex-1 overflow-x-clip [scrollbar-gutter:stable]">
         <LearnerStatsPanel
           variant="strip"
           pending={!stats}
@@ -1811,9 +1872,10 @@ export function LearnPlanView({
           <button
             type="button"
             onClick={goOverview}
-            className="mb-4 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
+            className="mb-4 inline-flex min-h-11 max-w-full items-center gap-1 rounded-md px-1.5 text-xs text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
           >
-            ← {title}
+            <span className="shrink-0">←</span>
+            <span className="truncate">{title}</span>
           </button>
         ) : null}
 
@@ -1822,15 +1884,20 @@ export function LearnPlanView({
             <p className="mb-3 inline-flex rounded-md border border-[var(--line)] px-2 py-0.5 text-xs font-medium text-[var(--ink-muted)]">
               {PROJECT_KIND_LABEL.learn}
             </p>
-            <h1 className="break-words text-3xl font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-[2.5rem]">{title}</h1>
+            <h1 className="break-words text-[1.65rem] font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-[2.5rem]">{title}</h1>
             {buildingPlanId ? (
-              <p
-                role="status"
-                className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_8%,var(--sidebar))] px-3 py-2 text-sm text-[var(--ink)]"
-              >
-                More lessons are still being built in the background. You can study at your own pace; new steps will appear
-                here as they finish.
-              </p>
+              <div className="mt-4">
+                <PathBuildCard
+                  milestones={buildMilestones.milestones}
+                  lessonOneReady={Boolean(buildMilestones.starter)}
+                  lessonOrder={buildMilestones.starter?.order ?? 1}
+                  onStartLesson={
+                    buildMilestones.starter
+                      ? () => goLesson(buildMilestones.starter!.id, "top")
+                      : undefined
+                  }
+                />
+              </div>
             ) : null}
             <p className="mt-3 text-sm leading-relaxed text-[var(--ink-muted)]">
               {plan.lessons.length} lesson{plan.lessons.length === 1 ? "" : "s"} · about {roundedMin} min · {plan.complexity}{" "}
@@ -1854,7 +1921,7 @@ export function LearnPlanView({
                   if (resume.kind === "final") goFinal();
                   else if (resume.kind === "lesson" || resume.kind === "gap") goLesson(resume.lessonId, "top");
                 }}
-                className="mt-5 flex w-full flex-col items-start gap-1 rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_50%,var(--line))]"
+                className="mt-5 flex min-h-11 w-full flex-col items-start justify-center gap-1 rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--sidebar))] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_50%,var(--line))]"
               >
                 <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--ink-muted)]">Continue</span>
                 <span className="text-sm font-medium text-[var(--ink)]">{resume.label}</span>
@@ -1909,7 +1976,7 @@ export function LearnPlanView({
                     type="button"
                     aria-pressed={homeView === "map"}
                     onClick={() => setHomeView("map")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                    className={`min-h-11 rounded-md px-3 text-xs font-medium ${
                       homeView === "map"
                         ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
                         : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
@@ -1921,7 +1988,7 @@ export function LearnPlanView({
                     type="button"
                     aria-pressed={homeView === "list"}
                     onClick={() => setHomeView("list")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                    className={`min-h-11 rounded-md px-3 text-xs font-medium ${
                       homeView === "list"
                         ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
                         : "text-[var(--ink-muted)] hover:text-[var(--ink)]"
@@ -1957,20 +2024,32 @@ export function LearnPlanView({
                         <button
                           type="button"
                           onClick={() => goLesson(lesson.id)}
-                          className="flex w-full items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))]"
+                          aria-busy={lesson.status === "pending" || undefined}
+                          className={`flex min-h-11 w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-[background-color,border-color,box-shadow] duration-500 sm:px-4 ${
+                            lessonsArrived.has(lesson.id) ? "study-ready " : ""
+                          }${
+                            lesson.status === "pending"
+                              ? "border-dashed border-[color-mix(in_srgb,var(--accent)_50%,var(--line))] bg-[color-mix(in_srgb,var(--sidebar)_88%,var(--canvas))]"
+                              : "border-[var(--line)] bg-[var(--sidebar)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))]"
+                          }`}
                         >
                           <StepMark done={done} />
                           <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-medium text-[var(--ink)]">
+                            <span className={`block break-words text-sm font-medium ${lesson.status === "pending" ? "text-[var(--ink-muted)]" : "text-[var(--ink)]"}`}>
                               Lesson {lesson.order}: {lesson.title}
                             </span>
                             <span className="mt-1 block text-xs text-[var(--ink-muted)]">
-                              {done
-                                ? "Complete"
-                                : readPct > 0
-                                  ? `${readPct}% read${lesson.quiz.length ? ` · quiz ${quizAnswered}/${lesson.quiz.length}` : ""}`
-                                  : `${lesson.estimatedMinutes} min${lesson.quiz.length ? ` · ${lesson.quiz.length} quiz questions` : ""}`}
+                              {lesson.status === "pending"
+                                ? "Building"
+                                : done
+                                  ? "Complete"
+                                  : readPct > 0
+                                    ? `${readPct}% read${lesson.quiz.length ? ` · quiz ${quizAnswered}/${lesson.quiz.length}` : ""}`
+                                    : `${lesson.estimatedMinutes} min${lesson.quiz.length ? ` · ${lesson.quiz.length} quiz questions` : ""}`}
                             </span>
+                            {lesson.status === "pending" ? (
+                              <span className="study-shimmer mt-2 block h-1 w-24 max-w-full rounded-full bg-[var(--line)]" />
+                            ) : null}
                           </span>
                         </button>
                       </li>
@@ -2008,6 +2087,14 @@ export function LearnPlanView({
 
         {location.screen === "lesson" && activeLesson ? (
           <>
+            {buildingPlanId && activeLesson.status !== "pending" ? (
+              <p
+                role="status"
+                className="mb-4 rounded-lg border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_8%,var(--sidebar))] px-3 py-2 text-sm leading-relaxed text-[var(--ink)]"
+              >
+                You can study this lesson now. The rest of the path is still being written.
+              </p>
+            ) : null}
             <ReadingProgressBar
               percent={readScrollFor(progress, scope, activeLesson.id)}
               done={readDoneFor(progress, scope, activeLesson.id)}
@@ -2053,7 +2140,7 @@ export function LearnPlanView({
 
         {location.screen === "final" && hasFinal ? (
           <>
-            <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-3xl">Final assessment</h1>
+            <h1 className="break-words text-2xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-3xl">Final assessment</h1>
             <p className="mt-2 text-sm text-[var(--ink-muted)]">Covers the whole course.</p>
             <QuizSection
               key={`${plan.id}:final`}
@@ -2100,24 +2187,24 @@ function LessonPager({
 }) {
   return (
     <nav
-      className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-8"
+      className="mt-12 flex flex-col items-stretch gap-3 border-t border-[var(--line)] pt-8 sm:flex-row sm:items-center sm:justify-between"
       aria-label="Lesson navigation"
     >
       {prev ? (
         <button
           type="button"
           onClick={onPrev}
-          className="rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-2 text-sm text-[var(--ink-muted)] hover:text-[var(--ink)]"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 text-sm text-[var(--ink-muted)] hover:text-[var(--ink)] sm:justify-start"
         >
           ← Lesson {prev.order}
         </button>
       ) : (
-        <span />
+        <span className="hidden sm:block" />
       )}
       <button
         type="button"
         onClick={onNext}
-        className="rounded-lg border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] px-3 py-2 text-sm font-medium text-[var(--ink)]"
+        className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] px-3 text-sm font-medium text-[var(--ink)]"
       >
         {nextLabel} →
       </button>

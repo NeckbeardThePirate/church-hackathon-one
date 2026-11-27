@@ -2,6 +2,7 @@
 
 import { statsFigures, type DailyGoalStatus, type LessonMastery } from "../lib/learn/learner-stats";
 import { DailyGoalBar } from "./ProgressDashboard";
+import { StudyShimmer } from "./StudyLamp";
 
 type Props = {
   xp: number;
@@ -36,12 +37,24 @@ export function LearnerStatsPanel({
         aria-label="Learner stats"
         aria-busy={figures.busy}
       >
-        <span>
-          XP <strong className="tabular-nums font-semibold text-[var(--ink)]">{figures.xp}</strong>
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          XP{" "}
+          {figures.busy ? (
+            <StudyShimmer className="inline-block h-3 w-8" />
+          ) : (
+            <strong className="tabular-nums font-semibold text-[var(--ink)]">{figures.xp}</strong>
+          )}
         </span>
-        <span>
-          Streak <strong className="tabular-nums font-semibold text-[var(--ink)]">{figures.streak}</strong>
-          {figures.busy ? "" : streak === 1 ? " day" : " days"}
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          Streak{" "}
+          {figures.busy ? (
+            <StudyShimmer className="inline-block h-3 w-8" />
+          ) : (
+            <strong className="tabular-nums font-semibold text-[var(--ink)]">
+              {figures.streak}
+              {streak === 1 ? " day" : " days"}
+            </strong>
+          )}
         </span>
         {masteryPercent != null ? (
           <span>
@@ -65,13 +78,17 @@ export function LearnerStatsPanel({
     >
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">XP</span>
-        <span className="tabular-nums text-[var(--ink)]">{figures.xp}</span>
+        {figures.busy ? <StudyShimmer className="h-3 w-8" /> : <span className="tabular-nums text-[var(--ink)]">{figures.xp}</span>}
       </div>
       <div className="mt-1 flex items-baseline justify-between gap-2 text-xs">
         <span className="font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">Streak</span>
-        <span className="tabular-nums text-[var(--ink)]">
-          {figures.busy ? figures.streak : `${figures.streak} ${streak === 1 ? "day" : "days"}`}
-        </span>
+        {figures.busy ? (
+          <StudyShimmer className="h-3 w-10" />
+        ) : (
+          <span className="tabular-nums text-[var(--ink)]">
+            {figures.streak} {streak === 1 ? "day" : "days"}
+          </span>
+        )}
       </div>
       {goal ? (
         <div className="mt-2 border-t border-[var(--line)] pt-2">

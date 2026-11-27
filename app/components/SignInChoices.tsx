@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { StudyLamp } from "./StudyLamp";
 
 const ERRORS: Record<string, string> = {
   chatgpt_unconfigured:
@@ -52,16 +53,16 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className={`w-full ${compact ? "" : "max-w-md"} [scrollbar-gutter:stable]`}>
-      <div className="safe-area-x rounded-xl border border-[var(--line)] bg-[var(--sidebar)] p-5 sm:p-6 text-[var(--ink)]">
-        <h1 className="font-serif text-2xl tracking-[-0.02em]">StudyBuddy</h1>
-        <p className="mt-2 text-sm leading-relaxed text-[var(--ink-muted)]">
+    <div className={`mx-auto w-full min-w-0 ${compact ? "" : "max-w-md"}`}>
+      <div className="rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-5 py-5 text-[var(--ink)] sm:px-6 sm:py-6">
+        <h1 className="study-serif break-words text-2xl tracking-[-0.02em]">StudyBuddy</h1>
+        <p className="mt-2 break-words text-sm leading-relaxed text-[var(--ink-muted)]">
           Learn paths cited to Scripture, the confessions, and the church fathers.
         </p>
-        <div className="mt-5 flex flex-col gap-2">
+        <div className="mt-6 flex flex-col gap-3">
           <a
             href="/api/auth/chatgpt/start"
-            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[var(--accent)] px-4 py-2.5 text-center text-base font-medium text-[#1c1a16]"
+            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-[var(--accent)] px-4 py-2.5 text-balance text-center text-base font-medium leading-snug text-[#1c1a16] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
           >
             Continue with ChatGPT
           </a>
@@ -70,14 +71,15 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
               type="button"
               onClick={() => void continueLocally()}
               disabled={pending}
-              className="min-h-11 rounded-lg border border-[var(--line)] px-4 py-2.5 text-base text-[var(--ink)] hover:bg-[var(--sidebar-active)] disabled:opacity-50"
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] px-4 py-2.5 text-balance text-center text-base leading-snug text-[var(--ink)] hover:bg-[var(--sidebar-active)] disabled:opacity-50"
             >
-              {pending ? "Signing in…" : "Continue on this computer"}
+              {pending ? <StudyLamp size={22} live /> : null}
+              {pending ? "Opening the study…" : "Continue on this computer"}
             </button>
           ) : null}
         </div>
-        {error ? <p className="mt-4 text-sm text-[#c0533f]">{error}</p> : null}
-        <p className="mt-4 text-xs leading-relaxed text-[var(--ink-muted)]">
+        {error ? <p className="mt-5 break-words text-sm leading-relaxed text-[#c0533f]">{error}</p> : null}
+        <p className="mt-5 break-words text-xs leading-relaxed text-[var(--ink-muted)]">
           Learn paths run on Workers AI. If you grant ChatGPT plan usage, it is stored for your account and used only when Workers AI fails and a fallback model is configured.
         </p>
       </div>

@@ -124,7 +124,7 @@ export function AppShell({
             type="button"
             aria-label={`Remove ${defaultTitle(project)}`}
             onClick={() => onRequestDelete(project.id)}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-base leading-none text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-base leading-none text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
           >
             ×
           </button>
@@ -136,7 +136,7 @@ export function AppShell({
 
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
-      <header className="safe-area-top fixed inset-x-0 top-0 z-50 flex h-12 items-center gap-2 border-b border-[var(--line)] bg-[var(--sidebar)] pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] md:hidden">
+      <header className="safe-area-top fixed inset-x-0 top-0 z-50 flex h-12 min-w-0 items-center gap-2 overflow-hidden border-b border-[var(--line)] bg-[var(--sidebar)] pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] md:hidden">
         <button
           type="button"
           onClick={() => setMobileNavOpen(true)}
@@ -151,16 +151,24 @@ export function AppShell({
           </span>
         </button>
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ink)]">StudyBuddy</p>
-        <p className="shrink-0 text-[11px] tabular-nums text-[var(--ink-muted)]" aria-label="Learner stats" aria-busy={figures.busy}>
-          {figures.busy ? "XP … · Streak …" : `${figures.xp} XP · ${figures.streak}d`}
+        <p
+          className="min-w-0 max-w-[5.5rem] truncate text-right text-[11px] tabular-nums text-[var(--ink-muted)]"
+          aria-label="Learner stats"
+          aria-busy={figures.busy}
+        >
+          {figures.busy ? (
+            <span className="study-shimmer inline-block h-3 w-12 rounded-full bg-[var(--line)]" aria-hidden />
+          ) : (
+            `${figures.xp} XP · ${figures.streak}d`
+          )}
         </p>
         <button
           type="button"
           onClick={openNewProject}
-          className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] px-3 text-sm font-medium text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-lg leading-none text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
           aria-label="New path"
         >
-          New path
+          <span aria-hidden>+</span>
         </button>
       </header>
 
@@ -299,7 +307,7 @@ export function AppShell({
       </aside>
 
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pt-12 md:pt-0">
-        <div data-learn-scroll className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <div data-learn-scroll className="min-h-0 min-w-0 flex-1 overflow-x-clip overflow-y-auto [scrollbar-gutter:stable]">
           {children}
         </div>
       </div>

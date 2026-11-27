@@ -90,6 +90,24 @@ test("80% rounded down, with all-but-one on a 3-item quiz", () => {
   assert.equal(attemptPassed(0, 0), false);
 });
 
+test("a pending lesson is still building, and a finished lesson is not", () => {
+  const nodes = mapOf([
+    lesson({ id: "l1", order: 1, title: "Foundations", status: "ok" }),
+    lesson({
+      id: "l2",
+      order: 2,
+      title: "Practice",
+      status: "pending",
+      teaching: [],
+      quiz: [],
+      prerequisiteLessonIds: ["l1"],
+    }),
+  ]);
+  assert.equal(nodes[0]?.building, false);
+  assert.equal(nodes[1]?.building, true);
+  assert.equal(nodes[1]?.state, "locked");
+});
+
 test("a path with no gap lessons follows order and locks on prerequisite titles", () => {
   const lessons = [
     lesson({ id: "l1", order: 1, title: "Foundations" }),

@@ -15,6 +15,7 @@ import { ArchivedProjectView } from "./ArchivedProjectView";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { LearnIntakeStep } from "./LearnIntakeStep";
 import { LearnPlanView } from "./LearnPlanView";
+import { StudyLoading } from "./StudyLoading";
 
 /** "start" is the new-path screen. "building" follows a started (or resumed) plan. */
 type WorkspaceView = "start" | "building" | "path";
@@ -491,11 +492,7 @@ export function WorkspaceApp() {
   }, [activeProjectId, updateProject]);
 
   if (!hydrated) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-[var(--canvas)] text-base text-[var(--ink-muted)]">
-        Loading workspace…
-      </div>
-    );
+    return <StudyLoading title="Your paths" caption="Gathering the desk…" />;
   }
 
   if (loadError) {

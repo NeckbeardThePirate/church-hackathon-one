@@ -18,8 +18,150 @@
 
 body {
   margin: 0;
+  overflow-x: clip;
   background: var(--canvas);
   color: var(--ink);
+}
+
+.study-serif {
+  font-family: var(--font-serif), Georgia, "Iowan Old Style", serif;
+}
+
+@keyframes study-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes study-flicker {
+  0%,
+  100% {
+    transform: scale(1, 1) rotate(-1deg);
+    opacity: 0.92;
+  }
+  35% {
+    transform: scale(0.96, 1.06) rotate(1.4deg);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(1.04, 0.96) rotate(-1.6deg);
+  }
+}
+
+@keyframes study-flare {
+  from {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0.88;
+  }
+}
+
+@keyframes study-shimmer {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -140% 0;
+  }
+}
+
+@keyframes study-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes study-ready {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  45% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
+@keyframes study-ink {
+  from {
+    stroke-dashoffset: 42;
+    opacity: 0.35;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+}
+
+.study-breathe {
+  transform-origin: center;
+  animation: study-breathe 3.4s ease-in-out infinite;
+}
+
+.study-flicker {
+  transform-origin: 50% 90%;
+  animation: study-flicker 1.7s ease-in-out infinite;
+}
+
+.study-flare {
+  transform-origin: 50% 60%;
+  animation: study-flare 0.9s ease-out;
+}
+
+.study-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    transparent 18%,
+    color-mix(in srgb, var(--accent) 34%, transparent) 46%,
+    transparent 72%
+  );
+  background-size: 220% 100%;
+  animation: study-shimmer 1.8s ease-in-out infinite;
+}
+
+.study-rise {
+  animation: study-rise 0.55s ease both;
+}
+
+.study-ready {
+  animation: study-ready 0.95s ease;
+}
+
+.study-ink {
+  stroke-dasharray: 42;
+  animation: study-ink 1.4s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .study-breathe,
+  .study-flicker,
+  .study-flare,
+  .study-shimmer,
+  .study-rise,
+  .study-ready,
+  .study-ink,
+  .animate-pulse {
+    animation: none !important;
+  }
+
+  .study-shimmer {
+    background-image: none;
+  }
 }
 
 @supports (height: 100dvh) {
