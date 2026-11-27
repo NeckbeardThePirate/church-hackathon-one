@@ -18,16 +18,20 @@ import {
 } from "@/app/lib/learn/opener";
 import { LEARN_TEXT_MODEL, llmJson, type LlmEnv } from "./llm";
 
-export const OPENER_TIMEOUT_MS = 18_000;
+export const OPENER_TIMEOUT_MS = 25_000;
 
 const OPENER_SYSTEM = `You write one short diagnostic question for a learner starting a study path.
 Probe baseline familiarity and knowledge gaps. This is not trivia and not a graded exam.
 Use the topic, the learner's notes, the passages, and every earlier answer.
-Return JSON:
-{"prompt":"one question under 180 characters","probe":"the concept this question tests, 2-6 words","stop":false,
- "choices":[{"id":"a","label":"under 90 characters","reading":"strength"|"gap"|"unsure","concept":"2-6 words"}]}
+Return one JSON object in this shape, with real values, not type names:
+{"prompt":"How familiar is the main idea?","probe":"the main idea","stop":false,"choices":[
+{"id":"a","label":"I can explain it in my own words","reading":"strength","concept":"the main idea"},
+{"id":"b","label":"I have heard the phrase only","reading":"gap","concept":"the main idea"},
+{"id":"c","label":"I mix it up with a nearby idea","reading":"gap","concept":"a nearby idea"},
+{"id":"d","label":"I'm not sure yet","reading":"unsure","concept":"the main idea"}]}
 Rules:
-- Exactly 4 choices. One reading "strength" (they already grasp the idea). One reading "gap" (a beginner answer or a plausible mix-up). One more strength or gap that distinguishes depth. One reading "unsure" with label "I'm not sure yet" and concept equal to probe.
+- Exactly 4 choices. One reading strength (they already grasp the idea). One reading gap (a beginner answer or a plausible mix-up). One more strength or gap that distinguishes depth. One reading unsure with label "I'm not sure yet" and concept equal to probe.
+- Each reading is exactly one word: strength, gap, or unsure. Never a slash, a pipe, or a list of options.
 - Choice ids are a, b, c, and d.
 - stop is true only when this is question 3 or later and the earlier answers already show a clear pattern. Otherwise false.
 - Do not quote Bible verses, confession text, or church fathers. You may name a reference.
@@ -68,7 +72,8 @@ export async function runOpenerAction(
     const state = await host.mutateOpener((current) => commitGeneratedQuestion(current, question));
     return { body: presentOpener(state), steer };
   } catch (error) {
-    console.warn("[learn] opener check closed:", error instanceof Error ? error.message : error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[learn] opener check closed:", message);
     const failed = await host.mutateOpener((current) => {
       const committed = commitOpenerFailure(current);
       turned.effects = committed.effects;
@@ -89,6 +94,7 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
   const reserved = await host.reserveLlm(false);
   if (!reserved.ok) throw new Error("Opener check skipped: model budget reached.");
   const [info, passages, state] = await Promise.all([host.info(), host.getSourcePassages(), host.getOpener()]);
+  const planId = info.planId ?? "opener";
   return llmJson(env, {
     role: "worker",
     model: LEARN_TEXT_MODEL,
@@ -100,11 +106,22 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
       questions: state.questions,
       answers: state.answers,
     }),
-    maxTokens: 800,
+    // Haiku 5.5 counts adaptive thinking against max_tokens. 800 was used up
+    // before the JSON question was written, so the check closed with no text.
+    maxTokens: 4096,
+    effort: "low",
     temperature: 0.4,
-    meta: { planId: info.planId ?? "opener", stage: "opener" },
+    meta: { planId, stage: "opener" },
     userId: reserved.userId,
-    validate: parseOpenerQuestion,
+    validate: (value) => {
+      try {
+        return parseOpenerQuestion(value);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[learn] opener question rejected plan=${planId}: ${message} payload=${JSON.stringify(value).slice(0, 400)}`);
+        throw error;
+      }
+    },
   });
 }
 

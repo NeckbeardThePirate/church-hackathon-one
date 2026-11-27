@@ -39,13 +39,13 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
 
     const load = async () => {
       try {
-        const current = await readOpener(planId);
+        const current = await readOpener(planId).catch(() => null);
         if (!live) return;
-        if (current.status === "closed") {
+        if (current?.status === "closed") {
           finish(current.summary ?? "");
           return;
         }
-        if (current.status === "asking" && current.question) {
+        if (current?.status === "asking" && current.question) {
           setView(current);
           return;
         }
@@ -154,16 +154,29 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
 }
 
 async function readOpener(planId: string): Promise<OpenerPublic> {
-  const response = await fetch(`/api/learn/plans/${planId}/opener`, { credentials: "same-origin", signal: AbortSignal.timeout(12_000) });
+  const response = await fetch(`/api/learn/plans/${planId}/opener`, { credentials: "same-origin", signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`opener ${response.status}`);
   return (await response.json()) as OpenerPublic;
 }
 
 async function askNext(planId: string): Promise<OpenerPublic> {
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const body = await postOpener(planId, { action: "next" });
-    if (!(body.status === "ready" && body.pending)) return body;
-    await new Promise((resolve) => setTimeout(resolve, 700));
+  let started: OpenerPublic | null = null;
+  try {
+    started = await postOpener(planId, { action: "next" });
+  } catch {
+    started = null;
+  }
+  if (started && !(started.status === "ready" && started.pending)) return started;
+  // Another request may still be writing the question. Poll instead of giving up.
+  const deadline = Date.now() + 26_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const current = await readOpener(planId);
+      if (current.status === "closed" || (current.status === "asking" && current.question)) return current;
+    } catch {
+      // The read can time out while the model call is still in flight.
+    }
   }
   return { status: "closed", reason: "unavailable", index: 0, answered: 0, limit: 4, summary: "" };
 }
@@ -174,7 +187,7 @@ async function postOpener(planId: string, payload: { action: "next" | "skip" } |
     credentials: "same-origin",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(22_000),
+    signal: AbortSignal.timeout(28_000),
   });
   if (!response.ok) throw new Error(`opener ${response.status}`);
   return (await response.json()) as OpenerPublic;
