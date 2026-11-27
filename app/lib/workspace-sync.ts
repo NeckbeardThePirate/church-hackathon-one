@@ -1,4 +1,5 @@
 import type { StatsSnapshot } from "./learn/learner-stats";
+import { WELCOME_PREF_KEY, type WelcomeStatus } from "./learn/welcome";
 import { claimLegacyProgress } from "./learn/plan-progress";
 import {
   clearLocalProjects,
@@ -103,4 +104,12 @@ export async function fetchLearnPerspective(): Promise<string | null> {
 
 export async function saveLearnPerspective(value: string): Promise<void> {
   await savePref(PERSPECTIVE_KEY, value);
+}
+
+export async function fetchWelcomeStatus(): Promise<string | null> {
+  return fetchPref(WELCOME_PREF_KEY);
+}
+
+export async function saveWelcomeStatus(status: Exclude<WelcomeStatus, "unseen">): Promise<void> {
+  await savePref(WELCOME_PREF_KEY, status);
 }
