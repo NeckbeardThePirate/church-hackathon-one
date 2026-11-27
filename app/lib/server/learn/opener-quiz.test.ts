@@ -161,6 +161,9 @@ test("skip and a timed-out Haiku call finish the check without failing the path"
   const skipped = await runOpenerAction(mockEnv(), plan, { type: "skip" });
   assert.equal(skipped.body.status, "closed");
   assert.equal(skipped.body.reason, "skipped");
+  const afterSkip = await runOpenerAction(mockEnv(), plan, { type: "next" });
+  assert.equal(afterSkip.body.status, "closed");
+  assert.equal(afterSkip.body.reason, "skipped");
   assert.equal((await plan.info()).status, "queued");
   assert.deepEqual((await plan.info()).lessonIds, ["l1", "l2", "l3", "l4"]);
 
@@ -184,6 +187,10 @@ test("skip and a timed-out Haiku call finish the check without failing the path"
   const snap = await slow.snapshot({ events: false, workingPlan: false });
   assert.equal(snap.status, "queued");
   assert.equal(snap.error, undefined);
+
+  const again = await runOpenerAction(mockEnv(), slow, { type: "next" });
+  assert.equal(again.body.status, "asking");
+  assert.ok(again.body.question?.prompt);
 });
 
 test("the opener call uses the Haiku catalog id through the gateway", async () => {

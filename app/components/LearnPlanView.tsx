@@ -112,6 +112,7 @@ import type { LearnReviewFocus } from "../lib/learn/agent-context";
 import { ArticleReadWindow } from "./ArticleReadWindow";
 import { LearnAgentFloat } from "./LearnAgentFloat";
 import { LearnPathMap } from "./LearnPathMap";
+import { OpenerQuiz } from "./OpenerQuiz";
 import { PathBuildCard } from "./PathBuildCard";
 import { StudyLamp } from "./StudyLamp";
 import { StudyPlaceholder } from "./StudyLoading";
@@ -1207,6 +1208,7 @@ export function LearnPlanView({
   const [reviewFocus, setReviewFocus] = useState<LearnReviewFocus | null>(null);
   const [buildStage, setBuildStage] = useState<LearnStage | undefined>(undefined);
   const [buildCounts, setBuildCounts] = useState<{ done: number; total: number } | null>(null);
+  const [openerSettled, setOpenerSettled] = useState(false);
 
   const saveTimerRef = useRef<number | null>(null);
   const lessonScrollIntentRef = useRef<LessonScrollIntent>("restore");
@@ -1220,6 +1222,10 @@ export function LearnPlanView({
   onAwardRef.current = onAward;
   const onPlanRef = useRef(onPlan);
   onPlanRef.current = onPlan;
+
+  useEffect(() => {
+    setOpenerSettled(false);
+  }, [buildingPlanId]);
 
   useEffect(() => {
     setPlan((current) => {
@@ -1887,15 +1893,24 @@ export function LearnPlanView({
             </p>
             <h1 className="break-words text-[1.65rem] font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-[2.5rem]">{title}</h1>
             {buildingPlanId ? (
-              <div className="mt-4">
+              <div
+                className={`mt-4 overflow-hidden rounded-2xl border bg-[var(--sidebar)] ${
+                  buildMilestones.starter
+                    ? "study-ready border-[color-mix(in_srgb,var(--accent)_55%,var(--line))]"
+                    : "border-[var(--line)]"
+                }`}
+              >
+                {openerSettled ? null : (
+                  <OpenerQuiz key={buildingPlanId} planId={buildingPlanId} onSettled={() => setOpenerSettled(true)} />
+                )}
                 <PathBuildCard
+                  embedded
+                  quiet={!openerSettled}
                   milestones={buildMilestones.milestones}
                   lessonOneReady={Boolean(buildMilestones.starter)}
                   lessonOrder={buildMilestones.starter?.order ?? 1}
                   onStartLesson={
-                    buildMilestones.starter
-                      ? () => goLesson(buildMilestones.starter!.id, "top")
-                      : undefined
+                    buildMilestones.starter ? () => goLesson(buildMilestones.starter!.id, "top") : undefined
                   }
                 />
               </div>

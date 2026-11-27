@@ -216,7 +216,14 @@ export function reduceOpener(state: OpenerState, event: OpenerEvent): { state: O
     if (state.status === "closed") return { state, effects: [] };
     return { state: closeOpener(state, "skipped"), effects: [{ type: "steer" }, { type: "close" }] };
   }
-  if (state.status === "closed") return { state, effects: [] };
+  if (state.status === "closed") {
+    // A failed first question must not end the check. The next request starts it again.
+    // Skip and a finished diagnostic stay closed.
+    if (event.type === "start" && state.reason === "unavailable" && state.answers.length === 0) {
+      return reduceOpener(freshOpener(), event);
+    }
+    return { state, effects: [] };
+  }
 
   if (event.type === "start") {
     if (unansweredQuestion(state)) return { state, effects: [{ type: "show" }] };
@@ -270,6 +277,22 @@ export function commitGeneratedQuestion(state: OpenerState, question: OpenerQues
 export function commitOpenerFailure(state: OpenerState): { state: OpenerState; effects: OpenerEffect[] } {
   const reduced = reduceOpener(unlock(state), { type: "fail" });
   return { state: { ...reduced.state, generating: false, generatingSince: undefined }, effects: reduced.effects };
+}
+
+export type OpenerStep = "show" | "wait" | "done";
+
+/**
+ * What the check card should do with one payload.
+ * A missing question, or a close before any answer, is not the end of the check.
+ * Skip and a finished diagnostic are.
+ */
+export function openerStep(
+  body: Pick<OpenerPublic, "status" | "reason" | "question" | "answered"> | null | undefined,
+): OpenerStep {
+  if (!body) return "wait";
+  if (body.status === "asking" && body.question) return "show";
+  if (body.status === "closed" && !(body.reason === "unavailable" && body.answered === 0)) return "done";
+  return "wait";
 }
 
 export function presentOpener(state: OpenerState, pending = false): OpenerPublic {
