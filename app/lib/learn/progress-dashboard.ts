@@ -95,6 +95,7 @@ export function pathSummaries(projects: readonly DashboardProject[], now: number
 }
 
 function openNode(node: PathMapNode): boolean {
+  if (node.building) return false;
   return node.state === "available" || node.state === "in-progress" || node.state === "needs-review";
 }
 

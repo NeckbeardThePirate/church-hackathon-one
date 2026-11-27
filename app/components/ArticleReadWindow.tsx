@@ -294,7 +294,7 @@ export function ArticleReadWindow({
         <button
           type="button"
           onClick={() => onOpenChange(!open)}
-          className="rounded-md border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] px-2.5 py-1 text-xs font-medium text-[var(--ink)]"
+          className="inline-flex min-h-11 items-center rounded-md border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] px-3 text-xs font-medium text-[var(--ink)]"
         >
           {readLabel}
         </button>
@@ -302,7 +302,7 @@ export function ArticleReadWindow({
           type="button"
           aria-pressed={done}
           onClick={() => onDone(!done)}
-          className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+          className={`inline-flex min-h-11 items-center rounded-md border px-3 text-xs font-medium ${
             done
               ? "border-[color-mix(in_srgb,#6b9f7a_50%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_18%,var(--sidebar))] text-[color-mix(in_srgb,#6b9f7a_85%,var(--ink))]"
               : nearEnd
@@ -343,11 +343,11 @@ export function ArticleReadWindow({
           >
             {!body && status !== "error" ? (
               <div className="space-y-3 font-sans" aria-busy="true" aria-live="polite">
-                <p className="text-sm text-[var(--ink-muted)]">Pulling in the article…</p>
-                <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--sidebar-active)]" />
-                <div className="h-3 w-full animate-pulse rounded bg-[var(--sidebar-active)]" />
-                <div className="h-3 w-11/12 animate-pulse rounded bg-[var(--sidebar-active)]" />
-                <div className="h-3 w-4/5 animate-pulse rounded bg-[var(--sidebar-active)]" />
+                <p className="study-serif text-sm italic text-[var(--ink-muted)]">Pulling in the article…</p>
+                <div className="study-shimmer h-3 w-2/3 rounded bg-[var(--line)]" />
+                <div className="study-shimmer h-3 w-full rounded bg-[var(--line)]" />
+                <div className="study-shimmer h-3 w-11/12 rounded bg-[var(--line)]" />
+                <div className="study-shimmer h-3 w-4/5 rounded bg-[var(--line)]" />
               </div>
             ) : null}
             {status === "error" ? (

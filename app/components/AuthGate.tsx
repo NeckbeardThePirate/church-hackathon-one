@@ -11,13 +11,10 @@ import {
 } from "./auth-session-gate";
 import { useClerkKey } from "./ClerkAppProvider";
 import { GuestPreview } from "./GuestPreview";
+import { StudyLoading } from "./StudyLoading";
 
 function AuthLoading() {
-  return (
-    <div className="flex min-h-dvh items-center justify-center bg-[var(--canvas)] text-base text-[var(--ink-muted)]">
-      Loading…
-    </div>
-  );
+  return <StudyLoading title="StudyBuddy" />;
 }
 
 function SessionGate({
