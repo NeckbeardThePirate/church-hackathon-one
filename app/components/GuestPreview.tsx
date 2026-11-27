@@ -24,6 +24,7 @@ import {
   type GuestSampleState,
 } from "../lib/learn/guest-preview";
 import { LearnPathMap } from "./LearnPathMap";
+import { LegalLinks } from "./LegalLinks";
 
 const serif = { fontFamily: "var(--font-serif), Georgia, 'Iowan Old Style', serif" } as const;
 
@@ -489,6 +490,9 @@ export function GuestPreview() {
               )}
             </section>
           </div>
+          <footer className="mt-12 border-t border-[var(--line)] pt-4">
+            <LegalLinks />
+          </footer>
         </div>
       </main>
     </div>
