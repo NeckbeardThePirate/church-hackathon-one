@@ -1,9 +1,9 @@
 "use client";
 
-import { ClerkLoading, RedirectToSignIn, Show } from "@clerk/react";
+import { ClerkLoading, Show } from "@clerk/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
-import { SignInChoices } from "./SignInChoices";
+import { GuestPreview } from "./GuestPreview";
 
 function AuthLoading() {
   return (
@@ -34,14 +34,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (session === "loading" || !clerkReady) return <AuthLoading />;
   if (session === "in") return <>{children}</>;
 
-  if (!publishableKey) return <div className="safe-area-x flex min-h-dvh items-center justify-center bg-[var(--canvas)] px-4 py-10 [scrollbar-gutter:stable]"><SignInChoices /></div>;
+  if (!publishableKey) return <GuestPreview />;
 
   return (
     <>
       <ClerkLoading>
         <AuthLoading />
       </ClerkLoading>
-      <Show when="signed-in" fallback={<RedirectToSignIn />}>
+      <Show when="signed-in" fallback={<GuestPreview />}>
         {children}
       </Show>
     </>
