@@ -147,6 +147,24 @@ body {
   animation: study-ink 1.4s ease both;
 }
 
+@keyframes path-stage-live {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.path-swoosh-reveal {
+  transition: stroke-dashoffset 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.path-stage-live {
+  animation: path-stage-live 2.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .study-breathe,
   .study-flicker,
@@ -155,12 +173,21 @@ body {
   .study-rise,
   .study-ready,
   .study-ink,
+  .path-stage-live,
   .animate-pulse {
     animation: none !important;
   }
 
   .study-shimmer {
     background-image: none;
+  }
+
+  .path-swoosh-reveal {
+    transition: none;
+  }
+
+  .path-stage-live {
+    opacity: 1;
   }
 }
 
