@@ -69,7 +69,7 @@ test("every open step has an excerpt, both sources, and a spaced-review chip", (
 test("the landing honesty line is the faithfulness copy", () => {
   assert.equal(
     GUEST_HONESTY_COPY,
-    "Lessons and quizzes are AI-generated; Scripture and historical sources are retrieved from the library.",
+    "This lesson is partially AI generated.",
   );
 });
 
@@ -208,7 +208,7 @@ test("the spawned practice lesson retrieves Ruth and the Westminster Confession"
   assert.match(confession.text, /protected, provided for, and chastened by Him as by a Father/);
   assert.equal(
     GUEST_HONESTY_COPY,
-    "Lessons and quizzes are AI-generated; Scripture and historical sources are retrieved from the library.",
+    "This lesson is partially AI generated.",
   );
 });
 
