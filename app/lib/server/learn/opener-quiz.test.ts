@@ -5,7 +5,7 @@ import type { LearnLesson, LessonOutline, ScopeResult } from "../../learn/types.
 import { runResearch } from "./stages.ts";
 import { LearnPlanDO } from "./plan-do.ts";
 import { runOpenerAction } from "./opener-quiz.ts";
-import type { LlmEnv } from "./llm.ts";
+import { LEARN_MAX_TOKENS, type LlmEnv } from "./llm.ts";
 import { env as workersEnv } from "./cloudflare-workers-stub.ts";
 
 const PLAN_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -230,7 +230,7 @@ test("the opener call uses the Haiku catalog id through the gateway", async () =
 
   const opened = await runOpenerAction(env, plan, { type: "next" });
   assert.equal(sent, "claude-haiku-5-5");
-  assert.equal(sentMax, 4096);
+  assert.equal(sentMax, LEARN_MAX_TOKENS);
   assert.equal(sentEffort, "low");
   assert.equal(opened.body.status, "asking");
   assert.equal(opened.body.question?.prompt, "How familiar is justification by faith?");

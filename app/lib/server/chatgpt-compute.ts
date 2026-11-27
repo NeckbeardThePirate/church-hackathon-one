@@ -4,6 +4,7 @@
  */
 import type { UserWorkspaceDO } from "./user-workspace-do";
 import { OPENAI_RESOURCE, OPENAI_TOKEN, type ChatGptIdentity } from "./chatgpt-auth";
+import { LEARN_GATEWAY_TIMEOUT_MS } from "./learn/llm.ts";
 
 type ComputeEnv = {
   LEARN_CHATGPT_MODEL?: string;
@@ -109,7 +110,7 @@ export async function chatGptText(
         { role: "user", content: user },
       ],
     }),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(LEARN_GATEWAY_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`ChatGPT plan request failed (${response.status}).`);

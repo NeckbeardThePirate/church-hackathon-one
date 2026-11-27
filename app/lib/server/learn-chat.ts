@@ -1,5 +1,13 @@
 import { runWorkersAi, workersGatewayCall } from "./ai-gateway";
-import { callAnthropic, learnModelId, readAnthropicText, type LlmEnv } from "./learn/llm";
+import {
+  LEARN_MAX_TOKENS,
+  LEARN_THINKING_EFFORT,
+  callAnthropic,
+  learnModelId,
+  readAnthropicText,
+  warnIfMaxTokensStop,
+  type LlmEnv,
+} from "./learn/llm";
 import { SOURCE_TEXT_RULE } from "./learn/source-policy";
 import type { LearnChatContext, LearnChatInput, LearnChatMessage, SerializedLesson } from "../learn/agent-context";
 
@@ -147,10 +155,12 @@ function parseSseLine(line: string): string {
   try {
     const json = JSON.parse(payload) as {
       type?: string;
-      delta?: { type?: string; text?: string };
+      stop_reason?: string;
+      delta?: { type?: string; text?: string; stop_reason?: string };
       response?: unknown;
       choices?: { delta?: { content?: unknown } }[];
     };
+    warnIfMaxTokensStop(json, "tutor");
     if (json.type === "content_block_delta" && json.delta?.type === "text_delta" && typeof json.delta.text === "string") {
       return json.delta.text;
     }
@@ -212,7 +222,7 @@ export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Prom
 
   if (model.startsWith("anthropic/")) {
     const result = await callAnthropic(env, model, {
-      max_tokens: 1800,
+      max_tokens: LEARN_MAX_TOKENS,
       stream: true,
       system,
       messages: history,
@@ -224,7 +234,7 @@ export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Prom
       }
       return textStreamFrom(result.body);
     }
-    return onceText(await readAnthropicText(result));
+    return onceText(await readAnthropicText(result, "tutor"));
   }
 
   const upstream = (await runWorkersAi(
@@ -233,7 +243,8 @@ export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Prom
     {
       messages: [{ role: "system", content: system }, ...history],
       stream: true,
-      max_tokens: 1800,
+      max_tokens: LEARN_MAX_TOKENS,
+      reasoning_effort: LEARN_THINKING_EFFORT,
       temperature: 0.45,
     },
     workersGatewayCall(env.AI_GATEWAY_ID, { stage: "chat" }),

@@ -28,7 +28,18 @@ import { exaAuthFrom, exaReady, exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId
 import { citeLibrary, mergeLibraryCitations, resolveLibraryRefs, type NamedLibraryRef } from "./library-cite";
 import { recordNewLessonWarnings } from "./plan-builder-log";
 import { SOURCE_TEXT_RULE } from "./source-policy";
-import { list, llmJson, num, obj, str, strList, type LlmMeta, type LlmRole } from "./llm";
+import {
+  LEARN_MAX_TOKENS,
+  LEARN_MAX_TOKENS_LONG,
+  list,
+  llmJson,
+  num,
+  obj,
+  str,
+  strList,
+  type LlmMeta,
+  type LlmRole,
+} from "./llm";
 import {
   carryConceptTags,
   finalizeGeneratedQuiz,
@@ -59,6 +70,7 @@ async function llm<T>(
   role: LlmRole,
   call: { system: string; user: string; validate: (v: unknown) => T; maxTokens?: number; temperature?: number },
 ): Promise<T> {
+  // Omitted maxTokens inherits LEARN_MAX_TOKENS. Lessons and the path outline pass LEARN_MAX_TOKENS_LONG.
   const reserved = await ctx.stub.reserveLlm(ctx.msg.job === "gap");
   if (!reserved.ok) throw new BudgetExhausted("LLM call budget reached.");
   const meta: LlmMeta = { planId: ctx.msg.planId, stage: ctx.msg.stage, lessonId: ctx.msg.lessonId };
@@ -168,6 +180,7 @@ export async function runPlan(ctx: Ctx): Promise<void> {
   const steer = planSteerLine(await ctx.stub.getOpenerDiagnostic(), n);
 
   const outlines = await llm(ctx, "planner", {
+    maxTokens: LEARN_MAX_TOKENS_LONG,
     system: `You turn a course scope into an ordered lesson outline. Each lesson builds on earlier ones.
 Return JSON:
 {"lessons":[{"title":"","objectives":["2-4, verb-first"],"prerequisiteLessons":[earlier lesson numbers, 1-based],
@@ -512,7 +525,7 @@ async function runGapTeach(ctx: Ctx): Promise<void> {
   const allowed = new Map(concepts.map((concept) => [concept.conceptId, concept.conceptLabel]));
 
   const result = await llm(ctx, "worker", {
-    maxTokens: 5000,
+    maxTokens: LEARN_MAX_TOKENS_LONG,
     system: `You write a short practice lesson for an adult learner who missed specific ideas.
 One sitting. Teach only the missed concepts named in the user message. Do not add new topics.
 Return JSON:
@@ -721,7 +734,7 @@ export async function runTeach(ctx: Ctx): Promise<void> {
   const passages = await ctx.stub.getSourcePassages();
 
   const result = await llm(ctx, "worker", {
-    maxTokens: 8000,
+    maxTokens: LEARN_MAX_TOKENS_LONG,
     system: `You write one lesson of a course for an adult learner.
 Return JSON:
 {"teaching":[{"type":"heading2"|"paragraph"|"bullet"|"numbered"|"quote"|"divider","text":""}],
@@ -1171,7 +1184,7 @@ export async function runAssemble(ctx: Ctx): Promise<void> {
     try {
       finalAssessment = attachFinalConcepts(
         await llm(ctx, "worker", {
-          maxTokens: 5000,
+          maxTokens: LEARN_MAX_TOKENS,
           system: `Write a final assessment for a course. Mix items across all lessons, favoring questions that connect lessons.
 Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0,"conceptId":"","conceptLabel":""}]}
 Return exactly ${band.finalItems} items. ${QUIZ_RULES} objectiveIndex refers to the course objectives.
