@@ -4,15 +4,16 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { gradeShortAnswerLocal } from "../learn/grade-answer.ts";
 import { shouldOfferStarterPath } from "../learn/starter-offer.ts";
-import { isStarterPlanId } from "../learn/starters.ts";
+import { isStarterPathId, isStarterPlanId, LEGACY_STARTER_PLAN_IDS } from "../learn/starters.ts";
 import type { LearnLesson, QuizItem } from "../learn/types.ts";
 import { WORKSPACE_SCHEMA_VERSION } from "./user-workspace-schema.ts";
+import { quizKindMinimum } from "./learn/quiz-items.ts";
 import { materializeStarter, seedStarterIntoWorkspace, type WorkspaceSeed } from "./starter-paths.ts";
 import { env as workersEnv } from "./learn/cloudflare-workers-stub.ts";
 import { SESSION_COOKIE, signSession } from "./session.ts";
 
 const SECRET = "starter-path-test-secret";
-const HESED_PARAPHRASE = "covenant loyalty and steadfast kindness shown within a relationship";
+const JOHN_PARAPHRASE = "the divine Word took on humanity";
 const LORDS_PARAPHRASE =
   "both start by calling God Father and ask for daily food; Matthew's is longer, with extra lines Luke leaves out";
 
@@ -44,25 +45,33 @@ test("the honesty note is unchanged and the starter card does not use browser di
 });
 
 test("a starter with no Bible library uses bundled wording, a gap lesson, and gradeable quiz keys", async () => {
-  const ruth = await materializeStarter("ruth", {}, 40);
-  assert.equal(ruth.importComplete, true);
-  assert.equal(ruth.learnPlanId, undefined);
-  assert.equal(ruth.learnPlan?.status, "complete");
-  assert.equal(isStarterPlanId(ruth.learnPlan?.id ?? ""), true);
-  assert.equal(ruth.title, "The Book of Ruth");
-  const lessons = ruth.learnPlan?.lessons ?? [];
+  const john = await materializeStarter("john", {}, 40);
+  assert.equal(john.importComplete, true);
+  assert.equal(john.learnPlanId, undefined);
+  assert.equal(john.learnPlan?.status, "complete");
+  assert.equal(isStarterPlanId(john.learnPlan?.id ?? ""), true);
+  assert.equal(isStarterPlanId(LEGACY_STARTER_PLAN_IDS[0]), true);
+  assert.equal(isStarterPathId("ruth"), false);
+  assert.equal(isStarterPathId("john"), true);
+  assert.equal(john.title, "The Gospel of John");
+  const lessons = john.learnPlan?.lessons ?? [];
   const gap = lessons.find((lesson) => lesson.kind === "gap");
   assert.ok(gap);
   assert.equal(gap.sourceLessonId, "l1");
   assert.ok(gap.teaching.length > 0);
   assert.ok(gap.quiz.length > 0);
   assert.equal(gap.scripture[0]?.textSource, "bundled");
-  assert.match(gap.scripture[0]?.text ?? "", /Intreat me not to leave thee/);
+  assert.match(gap.scripture[0]?.text ?? "", /In the beginning was the Word/);
+  assert.match(gap.scripture[0]?.reference ?? "", /^John /);
   assert.ok(lessons.every((lesson) => lesson.quiz.length > 0 && lesson.scripture.length > 0 && (lesson.library?.length ?? 0) > 0));
-  const hesed = shortItem(lessons, /hesed/i);
-  assert.equal(gradeShortAnswerLocal(HESED_PARAPHRASE, hesed.answer).correct, true);
-  for (const lesson of lessons) assertSlotsVary(lesson.quiz, lesson.id);
-  assertSlotsVary(ruth.learnPlan?.finalAssessment ?? [], "ruth final");
+  const claim = shortItem(lessons, /claim about the Word/i);
+  assert.equal(gradeShortAnswerLocal(JOHN_PARAPHRASE, claim.answer).correct, true);
+  for (const lesson of lessons) {
+    assertSlotsVary(lesson.quiz, lesson.id);
+    assertKindMix(lesson.quiz, lesson.id);
+  }
+  assertSlotsVary(john.learnPlan?.finalAssessment ?? [], "john final");
+  assertKindMix(john.learnPlan?.finalAssessment ?? [], "john final");
 
   const lords = await materializeStarter("lords-prayer", {}, 40);
   assert.equal(lords.title, "The Lord’s Prayer");
@@ -75,19 +84,22 @@ test("a starter with no Bible library uses bundled wording, a gap lesson, and gr
 });
 
 test("D1 rows replace bundled scripture and confessions, and a miss keeps the bundle", async () => {
-  const ruth = await materializeStarter("ruth", { BIBLE: fakeBible() }, 40);
-  const first = ruth.learnPlan?.lessons[0];
+  const john = await materializeStarter("john", { BIBLE: fakeBible() }, 40);
+  const first = john.learnPlan?.lessons[0];
   assert.equal(first?.scripture[0]?.textSource, "d1");
-  assert.match(first?.scripture[0]?.text ?? "", /D1-RUTH-16/);
-  assert.doesNotMatch(first?.scripture[0]?.text ?? "", /Intreat/);
+  assert.match(first?.scripture[0]?.text ?? "", /D1-JOHN-1/);
+  assert.match(first?.scripture[0]?.text ?? "", /D1-JOHN-3/);
+  assert.doesNotMatch(first?.scripture[0]?.text ?? "", /In the beginning was the Word/);
+  assert.equal(first?.scripture[1]?.textSource, "bundled");
+  assert.match(first?.scripture[1]?.text ?? "", /was made flesh/);
   assert.equal(first?.library?.[0]?.textSource, "d1");
-  assert.match(first?.library?.[0]?.text ?? "", /D1-WCF-PROVIDENCE/);
-  const wings = ruth.learnPlan?.lessons.find((lesson) => lesson.id === "l2");
-  assert.equal(wings?.scripture[0]?.textSource, "bundled");
-  assert.match(wings?.scripture[0]?.text ?? "", /under whose wings/);
-  const chrysostom = wings?.library?.find((item) => item.source === "father");
-  assert.equal(chrysostom?.textSource, "bundled");
-  assert.match(chrysostom?.text ?? "", /gift from above/);
+  assert.match(first?.library?.[0]?.text ?? "", /D1-WCF-MEDIATOR/);
+  const purpose = john.learnPlan?.lessons.find((lesson) => lesson.id === "l2");
+  assert.equal(purpose?.scripture[0]?.textSource, "bundled");
+  assert.match(purpose?.scripture[0]?.text ?? "", /have life through his name/);
+  const augustine = purpose?.library?.find((item) => item.source === "father");
+  assert.equal(augustine?.textSource, "bundled");
+  assert.match(augustine?.text ?? "", /medicine unto us/);
 });
 
 type SqlCursor = { one(): Record<string, unknown>; toArray(): Record<string, unknown>[] };
@@ -138,16 +150,16 @@ test("seeding writes one workspace project and does not touch a workspace that a
       return workspace.upsertProject(input);
     },
   };
-  const first = await seedStarterIntoWorkspace(seed, {}, "ruth", 10);
+  const first = await seedStarterIntoWorkspace(seed, {}, "john", 10);
   assert.equal(first.ok, true);
   if (!first.ok) return;
   assert.equal(first.created, true);
   assert.equal(writes, 1);
-  const stored = workspace.getProject("starter-ruth");
+  const stored = workspace.getProject("starter-john");
   assert.equal(stored?.learnPlan?.lessons.some((lesson) => lesson.kind === "gap"), true);
   assert.equal(stored?.importComplete, true);
 
-  const again = await seedStarterIntoWorkspace(seed, {}, "ruth", 99);
+  const again = await seedStarterIntoWorkspace(seed, {}, "john", 99);
   assert.equal(again.ok, true);
   if (!again.ok) return;
   assert.equal(again.created, false);
@@ -165,7 +177,7 @@ test("seeding writes one workspace project and does not touch a workspace that a
   });
   const blocked = await seedStarterIntoWorkspace(
     {
-      listProjects: () => workspace.listProjects().filter((project) => project.id !== "starter-ruth"),
+      listProjects: () => workspace.listProjects().filter((project) => project.id !== "starter-john"),
       upsertProject: () => {
         throw new Error("should not write");
       },
@@ -219,6 +231,13 @@ test("the starter route rejects signed-out callers, seeds an empty workspace, an
   assert.equal(signedOut.status, 401);
   assert.equal(tracker.opens(), 0);
 
+  const defaulted = await POST(await signedRequest("/api/workspace/starter", "user_a", {}));
+  assert.equal(defaulted.status, 201);
+  const defaultedBody = (await defaulted.json()) as { project?: { id?: string; title?: string } };
+  assert.equal(defaultedBody.project?.id, "starter-john");
+  assert.equal(defaultedBody.project?.title, "The Gospel of John");
+  workspace.deleteProject("starter-john");
+
   const created = await POST(await signedRequest("/api/workspace/starter", "user_a", { id: "lords-prayer" }));
   assert.equal(created.status, 201);
   const createdBody = (await created.json()) as { created?: boolean; project?: { id?: string; title?: string; learnPlan?: { lessons?: { kind?: string }[] } } };
@@ -236,6 +255,8 @@ test("the starter route rejects signed-out callers, seeds an empty workspace, an
 
   const unknown = await POST(await signedRequest("/api/workspace/starter", "user_a", { id: "jonah" }));
   assert.equal(unknown.status, 400);
+  const retired = await POST(await signedRequest("/api/workspace/starter", "user_a", { id: "ruth" }));
+  assert.equal(retired.status, 400);
 
   workspace.deleteProject("starter-lords-prayer");
   workspace.upsertProject({
@@ -246,11 +267,21 @@ test("the starter route rejects signed-out callers, seeds an empty workspace, an
     updatedAt: 5,
     importComplete: true,
   });
-  const refused = await POST(await signedRequest("/api/workspace/starter", "user_a", { id: "ruth" }));
+  const refused = await POST(await signedRequest("/api/workspace/starter", "user_a", { id: "john" }));
   assert.equal(refused.status, 409);
-  assert.equal(workspace.getProject("starter-ruth"), null);
+  assert.equal(workspace.getProject("starter-john"), null);
   assert.equal(workspace.getProject("owned")?.title, "Already mine");
 });
+
+function assertKindMix(items: readonly { kind: string }[], label: string) {
+  const minimum = quizKindMinimum(items.length);
+  const multipleChoice = items.filter((item) => item.kind === "mc").length;
+  const shortAnswer = items.filter((item) => item.kind === "short").length;
+  assert.ok(
+    multipleChoice >= minimum && shortAnswer >= minimum,
+    `${label} kind mix: ${multipleChoice} multiple choice, ${shortAnswer} short answer, need ${minimum} of each`,
+  );
+}
 
 function assertSlotsVary(items: readonly { kind: string; choices?: string[]; answer: string }[], label: string) {
   const slots = items.flatMap((item) => (item.kind === "mc" && item.choices ? [item.choices.indexOf(item.answer)] : []));
@@ -269,8 +300,9 @@ function shortItem(lessons: LearnLesson[], question: RegExp): QuizItem {
 
 function fakeBible(): D1Database {
   const verses = [
-    { book_id: 8, chapter: 1, verse: 16, text: "D1-RUTH-16" },
-    { book_id: 8, chapter: 1, verse: 17, text: "D1-RUTH-17" },
+    { book_id: 43, chapter: 1, verse: 1, text: "D1-JOHN-1" },
+    { book_id: 43, chapter: 1, verse: 2, text: "D1-JOHN-2" },
+    { book_id: 43, chapter: 1, verse: 3, text: "D1-JOHN-3" },
   ];
   return {
     prepare(sql: string) {
@@ -286,15 +318,15 @@ function fakeBible(): D1Database {
                     .map((row) => ({ verse: row.verse, text: row.text })),
                 };
               }
-              if (sql.includes("confession_sections") && String(args[2] ?? "") === "5.1") {
+              if (sql.includes("confession_sections") && String(args[2] ?? "") === "8.2") {
                 return {
                   results: [
                     {
-                      id: "d1-wcf-5-1",
+                      id: "d1-wcf-8-2",
                       doc_title: "Westminster Confession of Faith",
-                      label: "5.1",
-                      title: "Of Providence",
-                      text: "D1-WCF-PROVIDENCE",
+                      label: "8.2",
+                      title: "Of Christ the Mediator",
+                      text: "D1-WCF-MEDIATOR",
                     },
                   ],
                 };
