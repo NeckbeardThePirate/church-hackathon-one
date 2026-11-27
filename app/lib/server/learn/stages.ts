@@ -25,6 +25,7 @@ import {
 import { fetchPassagesFromD1 } from "../bible-db";
 import { exaAuthFrom, exaReady, exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId, youtubeOembed } from "./exa";
 import { citeLibrary, mergeLibraryCitations, resolveLibraryRefs, type NamedLibraryRef } from "./library-cite";
+import { recordNewLessonWarnings } from "./plan-builder-log";
 import { SOURCE_TEXT_RULE } from "./source-policy";
 import { list, llmJson, num, obj, str, strList, type LlmMeta, type LlmRole } from "./llm";
 import {
@@ -587,6 +588,7 @@ ${retrievedSources(parent)}`,
     ...verified.dropped.map((ref) => `Scripture reference dropped (did not resolve in BSB): ${ref}`),
     ...cited.dropped.map((ref) => `Library reference dropped (did not resolve): ${ref}`),
   ];
+  await logBuilderNotes(ctx, lesson, warnings, "teach");
   await ctx.stub.putLesson({
     ...lesson,
     teaching: result.teaching,
@@ -673,6 +675,7 @@ ${SOURCE_TEXT_RULE}`,
   }
   const status = quiz.length >= band.quiz[0] ? "ok" : "degraded";
   if (status === "degraded") warnings.push(`Practice quiz has ${quiz.length} items; expected at least ${band.quiz[0]}.`);
+  await logBuilderNotes(ctx, lesson, warnings, "check");
   const ready: LearnLesson = {
     ...lesson,
     quiz,
@@ -801,6 +804,7 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
     ...dropped.map((ref) => `Scripture reference dropped (did not resolve in BSB): ${ref}`),
     ...cited.dropped.map((ref) => `Library reference dropped (did not resolve): ${ref}`),
   ];
+  await logBuilderNotes(ctx, lesson, warnings, "teach");
   await ctx.stub.putLesson({
     ...lesson,
     objectives: result.objectives,
@@ -1019,6 +1023,7 @@ ${SOURCE_TEXT_RULE}`,
   const status = quiz.length >= band.quiz[0] ? "ok" : "degraded";
   if (status === "degraded") warnings.push(`Quiz has ${quiz.length} items; band minimum is ${band.quiz[0]}.`);
 
+  await logBuilderNotes(ctx, lesson, warnings, "check");
   await ctx.stub.putLesson({ ...lesson, quiz, warnings, status });
   await ctx.stub.event(
     "check",
@@ -1099,7 +1104,10 @@ ${lessons
   if (issues.length) {
     for (const { lessonId, issue } of issues) {
       const lesson = lessons.find((l) => l.id === lessonId);
-      if (lesson) await ctx.stub.putLesson({ ...lesson, warnings: [...lesson.warnings, `Reviewer: ${issue}`] });
+      if (!lesson) continue;
+      const warnings = [...lesson.warnings, `Reviewer: ${issue}`];
+      await logBuilderNotes(ctx, lesson, warnings, "critic");
+      await ctx.stub.putLesson({ ...lesson, warnings });
     }
   }
   await ctx.stub.event(
@@ -1120,11 +1128,18 @@ export async function runAssemble(ctx: Ctx): Promise<void> {
   const warnings: string[] = [];
   let partial = info.deadlineHit;
 
-  const lessons = (await ctx.stub.getLessons()).map((lesson): LearnLesson => {
-    if (lesson.status !== "pending" && lesson.teaching.length) return lesson;
+  const loaded = await ctx.stub.getLessons();
+  const lessons: LearnLesson[] = [];
+  for (const lesson of loaded) {
+    if (lesson.status !== "pending" && lesson.teaching.length) {
+      lessons.push(lesson);
+      continue;
+    }
     partial = true;
-    return { ...lesson, status: "degraded", warnings: [...lesson.warnings, "Not finished within the plan's budget."] };
-  });
+    const nextWarnings = [...lesson.warnings, "Not finished within the plan's budget."];
+    await logBuilderNotes(ctx, lesson, nextWarnings, "assemble");
+    lessons.push({ ...lesson, status: "degraded", warnings: nextWarnings });
+  }
 
   let finalAssessment: QuizItem[] = [];
   const ready = lessonsForFinalMix(lessons);
@@ -1197,6 +1212,15 @@ async function requireScope(ctx: Ctx): Promise<ScopeResult> {
 function requireLessonId(ctx: Ctx): string {
   if (!ctx.msg.lessonId) throw new Error(`${ctx.msg.stage} message is missing lessonId.`);
   return ctx.msg.lessonId;
+}
+
+function logBuilderNotes(ctx: Ctx, lesson: LearnLesson, warnings: string[], stage: string): Promise<void> {
+  return recordNewLessonWarnings(ctx.env, {
+    planId: ctx.msg.planId,
+    stage,
+    lesson,
+    warnings,
+  });
 }
 
 export type { Ctx, PlanInfo };
