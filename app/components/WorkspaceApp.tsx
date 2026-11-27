@@ -584,8 +584,8 @@ export function WorkspaceApp() {
         stats={statsReady && stats ? { xp: stats.xp, streak: stats.streak } : null}
         mastery={mastery}
         goal={statsReady && stats ? goal : null}
-        nextLabel={nextAction.label}
-        onNext={() => openAction(nextAction)}
+        nextLabel={nextAction.kind === "none" ? null : nextAction.label}
+        onNext={nextAction.kind === "none" ? undefined : () => openAction(nextAction)}
         onShowProgress={showStart}
         onRequestDelete={setPendingDeleteId}
       >

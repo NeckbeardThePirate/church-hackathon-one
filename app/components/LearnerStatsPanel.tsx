@@ -74,24 +74,30 @@ export function LearnerStatsPanel({
     <section
       aria-label="Learner stats"
       aria-busy={figures.busy}
-      className="mb-3 rounded-lg border border-[var(--line)] bg-[color-mix(in_srgb,var(--canvas)_35%,var(--sidebar))] px-2.5 py-2"
+      className="mb-3 rounded-lg border border-[var(--line)] bg-[color-mix(in_srgb,var(--canvas)_35%,var(--sidebar))] px-3 py-2.5"
     >
-      <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">XP</span>
-        {figures.busy ? <StudyShimmer className="h-3 w-8" /> : <span className="tabular-nums text-[var(--ink)]">{figures.xp}</span>}
-      </div>
-      <div className="mt-1 flex items-baseline justify-between gap-2 text-xs">
-        <span className="font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">Streak</span>
-        {figures.busy ? (
-          <StudyShimmer className="h-3 w-10" />
-        ) : (
-          <span className="tabular-nums text-[var(--ink)]">
-            {figures.streak} {streak === 1 ? "day" : "days"}
-          </span>
-        )}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">XP</p>
+          {figures.busy ? (
+            <StudyShimmer className="mt-1.5 h-3.5 w-8" />
+          ) : (
+            <p className="mt-1 text-sm font-semibold tabular-nums leading-none text-[var(--ink)]">{figures.xp}</p>
+          )}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Streak</p>
+          {figures.busy ? (
+            <StudyShimmer className="mt-1.5 h-3.5 w-12" />
+          ) : (
+            <p className="mt-1 truncate text-sm font-semibold tabular-nums leading-none text-[var(--ink)]">
+              {figures.streak} {streak === 1 ? "day" : "days"}
+            </p>
+          )}
+        </div>
       </div>
       {goal ? (
-        <div className="mt-2 border-t border-[var(--line)] pt-2">
+        <div className="mt-2.5 border-t border-[var(--line)] pt-2.5">
           <DailyGoalBar {...goal} />
         </div>
       ) : null}
@@ -99,9 +105,12 @@ export function LearnerStatsPanel({
         <button
           type="button"
           onClick={onNext}
-          className="mt-2 flex min-h-11 w-full items-center rounded-md border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] px-2 py-2 text-left text-xs font-medium text-[var(--ink)]"
+          className="mt-2.5 flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-left text-xs font-medium text-[var(--ink)] transition-colors hover:bg-[var(--sidebar-active)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
         >
-          <span className="min-w-0 flex-1">{nextLabel}</span>
+          <span className="min-w-0 flex-1 truncate">{nextLabel}</span>
+          <span aria-hidden className="shrink-0 text-[var(--ink-muted)]">
+            →
+          </span>
         </button>
       ) : null}
       {lessons.length ? (

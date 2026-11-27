@@ -356,9 +356,21 @@ kbd {
   flex-shrink: 0;
 }
 
-/* Compact desktop rail is 56px. Keep the control available, but only as a screen-reader target. */
+/* Sidebar footer: match the 36px account mark. The shared rule's bottom margin sits the label high. */
+.sign-out-button.sign-out-button-sidebar {
+  width: auto;
+  min-width: 0;
+  height: 2.25rem;
+  min-height: 2.25rem;
+  margin: 0 0 0 auto;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1;
+}
+
+/* Collapsed desktop rail. Keep the control available, but only as a screen-reader target. */
 @media (min-width: 768px) {
-  .sign-out-button-rail {
+  .sign-out-button.sign-out-button-rail {
     position: absolute;
     width: 1px;
     height: 1px;
