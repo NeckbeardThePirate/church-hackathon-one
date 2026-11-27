@@ -4,6 +4,7 @@ import { UserButton } from "@clerk/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
 import { signOutButtonClass } from "./clerk-appearance";
+import { sidebarRailClass } from "./sidebar-rail";
 import { defaultTitle, isLegacyProject, type Project } from "../lib/projects";
 import { statsFigures, type DailyGoalStatus, type LessonMastery } from "../lib/learn/learner-stats";
 import { LearnerStatsPanel } from "./LearnerStatsPanel";
@@ -28,6 +29,32 @@ type AppShellProps = {
   onReplayWelcome?: () => void;
 };
 
+const focusRing =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden className="shrink-0">
+      <path d="M7 1.75v10.5M1.75 7h10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="shrink-0">
+      <path
+        d={collapsed ? "M6 3.25 10.75 8 6 12.75" : "M10 3.25 5.25 8 10 12.75"}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function AppShell({
   children,
   projects,
@@ -47,8 +74,13 @@ export function AppShell({
 }: AppShellProps) {
   const { key: clerkKey } = useClerkKey();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [railOverride, setRailOverride] = useState<boolean | null>(null);
   const figures = statsFigures(stats);
-  const compactDesktop = sidebarCompact;
+  const railCollapsed = railOverride ?? sidebarCompact;
+
+  useEffect(() => {
+    setRailOverride(null);
+  }, [sidebarCompact]);
 
   const byRecent = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
   const paths = byRecent.filter((p) => !isLegacyProject(p));
@@ -66,6 +98,10 @@ export function AppShell({
     onNewProject();
     setMobileNavOpen(false);
   }, [onNewProject]);
+
+  const toggleRail = useCallback(() => {
+    setRailOverride(!(railOverride ?? sidebarCompact));
+  }, [railOverride, sidebarCompact]);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -85,60 +121,73 @@ export function AppShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileNavOpen]);
 
-  const sidebarInnerCompact = compactDesktop;
-
   const renderItem = (project: Project) => {
     const active = project.id === activeProjectId;
     const archivedItem = isLegacyProject(project);
+    const failed = Boolean(project.learnFailed && !project.importComplete);
     const label = `${defaultTitle(project)}${archivedItem ? " (archived)" : ""}`;
-    const rowClass = sidebarInnerCompact
-      ? `hidden size-11 shrink-0 items-center justify-center p-0 md:flex ${
-          active
-            ? "bg-[var(--sidebar-active)] ring-1 ring-[color-mix(in_srgb,var(--accent)_25%,var(--line))]"
-            : "hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)]"
-        }`
-      : `min-h-11 w-full items-center gap-1 px-2 py-2 ${
-          active
-            ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
-            : "text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]"
-        }`;
+    const dotClass = `shrink-0 rounded-full ${archivedItem ? "bg-[var(--line)]" : failed ? "bg-[#c0533f]" : "bg-[#89b09a]"}`;
+    const rowTone = active
+      ? "bg-[var(--sidebar-active)] text-[var(--ink)]"
+      : "text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]";
+    const railTone = active
+      ? "bg-[var(--sidebar-active)] text-[var(--ink)] ring-1 ring-[color-mix(in_srgb,var(--accent)_28%,var(--line))]"
+      : "text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]";
+
     return (
-      <div key={project.id} className={`flex rounded-md text-left text-sm transition-colors ${rowClass}`}>
-        <button
-          type="button"
-          onClick={() => selectProject(project.id)}
-          title={sidebarInnerCompact ? label : undefined}
-          aria-label={sidebarInnerCompact ? label : undefined}
-          aria-current={active ? "page" : undefined}
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md text-left ${sidebarInnerCompact ? "size-11 justify-center" : "min-h-11 py-0.5"}`}
-        >
-          <span
-            aria-hidden
-            className={`shrink-0 rounded-full ${archivedItem ? "bg-[var(--line)]" : project.learnFailed && !project.importComplete ? "bg-[#c0533f]" : "bg-[#89b09a]"} ${sidebarInnerCompact ? "size-2.5" : "size-2"}`}
-          />
-          {!sidebarInnerCompact ? (
+      <div key={project.id} className="contents">
+        <div className={`flex min-h-11 w-full items-center gap-1 rounded-md px-2 text-left text-sm transition-colors ${rowTone} ${railCollapsed ? "md:hidden" : ""}`}>
+          <button
+            type="button"
+            onClick={() => selectProject(project.id)}
+            aria-current={active ? "page" : undefined}
+            className={`flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md text-left ${focusRing}`}
+          >
+            <span aria-hidden className={`${dotClass} size-2`} />
             <span className="min-w-0 flex-1 truncate">
               {defaultTitle(project)}
-              {project.learnFailed && !project.importComplete ? (
+              {failed ? (
                 <span className="ml-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#c0533f]">Failed</span>
               ) : null}
             </span>
+          </button>
+          {!archivedItem && onRequestDelete ? (
+            <button
+              type="button"
+              aria-label={`Remove ${defaultTitle(project)}`}
+              onClick={() => onRequestDelete(project.id)}
+              className={`inline-flex size-11 shrink-0 items-center justify-center rounded-md text-base leading-none text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)] ${focusRing}`}
+            >
+              ×
+            </button>
           ) : null}
-        </button>
-        {!sidebarInnerCompact && !archivedItem && onRequestDelete ? (
+        </div>
+        {railCollapsed ? (
           <button
             type="button"
-            aria-label={`Remove ${defaultTitle(project)}`}
-            onClick={() => onRequestDelete(project.id)}
-            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-base leading-none text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
+            onClick={() => selectProject(project.id)}
+            title={label}
+            aria-label={label}
+            aria-current={active ? "page" : undefined}
+            className={`hidden size-9 shrink-0 items-center justify-center rounded-md transition-colors md:inline-flex ${railTone} ${focusRing}`}
           >
-            ×
+            <span aria-hidden className={`${dotClass} size-2.5`} />
           </button>
         ) : null}
       </div>
     );
   };
 
+  const signOut = () => {
+    void fetch("/api/auth/signout", { method: "POST", credentials: "same-origin" }).finally(() => {
+      const clerk = (window as unknown as { Clerk?: { signOut: (opts?: { redirectUrl?: string }) => Promise<void> } }).Clerk;
+      if (clerk?.signOut) {
+        void clerk.signOut({ redirectUrl: "/" });
+        return;
+      }
+      window.location.assign("/");
+    });
+  };
 
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
@@ -146,7 +195,7 @@ export function AppShell({
         <button
           type="button"
           onClick={() => setMobileNavOpen(true)}
-          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-[var(--ink)] hover:bg-[var(--sidebar-active)]"
+          className={`inline-flex size-11 shrink-0 items-center justify-center rounded-md text-[var(--ink)] hover:bg-[var(--sidebar-active)] ${focusRing}`}
           aria-label="Open menu"
           aria-expanded={mobileNavOpen}
         >
@@ -173,10 +222,10 @@ export function AppShell({
             <button
               type="button"
               onClick={openNewProject}
-              className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-lg leading-none text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)]"
+              className={`inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink-muted)] hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] ${focusRing}`}
               aria-label="New path"
             >
-              <span aria-hidden>+</span>
+              <PlusIcon />
             </button>
           </>
         )}
@@ -192,51 +241,81 @@ export function AppShell({
       ) : null}
 
       <aside
-        className={`safe-area-top safe-area-bottom fixed inset-y-0 left-0 z-[60] flex w-[min(100vw-2.5rem,280px)] shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] py-4 transition-transform duration-300 ease-out md:static md:z-auto md:min-h-0 md:w-[240px] md:overflow-hidden md:translate-x-0 md:pointer-events-auto md:px-3 ${
-          mobileNavOpen ? "max-md:translate-x-0 max-md:pointer-events-auto px-3" : "max-md:pointer-events-none -translate-x-full px-3 md:translate-x-0"
-        } ${
-          compactDesktop
-            ? "md:w-[56px] md:px-1.5"
-            : ""
+        className={`fixed inset-y-0 left-0 z-[60] flex w-[min(100vw-2.5rem,18rem)] shrink-0 flex-col border-r border-[var(--line)] bg-[var(--sidebar)] pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] transition-transform duration-300 ease-out md:static md:z-auto md:min-h-0 md:overflow-hidden md:transition-[width] md:duration-200 md:ease-out ${sidebarRailClass(railCollapsed)} ${
+          mobileNavOpen ? "translate-x-0 px-3" : "max-md:pointer-events-none max-md:-translate-x-full px-3 md:translate-x-0"
         }`}
         aria-label="Learn paths"
       >
-        <div className="mb-2 flex items-center justify-between gap-2 px-2 md:hidden">
+        <div className="mb-2 flex items-center justify-between gap-2 px-1 md:hidden">
           <p className="text-sm font-medium text-[var(--ink)]">StudyBuddy</p>
           <button
             type="button"
             onClick={() => setMobileNavOpen(false)}
-            className="inline-flex size-11 items-center justify-center rounded-md text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)]"
+            className={`inline-flex size-11 items-center justify-center rounded-md text-[var(--ink-muted)] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)] ${focusRing}`}
             aria-label="Close menu"
           >
             ✕
           </button>
         </div>
+
         <div
-          className={`flex pb-3 ${sidebarInnerCompact ? "hidden flex-col items-center gap-2 px-0 md:flex" : "items-center justify-between gap-2 px-2"}`}
+          className={`hidden md:flex ${
+            railCollapsed ? "mb-1 w-full flex-col items-center gap-1.5 pb-2" : "mb-1 items-center justify-between gap-2 px-1 pb-3"
+          }`}
         >
-          {!sidebarInnerCompact ? (
-            <div className="hidden min-w-0 md:block">
-              <p className="truncate text-sm font-semibold text-[var(--ink)]">StudyBuddy</p>
-              {focusMode ? null : <p className="mt-1 text-xs text-[var(--ink-muted)]">Learn paths</p>}
+          {railCollapsed ? null : (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold leading-none tracking-[-0.011em] text-[var(--ink)]">StudyBuddy</p>
+              {focusMode ? null : <p className="mt-1 truncate text-[11px] leading-none text-[var(--ink-muted)]">Learn paths</p>}
             </div>
-          ) : null}
-          {focusMode ? null : (
-            <button
-              type="button"
-              onClick={openNewProject}
-              title="New path"
-              aria-label="New path"
-              className={`hidden shrink-0 rounded-md border border-[var(--line)] font-medium text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] hover:text-[var(--ink)] md:inline-flex ${
-                sidebarInnerCompact ? "size-11 items-center justify-center p-0 text-lg leading-none" : "min-h-11 px-3 py-2 text-xs"
-              }`}
-            >
-              {sidebarInnerCompact ? "+" : "New path"}
-            </button>
           )}
+          <div className={railCollapsed ? "flex flex-col items-center gap-1.5" : "flex shrink-0 items-center gap-1"}>
+            {railCollapsed ? (
+              <button
+                type="button"
+                onClick={toggleRail}
+                aria-expanded={false}
+                aria-controls="learn-paths-nav"
+                title="Expand sidebar"
+                aria-label="Expand sidebar"
+                className={`inline-flex size-9 items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink-muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)] ${focusRing}`}
+              >
+                <SidebarToggleIcon collapsed />
+              </button>
+            ) : null}
+            {focusMode ? null : (
+              <button
+                type="button"
+                onClick={openNewProject}
+                title="New path"
+                aria-label="New path"
+                className={`border border-[var(--line)] font-medium leading-none text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] hover:bg-[var(--sidebar-active)] ${focusRing} ${
+                  railCollapsed
+                    ? "inline-flex size-9 items-center justify-center rounded-md"
+                    : "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-2.5 text-xs"
+                }`}
+              >
+                {railCollapsed ? <PlusIcon /> : "New path"}
+              </button>
+            )}
+            {railCollapsed ? null : (
+              <button
+                type="button"
+                onClick={toggleRail}
+                aria-expanded
+                aria-controls="learn-paths-nav"
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+                className={`inline-flex size-8 items-center justify-center rounded-md text-[var(--ink-muted)] transition-colors hover:bg-[var(--sidebar-active)] hover:text-[var(--ink)] ${focusRing}`}
+              >
+                <SidebarToggleIcon collapsed={false} />
+              </button>
+            )}
+          </div>
         </div>
-        {!sidebarInnerCompact && !focusMode ? (
-          <div className="px-2">
+
+        {focusMode ? null : (
+          <div className={railCollapsed ? "px-1 md:hidden" : "px-1"}>
             <LearnerStatsPanel
               pending={!stats}
               xp={stats?.xp ?? 0}
@@ -253,85 +332,91 @@ export function AppShell({
                   : undefined
               }
             />
-            {onShowProgress ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onShowProgress();
-                  setMobileNavOpen(false);
-                }}
-                className="mt-1 flex min-h-11 w-full items-center rounded-md px-2 text-left text-sm text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)]"
-              >
-                Progress
-              </button>
-            ) : null}
           </div>
-        ) : null}
+        )}
+
         <nav
-          className={`flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable] ${
-            sidebarInnerCompact ? "hidden items-center gap-1.5 px-0 md:flex" : "gap-0.5 px-1"
+          id="learn-paths-nav"
+          className={`flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 [scrollbar-gutter:stable] ${
+            railCollapsed ? "md:items-center md:gap-1.5 md:px-0 md:[scrollbar-gutter:stable_both-edges]" : ""
           }`}
         >
-          {paths.length === 0 && archived.length === 0 && !sidebarInnerCompact && !focusMode ? (
-            <p className="px-2 py-2 text-xs leading-relaxed text-[var(--ink-muted)]">Your paths appear here.</p>
+          {onShowProgress && !focusMode ? (
+            <button
+              type="button"
+              onClick={() => {
+                onShowProgress();
+                setMobileNavOpen(false);
+              }}
+              className={`flex min-h-11 w-full items-center rounded-md px-2 text-left text-sm text-[var(--ink-muted)] transition-colors hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)] md:h-9 md:min-h-0 ${focusRing} ${
+                railCollapsed ? "md:hidden" : ""
+              }`}
+            >
+              Progress
+            </button>
+          ) : null}
+          {paths.length === 0 && archived.length === 0 && !focusMode ? (
+            <p className={`px-2 pb-1 pt-1 text-xs leading-5 text-[var(--ink-muted)] ${railCollapsed ? "md:hidden" : ""}`}>
+              Your paths appear here.
+            </p>
           ) : null}
           {paths.map((project) => renderItem(project))}
-          {archived.length > 0 && !sidebarInnerCompact ? (
-            <p className="mt-4 px-2 pb-1 text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">Archived</p>
+          {archived.length > 0 ? (
+            <p
+              className={`mt-3 px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)] ${
+                railCollapsed ? "md:hidden" : ""
+              }`}
+            >
+              Archived
+            </p>
           ) : null}
           {archived.map((project) => renderItem(project))}
         </nav>
+
         <div className="mt-auto">
           {onReplayWelcome ? (
-            <div className={sidebarInnerCompact ? "md:hidden" : ""}>
+            <div className={railCollapsed ? "md:hidden" : ""}>
               <button
                 type="button"
                 onClick={() => {
                   setMobileNavOpen(false);
                   onReplayWelcome();
                 }}
-                className="mx-2 mb-2 flex min-h-11 w-[calc(100%-1rem)] items-center rounded-md px-2 text-left text-xs text-[var(--ink-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                className={`mx-1 mb-2 flex min-h-11 w-[calc(100%-0.5rem)] items-center rounded-md px-2 text-left text-xs text-[var(--ink-muted)] transition-colors hover:bg-[color-mix(in_srgb,var(--sidebar-active)_55%,transparent)] hover:text-[var(--ink)] md:min-h-9 ${focusRing}`}
               >
                 Welcome
               </button>
             </div>
           ) : null}
           <div
-            className={`relative flex flex-nowrap items-center gap-3 border-t border-[var(--line)] pt-3 ${
-              sidebarInnerCompact ? "px-2 md:justify-center md:px-0" : "px-2"
+            className={`relative flex items-center gap-2 border-t border-[var(--line)] px-1 pt-3 ${
+              railCollapsed ? "md:justify-center md:px-0" : ""
             }`}
           >
-          {clerkKey ? (
-            <UserButton
-              appearance={{
-                elements: {
-                  avatarBox: { width: sidebarInnerCompact ? "2.25rem" : "2.5rem", height: sidebarInnerCompact ? "2.25rem" : "2.5rem" },
-                  userButtonAvatarBox: {
-                    width: sidebarInnerCompact ? "2.25rem" : "2.5rem",
-                    height: sidebarInnerCompact ? "2.25rem" : "2.5rem",
-                  },
-                  userButtonPopoverActionButton__signOut: signOutButtonClass,
-                  userButtonPopoverActionButton__signOutAll: signOutButtonClass,
-                },
-              }}
-            />
-          ) : null}
-          <button
-            type="button"
-            onClick={() => {
-              void fetch("/api/auth/signout", { method: "POST", credentials: "same-origin" }).finally(() => {
-                const clerk = (window as unknown as { Clerk?: { signOut: (opts?: { redirectUrl?: string }) => Promise<void> } }).Clerk;
-                if (clerk?.signOut) {
-                  void clerk.signOut({ redirectUrl: "/" });
-                  return;
-                }
-                window.location.assign("/");
-              });
-            }}
-            className={`${signOutButtonClass} ${sidebarInnerCompact ? "sign-out-button-rail" : ""}`}
-          >
-            Sign out
-          </button>
+            {clerkKey ? (
+              <div className="sidebar-account flex size-9 shrink-0 items-center justify-center">
+                <UserButton
+                  appearance={{
+                    elements: {
+                      rootBox: { width: "auto", height: "auto" },
+                      userButtonBox: { width: "2.25rem", height: "2.25rem" },
+                      userButtonTrigger: { width: "2.25rem", height: "2.25rem" },
+                      avatarBox: { width: "2.25rem", height: "2.25rem" },
+                      userButtonAvatarBox: { width: "2.25rem", height: "2.25rem" },
+                      userButtonPopoverActionButton__signOut: signOutButtonClass,
+                      userButtonPopoverActionButton__signOutAll: signOutButtonClass,
+                    },
+                  }}
+                />
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={signOut}
+              className={`${signOutButtonClass} sign-out-button-sidebar ml-auto ${railCollapsed ? "sign-out-button-rail" : ""}`}
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </aside>
