@@ -1,3 +1,5 @@
+import { isLoopbackRequest, readCookie, verifyBlob } from "./session.ts";
+
 /**
  * Sign in with ChatGPT (OpenID Connect + PKCE).
  * Website clients use OPENAI_CLIENT_ID from a human-registered OAuth client.
@@ -13,6 +15,39 @@ export const CHATGPT_SCOPES = "openid profile email offline_access resource.invo
 export const AGENT_NAME = "StudyBuddy";
 /** Stable host id for the open-source dynamic client. One installation of this app. */
 export const AGENT_HOST_ID = "urn:uuid:7c2a9e14-4b6d-4f1a-9c3e-8a1b2c3d4e5f";
+/** Issued client id from a previous dynamic registration on this host. */
+export const CHATGPT_CLIENT_COOKIE = "sb_oai_client";
+
+/** Registered website client. A blank value or the binding name left in place means unset. */
+export function registeredOpenAiClientId(value: string | undefined): string {
+  const registered = value?.trim() ?? "";
+  if (!registered || registered === "OPENAI_CLIENT_ID") return "";
+  return registered;
+}
+
+/**
+ * Client id ChatGPT sign-in will use for this request, or null when it is not configured.
+ * Matches `/api/auth/chatgpt/start`: a registered id, a saved client cookie, or the
+ * loopback dynamic client on 127.0.0.1.
+ */
+export async function resolveChatGptClientId(
+  request: Request,
+  input: { openAiClientId: string | undefined; sessionSecret: string | null },
+): Promise<string | null> {
+  const registered = registeredOpenAiClientId(input.openAiClientId);
+  if (registered) return registered;
+  if (input.sessionSecret) {
+    const saved = readCookie(request, CHATGPT_CLIENT_COOKIE);
+    if (saved) {
+      const savedClient = await verifyBlob<{ clientId?: string }>(saved, input.sessionSecret);
+      if (typeof savedClient?.clientId === "string" && savedClient.clientId) return savedClient.clientId;
+    }
+  }
+  if (isLoopbackRequest(request) && new URL(request.url).hostname === "127.0.0.1") {
+    return "dynamic_agent_client";
+  }
+  return null;
+}
 
 export type OauthPending = {
   state: string;

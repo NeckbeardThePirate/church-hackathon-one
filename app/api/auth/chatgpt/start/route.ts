@@ -1,10 +1,14 @@
 import { env } from "cloudflare:workers";
-import { authorizeUrl, callbackUrl, randomToken, type OauthPending } from "@/app/lib/server/chatgpt-auth";
-import { isLoopbackRequest, OAUTH_COOKIE, readCookie, resolveSessionSecret, signBlob, verifyBlob } from "@/app/lib/server/session";
+import {
+  authorizeUrl,
+  callbackUrl,
+  randomToken,
+  resolveChatGptClientId,
+  type OauthPending,
+} from "@/app/lib/server/chatgpt-auth";
+import { OAUTH_COOKIE, resolveSessionSecret, signBlob } from "@/app/lib/server/session";
 
 export const dynamic = "force-dynamic";
-
-const CLIENT_COOKIE = "sb_oai_client";
 
 function redirectError(request: Request, code: string): Response {
   const url = new URL("/", request.url);
@@ -16,17 +20,11 @@ export async function GET(request: Request): Promise<Response> {
   const secret = resolveSessionSecret(request, env.SESSION_SECRET);
   if (!secret) return redirectError(request, "session_secret");
 
-  const registeredRaw = env.OPENAI_CLIENT_ID?.trim();
-  const registered = registeredRaw && registeredRaw !== "OPENAI_CLIENT_ID" ? registeredRaw : "";
-  const saved = readCookie(request, CLIENT_COOKIE);
-  const savedClient = saved ? await verifyBlob<{ clientId?: string }>(saved, secret) : null;
-  let clientId = registered || savedClient?.clientId || "";
-  if (!clientId) {
-    if (!isLoopbackRequest(request) || new URL(request.url).hostname !== "127.0.0.1") {
-      return redirectError(request, "chatgpt_unconfigured");
-    }
-    clientId = "dynamic_agent_client";
-  }
+  const clientId = await resolveChatGptClientId(request, {
+    openAiClientId: env.OPENAI_CLIENT_ID,
+    sessionSecret: secret,
+  });
+  if (!clientId) return redirectError(request, "chatgpt_unconfigured");
 
   const pending: OauthPending = {
     state: randomToken(),

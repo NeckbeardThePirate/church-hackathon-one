@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import {
+  CHATGPT_CLIENT_COOKIE,
   exchangeCode,
   identityFromTokenResponse,
   verifyIdToken,
@@ -71,7 +72,7 @@ export async function GET(request: Request): Promise<Response> {
     const secure = url.protocol === "https:" ? "; Secure" : "";
     headers.append(
       "set-cookie",
-      `sb_oai_client=${encodeURIComponent(await signBlob({ clientId }, secret))}; HttpOnly; Path=/; SameSite=Lax; Max-Age=31536000${secure}`,
+      `${CHATGPT_CLIENT_COOKIE}=${encodeURIComponent(await signBlob({ clientId }, secret))}; HttpOnly; Path=/; SameSite=Lax; Max-Age=31536000${secure}`,
     );
     return new Response(response.body, { status: response.status, headers });
   } catch (error) {
