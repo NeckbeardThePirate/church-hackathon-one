@@ -141,6 +141,12 @@ test("skip and model failure close the check without throwing away answers alrea
   assert.equal(empty.state.reason, "unavailable");
   assert.deepEqual(empty.state.diagnostic, { strengths: [], gaps: [] });
 
+  const waiting = ask(freshOpener());
+  const kept = reduceOpener(waiting, { type: "fail" });
+  assert.equal(kept.state.status, "open");
+  assert.equal(kept.state.questions.length, 1);
+  assert.equal(kept.effects[0]?.type, "show");
+
   const again = beginOpenerTurn(empty.state, { type: "start" }, 1_000);
   assert.equal(again.state.status, "open");
   assert.equal(again.effects[0]?.type, "generate");

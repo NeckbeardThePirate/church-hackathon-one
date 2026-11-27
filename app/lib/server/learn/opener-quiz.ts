@@ -18,24 +18,17 @@ import {
 } from "@/app/lib/learn/opener";
 import { LEARN_MAX_TOKENS, LEARN_TEXT_MODEL, llmJson, type LlmEnv } from "./llm";
 
-export const OPENER_TIMEOUT_MS = 25_000;
+/** First question must land inside the client wait. A slow think is a miss, not a longer wait. */
+export const OPENER_TIMEOUT_MS = 10_000;
 
-const OPENER_SYSTEM = `You write one short diagnostic question for a learner starting a study path.
-Probe baseline familiarity and knowledge gaps. This is not trivia and not a graded exam.
-Use the topic, the learner's notes, the passages, and every earlier answer.
-Return one JSON object in this shape, with real values, not type names:
+const OPENER_SYSTEM = `One short familiarity question. Not trivia. Not a verse to recite.
+Return only this JSON object:
 {"prompt":"How familiar is the main idea?","probe":"the main idea","stop":false,"choices":[
-{"id":"a","label":"I can explain it in my own words","reading":"strength","concept":"the main idea"},
-{"id":"b","label":"I have heard the phrase only","reading":"gap","concept":"the main idea"},
+{"id":"a","label":"I can explain it","reading":"strength","concept":"the main idea"},
+{"id":"b","label":"I have only heard of it","reading":"gap","concept":"the main idea"},
 {"id":"c","label":"I mix it up with a nearby idea","reading":"gap","concept":"a nearby idea"},
 {"id":"d","label":"I'm not sure yet","reading":"unsure","concept":"the main idea"}]}
-Rules:
-- Exactly 4 choices. One reading strength (they already grasp the idea). One reading gap (a beginner answer or a plausible mix-up). One more strength or gap that distinguishes depth. One reading unsure with label "I'm not sure yet" and concept equal to probe.
-- Each reading is exactly one word: strength, gap, or unsure. Never a slash, a pipe, or a list of options.
-- Choice ids are a, b, c, and d.
-- stop is true only when this is question 3 or later and the earlier answers already show a clear pattern. Otherwise false.
-- Do not quote Bible verses, confession text, or church fathers. You may name a reference.
-- Do not ask the learner to recite a passage.`;
+Exactly 4 choices, ids a b c d. reading is the single word strength, gap, or unsure. The last choice is unsure and says "I'm not sure yet". stop is false until question 3 or later already shows a pattern.`;
 
 export type OpenerHost = {
   getOpener(): Promise<OpenerState>;
@@ -95,8 +88,8 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
   if (!reserved.ok) throw new Error("Opener check skipped: model budget reached.");
   const [info, passages, state] = await Promise.all([host.info(), host.getSourcePassages(), host.getOpener()]);
   const planId = info.planId ?? "opener";
-  return llmJson(env, {
-    role: "worker",
+  const call = {
+    role: "worker" as const,
     model: LEARN_TEXT_MODEL,
     system: OPENER_SYSTEM,
     user: openerUserPrompt({
@@ -106,14 +99,15 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
       questions: state.questions,
       answers: state.answers,
     }),
-    // Haiku 5.5 counts adaptive thinking against max_tokens. The shared floor
-    // leaves room for thinking and the JSON question. Effort stays low.
+    // Keep the shared token floor. Thinking is off so those tokens are not spent
+    // before the question. If the model rejects that, one adaptive retry follows.
     maxTokens: LEARN_MAX_TOKENS,
-    effort: "low",
+    effort: "low" as const,
+    thinking: "disabled" as const,
     temperature: 0.4,
     meta: { planId, stage: "opener" },
     userId: reserved.userId,
-    validate: (value) => {
+    validate: (value: unknown) => {
       try {
         return parseOpenerQuestion(value);
       } catch (error) {
@@ -122,7 +116,15 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
         throw error;
       }
     },
-  });
+  };
+  try {
+    return await llmJson(env, call);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/thinking|disabled/i.test(message)) throw error;
+    console.warn(`[learn] opener thinking disabled was rejected, retrying adaptive: ${message}`);
+    return await llmJson(env, { ...call, thinking: "adaptive" });
+  }
 }
 
 async function turn(

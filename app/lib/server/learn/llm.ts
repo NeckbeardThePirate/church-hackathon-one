@@ -71,7 +71,13 @@ export function anthropicRequestQuery(query: Record<string, unknown>): Record<st
   delete next.temperature;
   const requested = typeof next.max_tokens === "number" ? next.max_tokens : undefined;
   next.max_tokens = resolveMaxTokens(requested);
-  next.thinking = { type: "adaptive" };
+  const requestedThinking = next.thinking;
+  const thinkingType =
+    requestedThinking && typeof requestedThinking === "object" && typeof (requestedThinking as { type?: unknown }).type === "string"
+      ? (requestedThinking as { type: string }).type
+      : "";
+  // Adaptive is the default. The opener turns it off so the first question is not stuck behind a long think.
+  next.thinking = thinkingType === "disabled" ? { type: "disabled" } : { type: "adaptive" };
   const configured = next.output_config;
   const effort =
     configured && typeof configured === "object" && typeof (configured as { effort?: unknown }).effort === "string"
@@ -130,6 +136,11 @@ type JsonCall<T> = {
   temperature?: number;
   /** Sent as `output_config.effort` on Anthropic messages. Omitted for Workers AI. */
   effort?: LlmEffort;
+  /**
+   * Anthropic thinking mode. Omitted calls stay adaptive.
+   * `disabled` is for a short check that must answer before the path build.
+   */
+  thinking?: "adaptive" | "disabled";
   /** Throw to reject the output; the message is fed back to the model on retry. */
   validate: (value: unknown) => T;
   /** Plan owner. Used only to look up a stored ChatGPT token for fallback compute. */
@@ -206,6 +217,7 @@ async function complete(
   temperature: number,
   userId?: string,
   effort?: LlmEffort,
+  thinking?: "adaptive" | "disabled",
 ): Promise<string> {
   if (env.MOCK_AI === "1") return mockModelText(system, user, meta);
 
@@ -226,6 +238,7 @@ async function complete(
       messages: [{ role: "user", content: user }],
     };
     if (effort) query.output_config = { effort };
+    if (thinking === "disabled") query.thinking = { type: "disabled" };
     const result = await callAnthropic(env, model, query, attempt > 1 ? { "cf-aig-skip-cache": "true" } : undefined);
     return readAnthropicText(result, meta.stage);
   }
@@ -339,6 +352,7 @@ export async function llmJson<T>(env: LlmEnv, call: JsonCall<T>): Promise<T> {
         call.temperature ?? 0.3,
         call.userId,
         call.effort,
+        call.thinking,
       );
       return call.validate(extractJson(raw));
     } catch (error) {

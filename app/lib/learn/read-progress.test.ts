@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { combineReadPercent, scrollDepthPercent, sectionVisibilityPercent } from "./read-progress.ts";
+import { combineReadPercent, lessonCanBeMarkedRead, scrollDepthPercent, sectionVisibilityPercent } from "./read-progress.ts";
 
 test("scroll depth is 0 at the top, 100 at the bottom, and 100 when the lesson fits", () => {
   assert.equal(scrollDepthPercent(0, 1000, 200), 0);
@@ -21,6 +21,15 @@ test("section visibility counts sections scrolled through and ignores a tall blo
   assert.equal(sectionVisibilityPercent([{ top: 0, bottom: 2400 }], 0, 800), 0);
   assert.equal(sectionVisibilityPercent([{ top: 0, bottom: 2400 }], 1700, 800), 100);
   assert.equal(sectionVisibilityPercent([], 0, 800), null);
+});
+
+test("a pending or empty lesson is not marked read", () => {
+  assert.equal(lessonCanBeMarkedRead({ status: "pending", teaching: [] }), false);
+  assert.equal(lessonCanBeMarkedRead({ status: "pending", teaching: ["a paragraph"] }), false);
+  assert.equal(lessonCanBeMarkedRead({ status: "ok", teaching: [] }), false);
+  assert.equal(lessonCanBeMarkedRead(null), false);
+  assert.equal(lessonCanBeMarkedRead({ status: "ok", teaching: ["a paragraph"] }), true);
+  assert.equal(lessonCanBeMarkedRead({ status: "degraded", teaching: ["a paragraph"] }), true);
 });
 
 test("reading percent keeps the deeper of scroll, sections, and what was already stored", () => {

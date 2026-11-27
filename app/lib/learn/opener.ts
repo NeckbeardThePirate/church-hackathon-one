@@ -204,12 +204,14 @@ export function unansweredQuestion(state: OpenerState): OpenerQuestion | undefin
 }
 
 /**
- * One step of the check. `fail` and `skip` always close.
+ * One step of the check. `skip` always closes. `fail` closes unless a question is already waiting.
  * A stop flag is ignored until the minimum number of answers is in.
  */
 export function reduceOpener(state: OpenerState, event: OpenerEvent): { state: OpenerState; effects: OpenerEffect[] } {
   if (event.type === "fail") {
     if (state.status === "closed") return { state: unlock(state), effects: [] };
+    // A question that landed just as the wait expired must not be thrown away.
+    if (unansweredQuestion(state)) return { state: unlock(state), effects: [{ type: "show" }] };
     return { state: closeOpener(state, state.answers.length ? "complete" : "unavailable"), effects: [{ type: "steer" }, { type: "close" }] };
   }
   if (event.type === "skip") {
@@ -375,12 +377,12 @@ export function openerUserPrompt(input: {
     `This is question ${input.answers.length + 1} of at most ${OPENER_MAX_QUESTIONS}.`,
   ];
   const notes = input.notes.trim();
-  if (notes) lines.push(`Learner notes:\n"""\n${clipBody(notes, 1500)}\n"""`);
+  if (notes) lines.push(`Learner notes:\n"""\n${clipBody(notes, 400)}\n"""`);
   const passages = input.passages.slice(0, 4).filter((passage) => passage.reference.trim());
   if (passages.length) {
     lines.push(
       `Passages the learner chose (wording supplied for you; do not ask them to recite it):\n${passages
-        .map((passage) => `- ${passage.reference}: ${clipBody(passage.text.trim(), 500)}`)
+        .map((passage) => `- ${passage.reference}: ${clipBody(passage.text.trim(), 160)}`)
         .join("\n")}`,
     );
   }

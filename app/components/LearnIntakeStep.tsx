@@ -207,7 +207,8 @@ export function LearnIntakeStep({
   const currentStage = events.at(-1)?.stage ?? snapshot?.stage;
   const lessonsTotal = snapshot?.lessonsTotal ?? 0;
   const lessonsDone = snapshot?.lessonsDone ?? 0;
-  const lessonOneReady = snapshot?.plan?.lessons.some(lessonIsStudyable) ?? false;
+  const readyLesson = snapshot?.plan?.lessons.filter(lessonIsStudyable).sort((a, b) => a.order - b.order)[0];
+  const lessonOneReady = Boolean(readyLesson);
   const milestones = useMemo(
     () =>
       pathMilestones({
@@ -216,8 +217,9 @@ export function LearnIntakeStep({
         lessonsDone,
         lessonsTotal,
         lessonOneReady,
+        readyLessonOrder: readyLesson?.order,
       }),
-    [currentStage, snapshot?.status, lessonsDone, lessonsTotal, lessonOneReady],
+    [currentStage, snapshot?.status, lessonsDone, lessonsTotal, lessonOneReady, readyLesson?.order],
   );
   const failed = snapshot?.status === "failed" || !!error;
 

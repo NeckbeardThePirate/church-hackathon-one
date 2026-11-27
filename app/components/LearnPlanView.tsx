@@ -25,6 +25,7 @@ import {
 import { locationForPlan, parsePathUrl, pathSearch } from "../lib/learn/path-url";
 import {
   combineReadPercent,
+  lessonCanBeMarkedRead,
   readPercentMarksDone,
   scrollDepthPercent,
   sectionVisibilityPercent,
@@ -773,7 +774,7 @@ function LessonBody({
   useEffect(() => {
     setPlayingVideo(null);
   }, [lesson.id]);
-  if (lesson.status === "pending") {
+  if (lesson.status === "pending" && lesson.teaching.length === 0) {
     return (
       <StudyPlaceholder
         kicker={`Lesson ${lesson.order} of ${total}`}
@@ -791,6 +792,7 @@ function LessonBody({
       <p className="mt-2 text-sm text-[var(--ink-muted)]">
         About {lesson.estimatedMinutes} min
         {lesson.status === "degraded" ? " · Some resources may be missing" : null}
+        {lesson.status === "pending" ? " · The check is still being written" : null}
       </p>
       <SourceNote place="lesson" />
 
@@ -1499,7 +1501,7 @@ export function LearnPlanView({
   const nextLesson = lessonIndex >= 0 && lessonIndex < plan.lessons.length - 1 ? plan.lessons[lessonIndex + 1] : undefined;
 
   useLessonScrollPersistence(
-    activeLesson?.id,
+    lessonCanBeMarkedRead(activeLesson) ? activeLesson?.id : undefined,
     scope,
     activeLesson ? readScrollFor(progress, scope, activeLesson.id) : 0,
     commitProgress,
@@ -1804,6 +1806,7 @@ export function LearnPlanView({
         lessonsDone: Math.max(buildCounts?.done ?? 0, readyCore),
         lessonsTotal: Math.max(buildCounts?.total ?? 0, core.length),
         lessonOneReady: Boolean(starter),
+        readyLessonOrder: starter?.order,
       }),
     };
   }, [plan.lessons, buildStage, buildCounts]);
