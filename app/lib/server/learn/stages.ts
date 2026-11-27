@@ -4,6 +4,7 @@
  * Scripture readings are proposed by the model as references only; text comes from D1.
  */
 import { learnerContext, passagesForLesson } from "@/app/lib/learn/intake";
+import { planSteerLine, scopeSteerLine } from "@/app/lib/learn/opener";
 import { findBibleReferences } from "@/app/lib/bible/parse-reference";
 import { attachFinalConcepts, gapConceptLine, lessonsForFinalMix, type GapConcept } from "@/app/lib/learn/gaps";
 import {
@@ -121,9 +122,10 @@ The learner may give a topic, notes, Bible passages, and text read from photos t
 export async function runScope(ctx: Ctx): Promise<void> {
   const info = await ctx.stub.info();
   const passages = await ctx.stub.getSourcePassages();
+  const steer = scopeSteerLine(await ctx.stub.getOpenerDiagnostic());
   const scope = await llm(ctx, "planner", {
     system: SCOPE_SYSTEM,
-    user: `Topic: ${info.topic}\n${learnerContext(info.notes, passages, { notes: 6000, passageChars: 3000 })}`,
+    user: `Topic: ${info.topic}\n${learnerContext(info.notes, passages, { notes: 6000, passageChars: 3000 })}${steer ? `\n${steer}` : ""}`,
     validate: (value): ScopeResult => {
       const o = obj(value);
       const complexity = o.complexity as Complexity;
@@ -163,6 +165,7 @@ export async function runPlan(ctx: Ctx): Promise<void> {
   const scope = await requireScope(ctx);
   const band = LESSON_BANDS[scope.complexity];
   const n = scope.lessonCount;
+  const steer = planSteerLine(await ctx.stub.getOpenerDiagnostic(), n);
 
   const outlines = await llm(ctx, "planner", {
     system: `You turn a course scope into an ordered lesson outline. Each lesson builds on earlier ones.
@@ -175,7 +178,7 @@ Topic: ${info.topic}
 Prerequisites: ${scope.prerequisites.join("; ") || "none"}
 Core concepts: ${scope.coreConcepts.join("; ")}
 Course objectives:\n${scope.objectives.map((o, i) => `${i + 1}. ${o}`).join("\n")}
-${learnerContext(info.notes, passages, { notes: 4000, passageChars: 2000 })}`,
+${learnerContext(info.notes, passages, { notes: 4000, passageChars: 2000 })}${steer ? `\n${steer}` : ""}`,
     validate: (value): LessonOutline[] => {
       const raw = list(obj(value).lessons, "lessons", { min: n });
       return raw.slice(0, n).map((item, index) => {
@@ -198,11 +201,11 @@ ${learnerContext(info.notes, passages, { notes: 4000, passageChars: 2000 })}`,
     },
   });
 
-  await ctx.stub.setOutline(outlines);
-  await ctx.stub.event("plan", `${outlines.length} lessons: ${outlines.map((l) => l.title).join(" · ")}`);
+  const committed = await ctx.stub.commitOutline(outlines);
+  await ctx.stub.event("plan", committed.note ? `${committed.summary} ${committed.note}` : committed.summary);
   await enqueueMany(
     ctx.env,
-    outlines.map((l) => ({ planId: ctx.msg.planId, stage: "research" as const, lessonId: l.id, round: ctx.msg.round })),
+    committed.researchIds.map((lessonId) => ({ planId: ctx.msg.planId, stage: "research" as const, lessonId, round: ctx.msg.round })),
   );
 }
 
@@ -268,13 +271,14 @@ async function researchOpenSources(ctx: Ctx, lesson: LearnLesson, query: string)
     }`,
     lessonId,
   );
-  await enqueue(ctx.env, { ...next, stage: articles.length ? "review" : "teach" });
+  await enqueueIfActive(ctx, lessonId, articles.length ? "review" : "teach");
 }
 
 type Openish = { url: string; title: string; text: string; siteName?: string };
 
 export async function runResearch(ctx: Ctx): Promise<void> {
   const lessonId = requireLessonId(ctx);
+  if (await releaseRetired(ctx, lessonId)) return;
   const lesson = await ctx.stub.getLesson(lessonId);
   if (!lesson) throw new Error(`Lesson ${lessonId} not found.`);
   const scope = await requireScope(ctx);
@@ -352,7 +356,7 @@ export async function runResearch(ctx: Ctx): Promise<void> {
     }`,
     lessonId,
   );
-  await enqueue(ctx.env, { ...next, stage: verifiedArticles.length || videos.length ? "review" : "teach" });
+  await enqueueIfActive(ctx, lessonId, verifiedArticles.length || videos.length ? "review" : "teach");
 }
 
 /* =============================== S5 select + review =============================== */
@@ -362,6 +366,7 @@ const MAX_VIDEOS = 2;
 
 export async function runReview(ctx: Ctx): Promise<void> {
   const lessonId = requireLessonId(ctx);
+  if (await releaseRetired(ctx, lessonId)) return;
   const info = await ctx.stub.info();
   const scope = await requireScope(ctx);
   const lessons = await ctx.stub.getLessons();
@@ -440,7 +445,7 @@ ${videos.map((v, i) => `V${i + 1}. ${v.title} — ${v.channel}\n${clip(v.text, 4
     `L${lesson.order}: picked ${chosenArticles.length} articles, ${chosenVideos.length} videos (from ${articles.length + videos.length} verified)`,
     lessonId,
   );
-  await enqueue(ctx.env, { planId: ctx.msg.planId, stage: "teach", lessonId, round: ctx.msg.round });
+  await enqueueIfActive(ctx, lessonId, "teach");
 }
 
 function hostOf(url: string): string {
@@ -705,6 +710,7 @@ export async function runTeach(ctx: Ctx): Promise<void> {
     return;
   }
   const lessonId = requireLessonId(ctx);
+  if (await releaseRetired(ctx, lessonId)) return;
   const info = await ctx.stub.info();
   const scope = await requireScope(ctx);
   const lessons = await ctx.stub.getLessons();
@@ -823,7 +829,7 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
     }`,
     lessonId,
   );
-  await enqueue(ctx.env, { planId: ctx.msg.planId, stage: "check", lessonId, round: ctx.msg.round });
+  await enqueueIfActive(ctx, lessonId, "check");
 }
 
 function readNamedRefs(value: unknown): NamedLibraryRef[] {
@@ -977,6 +983,7 @@ export async function runCheck(ctx: Ctx): Promise<void> {
     return;
   }
   const lessonId = requireLessonId(ctx);
+  if (await releaseRetired(ctx, lessonId)) return;
   const scope = await requireScope(ctx);
   const band = LESSON_BANDS[scope.complexity];
   const lesson = await ctx.stub.getLesson(lessonId);
@@ -1033,6 +1040,18 @@ ${SOURCE_TEXT_RULE}`,
     lessonId,
   );
   await finishLesson(ctx, lessonId);
+}
+
+/** A lesson the opener retired must not keep the pipeline in research, review, teach, or check. */
+async function releaseRetired(ctx: Ctx, lessonId: string): Promise<boolean> {
+  if ((await ctx.stub.getScratch(`opener-skip:${lessonId}`)) !== true) return false;
+  await finishLesson(ctx, lessonId);
+  return true;
+}
+
+async function enqueueIfActive(ctx: Ctx, lessonId: string, stage: "review" | "teach" | "check"): Promise<void> {
+  if (await releaseRetired(ctx, lessonId)) return;
+  await enqueue(ctx.env, { planId: ctx.msg.planId, stage, lessonId, round: ctx.msg.round });
 }
 
 /** Fan-in: when the last lesson of the round finishes, queue the critic. */

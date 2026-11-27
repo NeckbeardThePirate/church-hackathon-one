@@ -42,6 +42,8 @@ export type LlmMeta = { planId: string; stage: string; lessonId?: string };
 
 type JsonCall<T> = {
   role: LlmRole;
+  /** Catalog id. The opener check pins {@link LEARN_TEXT_MODEL}; other stages use the role default. */
+  model?: string;
   system: string;
   user: string;
   meta: LlmMeta;
@@ -224,7 +226,7 @@ export async function readAnthropicText(result: unknown): Promise<string> {
 
 /** JSON call with schema validation and up to 2 corrective retries (§3). */
 export async function llmJson<T>(env: LlmEnv, call: JsonCall<T>): Promise<T> {
-  const model = learnModelId(env, call.role);
+  const model = call.model?.trim() || learnModelId(env, call.role);
   let user = call.user;
   let lastError = "";
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
