@@ -55,8 +55,9 @@ test("every open step has an excerpt, both sources, and a spaced-review chip", (
     assert.ok(lesson, node.id);
     assert.equal(lesson.title, node.title);
     assert.ok(lesson.excerpt.every((paragraph) => paragraph.trim().length > 40));
-    assert.ok(lesson.citations.some((item) => item.kind === "scripture" && item.reference.startsWith("Ruth ")));
-    assert.ok(lesson.citations.some((item) => item.kind === "confession" && item.label.includes("Westminster")));
+    assert.ok(lesson.citations.some((item) => item.kind === "scripture" && item.reference.startsWith("John ")));
+    assert.ok(lesson.citations.some((item) => item.kind === "scripture" && item.note.includes("Berean Study Bible")));
+    assert.ok(lesson.citations.some((item) => item.kind === "library" && item.text.trim().length > 40));
     assert.match(lesson.review, /^Spaced review/);
     assert.match(lesson.xp, /\d+ XP/);
   }
@@ -85,7 +86,7 @@ test("the sample check starts idle, at the bundled XP, with no extra gap", () =>
   assert.equal(guestSampleFeedback(state), null);
   assert.equal(guestHighlightId(state), null);
   assert.equal(GUEST_SAMPLE_QUESTION.lessonId, GUEST_OPEN_LESSON_ID);
-  assert.equal(GUEST_SAMPLE_QUESTION.correctId, "wings");
+  assert.equal(GUEST_SAMPLE_QUESTION.correctId, "christ");
 
   const path = guestPathNodes(state);
   assert.equal(path.length, GUEST_PATH_NODES.length);
@@ -98,31 +99,31 @@ test("the sample check starts idle, at the bundled XP, with no extra gap", () =>
 
 test("a right answer credits sample XP and does not spawn a gap", () => {
   const start = initialGuestSample();
-  const right = pickGuestSample(start, "wings");
+  const right = pickGuestSample(start, "christ");
   assert.notEqual(right, start);
   assert.equal(guestSamplePhase(right), "correct");
   assert.equal(right.correct, true);
-  assert.equal(right.pickedId, "wings");
+  assert.equal(right.pickedId, "christ");
   assert.equal(right.gapSpawned, false);
   assert.equal(right.xp, GUEST_SAMPLE_BASE_XP + GUEST_SAMPLE_CHECK_XP);
   assert.equal(GUEST_SAMPLE_CHECK_XP, 5);
   assert.equal(right.awardTick, 1);
   assert.equal(guestSampleHeading(right), "That’s right");
-  assert.match(guestSampleFeedback(right) ?? "", /wings of the God of Israel/);
+  assert.match(guestSampleFeedback(right) ?? "", /Christ, the Son of God/);
   assert.equal(guestHighlightId(right), null);
   assert.equal(guestPathNodes(right).some((node) => node.id === GUEST_SAMPLE_GAP_ID), false);
-  assert.equal(guestChoiceVisual(right, "wings"), "correct");
-  assert.equal(guestChoiceVisual(right, "gate"), "idle");
+  assert.equal(guestChoiceVisual(right, "christ"), "correct");
+  assert.equal(guestChoiceVisual(right, "prophet"), "idle");
 
-  const again = pickGuestSample(right, "gate");
+  const again = pickGuestSample(right, "prophet");
   assert.equal(again, right);
   assert.equal(again.xp, GUEST_SAMPLE_BASE_XP + GUEST_SAMPLE_CHECK_XP);
   assert.equal(again.gapSpawned, false);
 });
 
-test("a wrong answer or the miss control spawns one new practice gap under the field", () => {
+test("a wrong answer or the miss control spawns one new practice gap under the lesson", () => {
   const bundled = GUEST_PATH_NODES.map((node) => node.id).join(",");
-  const wrong = pickGuestSample(initialGuestSample(), "roof");
+  const wrong = pickGuestSample(initialGuestSample(), "priest");
   assert.equal(guestSamplePhase(wrong), "missed");
   assert.equal(wrong.correct, false);
   assert.equal(wrong.xp, GUEST_SAMPLE_BASE_XP);
@@ -130,9 +131,9 @@ test("a wrong answer or the miss control spawns one new practice gap under the f
   assert.equal(wrong.gapSpawned, true);
   assert.equal(guestSampleHeading(wrong), "A practice step opened");
   assert.match(guestSampleFeedback(wrong) ?? "", /practice step is now on the path/);
-  assert.equal(guestChoiceVisual(wrong, "wings"), "correct");
-  assert.equal(guestChoiceVisual(wrong, "roof"), "wrong");
-  assert.equal(guestChoiceVisual(wrong, "gate"), "idle");
+  assert.equal(guestChoiceVisual(wrong, "christ"), "correct");
+  assert.equal(guestChoiceVisual(wrong, "priest"), "wrong");
+  assert.equal(guestChoiceVisual(wrong, "prophet"), "idle");
 
   const path = guestPathNodes(wrong);
   assert.equal(path.filter((node) => node.id === GUEST_SAMPLE_GAP_ID).length, 1);
@@ -142,7 +143,7 @@ test("a wrong answer or the miss control spawns one new practice gap under the f
   assert.equal(path[gapAt]?.parentId, GUEST_OPEN_LESSON_ID);
   assert.equal(path[gapAt]?.kind, "gap");
   assert.equal(path[gapAt]?.state, "available");
-  assert.equal(path[gapAt]?.title, "Practice: under his wings");
+  assert.equal(path[gapAt]?.title, "Practice: that you may believe");
   assert.equal(path[gapAt]?.unmet.length, 0);
   assert.equal(guestHighlightId(wrong), GUEST_SAMPLE_GAP_ID);
   assert.equal(new Set(path.map((node) => node.id)).size, path.length);
@@ -157,11 +158,11 @@ test("a wrong answer or the miss control spawns one new practice gap under the f
   assert.equal(opened.xp, GUEST_SAMPLE_BASE_XP);
   assert.equal(guestSampleHeading(opened), "A practice step opened");
   assert.match(guestSampleFeedback(opened) ?? "", /what a miss does/);
-  assert.equal(guestChoiceVisual(opened, "wings"), "idle");
+  assert.equal(guestChoiceVisual(opened, "christ"), "idle");
   assert.equal(guestPathNodes(opened).filter((node) => node.id === GUEST_SAMPLE_GAP_ID).length, 1);
   assert.equal(revealGuestMiss(opened), opened);
 
-  const thenRight = pickGuestSample(opened, "wings");
+  const thenRight = pickGuestSample(opened, "christ");
   assert.equal(thenRight.gapSpawned, true);
   assert.equal(thenRight.correct, true);
   assert.equal(thenRight.xp, GUEST_SAMPLE_BASE_XP + GUEST_SAMPLE_CHECK_XP);
@@ -174,42 +175,71 @@ test("an unknown choice is ignored and reset clears the sample", () => {
   assert.equal(pickGuestSample(start, "nope"), start);
   assert.equal(pickGuestSample(start, ""), start);
 
-  const missed = pickGuestSample(start, "gate");
+  const missed = pickGuestSample(start, "prophet");
   const cleared = resetGuestSample();
   assert.deepEqual(cleared, initialGuestSample());
   assert.equal(cleared.gapSpawned, false);
   assert.equal(guestPathNodes(cleared).some((node) => node.id === GUEST_SAMPLE_GAP_ID), false);
   assert.equal(missed.gapSpawned, true);
 
-  const credited = pickGuestSample(start, "wings");
+  const credited = pickGuestSample(start, "christ");
   const afterMiss = revealGuestMiss(credited);
   assert.equal(afterMiss.correct, true);
   assert.equal(afterMiss.gapSpawned, true);
   assert.equal(afterMiss.xp, credited.xp);
-  assert.equal(afterMiss.pickedId, "wings");
+  assert.equal(afterMiss.pickedId, "christ");
   assert.deepEqual(resetGuestSample(), initialGuestSample());
 });
 
-test("the spawned practice lesson retrieves Ruth and the Westminster Confession", () => {
+test("the spawned practice lesson retrieves John and Matthew Henry", () => {
   const lesson = guestLesson(GUEST_SAMPLE_GAP_ID);
   assert.ok(lesson);
   assert.equal(lesson.id, GUEST_SAMPLE_GAP_NODE.id);
   assert.equal(lesson.title, GUEST_SAMPLE_GAP_NODE.title);
-  assert.equal(lesson.title, "Practice: under his wings");
+  assert.equal(lesson.title, "Practice: that you may believe");
   assert.ok(lesson.excerpt.every((paragraph) => paragraph.trim().length > 40));
   const scripture = lesson.citations.find((item) => item.kind === "scripture");
-  const confession = lesson.citations.find((item) => item.kind === "confession");
+  const henry = lesson.citations.find((item) => item.kind === "library");
   assert.ok(scripture && scripture.kind === "scripture");
-  assert.equal(scripture.reference, "Ruth 2:12");
-  assert.match(scripture.text, /under whose wings thou art come to trust/);
-  assert.ok(confession && confession.kind === "confession");
-  assert.match(confession.label, /Westminster Confession/);
-  assert.equal(confession.detail, "12.1");
-  assert.match(confession.text, /protected, provided for, and chastened by Him as by a Father/);
+  assert.equal(scripture.reference, "John 20:31");
+  assert.match(scripture.text, /so that you may believe that Jesus is the Christ, the Son of God/);
+  assert.match(scripture.text, /life in His name/);
+  assert.match(scripture.note, /Berean Study Bible/);
+  assert.ok(henry && henry.kind === "library");
+  assert.equal(henry.source, "commentary");
+  assert.equal(henry.label, "Matthew Henry");
+  assert.equal(henry.detail, "John 20:26–31");
+  assert.match(henry.text, /bring men to Christ and heaven, and, in order to this, to persuade men to believe/);
   assert.equal(
     GUEST_HONESTY_COPY,
     "This lesson is partially AI generated.",
   );
+});
+
+test("open steps cite the Berean text, a confession, Augustine, and Matthew Henry", () => {
+  const openable = GUEST_PATH_NODES.filter((node) => node.state !== "locked");
+  const library = openable.flatMap((node) => guestLesson(node.id)?.citations ?? []).filter((item) => item.kind === "library");
+  assert.ok(library.some((item) => item.kind === "library" && item.source === "confession" && item.label.includes("Westminster")));
+  assert.ok(library.some((item) => item.kind === "library" && item.source === "father" && item.label === "Augustine"));
+  assert.ok(library.some((item) => item.kind === "library" && item.source === "commentary" && item.label === "Matthew Henry"));
+  const augustine = library.find((item) => item.kind === "library" && item.label === "Augustine");
+  const confession = library.find((item) => item.kind === "library" && item.detail === "8.2");
+  assert.ok(augustine && augustine.kind === "library");
+  assert.match(augustine.text, /became a medicine unto us/);
+  assert.ok(confession && confession.kind === "library");
+  assert.match(confession.text, /two whole, perfect, and distinct natures, the Godhead and the manhood/);
+  const flesh = guestLesson("john-flesh");
+  assert.match(flesh?.citations.find((item) => item.kind === "scripture")?.text ?? "", /The Word became flesh and made His dwelling among us/);
+});
+
+test("guest preview copy does not name the previous sample book", () => {
+  const source = readFileSync(new URL("./guest-preview.ts", import.meta.url), "utf8");
+  const view = readFileSync(new URL("../../components/GuestPreview.tsx", import.meta.url), "utf8");
+  assert.equal(source.includes("Ruth"), false);
+  assert.equal(view.includes("Ruth"), false);
+  assert.match(view, /Berean Study Bible · retrieved/);
+  assert.match(view, /librarySourceLabel/);
+  assert.match(source, /The Gospel of John/);
 });
 
 test("signed-out landing mounts the preview and leaves the signed-in branch alone", () => {
