@@ -27,7 +27,17 @@ import { exaAuthFrom, exaReady, exaSearch, exaVerify, YOUTUBE_DOMAINS, youtubeId
 import { citeLibrary, mergeLibraryCitations, resolveLibraryRefs, type NamedLibraryRef } from "./library-cite";
 import { SOURCE_TEXT_RULE } from "./source-policy";
 import { list, llmJson, num, obj, str, strList, type LlmMeta, type LlmRole } from "./llm";
-import { carryConceptTags, parseQuizItems, requireConceptTags, teachConceptRules } from "./quiz-items.ts";
+import {
+  carryConceptTags,
+  finalizeGeneratedQuiz,
+  finalizeRewrittenQuiz,
+  parseQuizItems,
+  quizGenerationRules,
+  requireConceptTags,
+  rewrittenQuizRules,
+  shuffleQuizChoices,
+  teachConceptRules,
+} from "./quiz-items.ts";
 import { openSourceQueryOrder, searchOpenLibrary, searchWikipedia } from "./open-sources";
 import type { LearnPlanDO } from "./plan-do";
 import { enqueue, enqueueMany, type LearnEnv, type LearnMessage } from "./queues";
@@ -457,9 +467,7 @@ Never present the ${perspective} view as settled for all Christians.`;
 
 const TEACH_TYPES: TeachBlock["type"][] = ["paragraph", "heading1", "heading2", "bullet", "numbered", "quote", "divider"];
 
-const QUIZ_RULES = `Quiz rules: multiple choice ("mc") items have 4 choices and "answer" must exactly equal one choice.
-Short-answer ("short") items have a one-sentence answer. Every item must be answerable from the lesson text alone.
-objectiveIndex is the 0-based index of the lesson objective the item tests.`;
+const QUIZ_RULES = quizGenerationRules();
 
 const GAP_FAIL = "The practice lesson could not be built. The rest of the path is unchanged.";
 const GAP_BUDGET = "The practice lesson stopped because the plan reached its model budget. The rest of the path is unchanged.";
@@ -548,6 +556,7 @@ ${retrievedSources(parent)}`,
         });
       if (quiz.length < band.quiz[0]) throw new Error(`quiz needs at least ${band.quiz[0]} valid items`);
       requireConceptTags(quiz);
+      const arranged = finalizeGeneratedQuiz(quiz, `gap:${lessonId}`);
       const refs = Array.isArray(record.scriptureRefs)
         ? record.scriptureRefs.flatMap((ref) => {
             if (!ref || typeof ref !== "object") return [];
@@ -557,7 +566,7 @@ ${retrievedSources(parent)}`,
               : [];
           })
         : [];
-      return { teaching, quiz, refs, libraryRefs: readNamedRefs(record.libraryRefs) };
+      return { teaching, quiz: arranged, refs, libraryRefs: readNamedRefs(record.libraryRefs) };
     },
   });
 
@@ -631,12 +640,17 @@ async function runGapCheck(ctx: Ctx): Promise<void> {
       const replacements = await llm(ctx, "worker", {
         system: `Rewrite quiz items so each is clearly answerable from the lesson text alone.
 Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0}]}
-Return exactly ${bad.length} items. ${QUIZ_RULES}
+${rewrittenQuizRules(bad.length)}
 ${SOURCE_TEXT_RULE}`,
         user: `Lesson:\n"""\n${clip(lessonText(lesson), 9000)}\n"""\n\nItems that failed:\n${bad
-          .map((item) => `- ${item.question} (key: ${item.answer})`)
+          .map((item) => `- [${item.kind}] ${item.question} (key: ${item.answer})`)
           .join("\n")}`,
-        validate: (value) => parseQuizItems(obj(value).quiz, "quiz", lesson.objectives.length),
+        validate: (value) =>
+          finalizeRewrittenQuiz(
+            bad,
+            parseQuizItems(obj(value).quiz, "quiz", lesson.objectives.length),
+            `gap-check:${lessonId}`,
+          ),
       });
       const repaired = replacements.map((item, index) => carryConceptTags(bad[index], item));
       const stillFailed = repaired.length ? await checkQuiz(ctx, lesson, repaired) : new Set<number>();
@@ -652,6 +666,7 @@ ${SOURCE_TEXT_RULE}`,
   }
 
   if (droppedCount > 0) warnings.push(`${droppedCount} quiz item(s) dropped: not answerable from the lesson.`);
+  quiz = shuffleQuizChoices(quiz, `ready:${lessonId}`);
   if (!quiz.length || !lesson.teaching.length) {
     await ctx.stub.abandonGap(lessonId, GAP_FAIL);
     return;
@@ -748,6 +763,7 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
       const quiz = parseQuizItems(o.quiz, "quiz", objectives.length, { strictConcepts: true }).slice(0, band.quiz[1]);
       if (quiz.length < band.quiz[0]) throw new Error(`quiz needs at least ${band.quiz[0]} valid items`);
       requireConceptTags(quiz);
+      const arranged = finalizeGeneratedQuiz(quiz, `teach:${lessonId}`);
       const refs = Array.isArray(o.scriptureRefs)
         ? o.scriptureRefs.flatMap((r) => {
             if (!r || typeof r !== "object") return [];
@@ -757,7 +773,7 @@ ${repair ? `Reviewer asked for this fix: ${repair}` : ""}`,
               : [];
           })
         : [];
-      return { objectives, teaching, quiz, refs, libraryRefs: readNamedRefs(o.libraryRefs) };
+      return { objectives, teaching, quiz: arranged, refs, libraryRefs: readNamedRefs(o.libraryRefs) };
     },
   });
 
@@ -975,13 +991,14 @@ export async function runCheck(ctx: Ctx): Promise<void> {
       const replacements = await llm(ctx, "worker", {
         system: `Rewrite quiz items so each is clearly answerable from the lesson text alone.
 Return JSON: {"quiz":[{"kind":"mc"|"short","question":"","choices":[""],"answer":"","rationale":"","objectiveIndex":0}]}
-Return exactly ${bad.length} items. ${QUIZ_RULES}
+${rewrittenQuizRules(bad.length)}
 ${SOURCE_TEXT_RULE}`,
         user: `Lesson objectives:\n${lesson.objectives.map((o, i) => `${i}. ${o}`).join("\n")}\n\nLesson:\n"""\n${clip(
           lessonText(lesson),
           9000,
-        )}\n"""\n\nItems that failed:\n${bad.map((q) => `- ${q.question} (key: ${q.answer})`).join("\n")}`,
-        validate: (value) => parseQuizItems(obj(value).quiz, "quiz", lesson.objectives.length),
+        )}\n"""\n\nItems that failed:\n${bad.map((q) => `- [${q.kind}] ${q.question} (key: ${q.answer})`).join("\n")}`,
+        validate: (value) =>
+          finalizeRewrittenQuiz(bad, parseQuizItems(obj(value).quiz, "quiz", lesson.objectives.length), `check:${lessonId}`),
       });
       regenerated = replacements.length;
       // The rewrite asks for a new question, not a new concept. Keep the teach-time tag and alternate.
@@ -998,6 +1015,7 @@ ${SOURCE_TEXT_RULE}`,
   }
 
   if (droppedCount > 0) warnings.push(`${droppedCount} quiz item(s) dropped: not answerable from the lesson.`);
+  quiz = shuffleQuizChoices(quiz, `ready:${lessonId}`);
   const status = quiz.length >= band.quiz[0] ? "ok" : "degraded";
   if (status === "degraded") warnings.push(`Quiz has ${quiz.length} items; band minimum is ${band.quiz[0]}.`);
 
@@ -1133,7 +1151,10 @@ ${SOURCE_TEXT_RULE}`,
 ${conceptLines.length ? `\nLesson concepts:\n${conceptLines.join("\n")}\n` : ""}
 ${ready.map((l) => `Lesson ${l.order}: ${l.title}\n${clip(lessonText(l), 1500)}`).join("\n\n")}`,
           validate: (value) =>
-            parseQuizItems(obj(value).quiz, "quiz", scope.objectives.length).slice(0, band.finalItems),
+            finalizeGeneratedQuiz(
+              parseQuizItems(obj(value).quiz, "quiz", scope.objectives.length).slice(0, band.finalItems),
+              `final:${ctx.msg.planId}`,
+            ),
         }),
         ready,
       );
