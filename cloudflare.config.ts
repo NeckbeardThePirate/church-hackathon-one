@@ -150,7 +150,7 @@ export default defineConfig({
       LEARN_MODEL_WORKER: bindings.text(""),
       // Public Clerk frontend key. Plain var so a strict deploy keeps the dashboard value.
       CLERK_PUBLISHABLE_KEY: bindings.text(
-        "pk_test_cGVhY2VmdWwtaGFsaWJ1dC0yNjA1LmNsZXJrLmFjY291bnRzLmRldiQ",
+        "pk_live_Y2xlcmsudGhlbGlnaHRsYWJzLmRldiQ",
       ),
       AI_GATEWAY_TOKEN: bindings.secret(),
       SESSION_SECRET: bindings.secret(),
