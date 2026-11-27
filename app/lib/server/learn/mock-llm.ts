@@ -40,6 +40,7 @@ export function mockModelText(system: string, user: string, meta: LlmMeta): stri
       ],
     });
   }
+  if (meta.stage === "opener") return mockOpener(user);
   if (meta.stage === "scope") {
     const topic = /Topic:\s*(.+)/.exec(user)?.[1]?.split("\n")[0]?.trim() || "Study";
     const faith = FAITH.test(user);
@@ -127,6 +128,25 @@ export function mockModelText(system: string, user: string, meta: LlmMeta): stri
     libraryRefs: FAITH.test(`${system}\n${user}`)
       ? [{ reference: "Westminster Confession of Faith 11.1", note: "The confession's chapter on this idea." }]
       : [],
+  });
+}
+
+/** Sequential opener. The second question onward sees the earlier answers in the prompt. */
+function mockOpener(user: string): string {
+  const count = (user.match(/Chose:/g) ?? []).length;
+  const probe = count >= 2 ? "what to emphasize" : count === 1 ? "the unclear part" : "the main idea";
+  const prompt =
+    count >= 2 ? "What should the path emphasize?" : count === 1 ? "What still feels unclear?" : "How familiar is the main idea?";
+  return JSON.stringify({
+    prompt,
+    probe,
+    stop: count >= 2,
+    choices: [
+      { id: "a", label: "I can explain it", reading: "strength", concept: probe },
+      { id: "b", label: "I only know the words", reading: "gap", concept: probe },
+      { id: "c", label: "I mix it up with something nearby", reading: "gap", concept: `${probe} mix-up` },
+      { id: "d", label: "I'm not sure yet", reading: "unsure", concept: probe },
+    ],
   });
 }
 

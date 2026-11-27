@@ -18,6 +18,15 @@ import {
   type GapReserveResult,
 } from "@/app/lib/learn/gaps";
 import {
+  normalizeOpenerState,
+  planAdaptation,
+  type AdaptableLesson,
+  type OpenerDiagnostic,
+  type OpenerState,
+  type OpenerSteer,
+} from "@/app/lib/learn/opener";
+import {
+  LESSON_BANDS,
   lessonKind,
   type GapJobEvent,
   type LearnLesson,
@@ -125,6 +134,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   }
 
   async info(): Promise<{
+    planId: string;
     userId: string;
     topic: string;
     notes: string;
@@ -145,6 +155,7 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
   private infoFrom(m: Meta) {
     const lessonsTotal = m.lessonIds.length;
     return {
+      planId: m.planId,
       userId: m.userId,
       topic: m.topic,
       notes: m.notes,
@@ -413,23 +424,146 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     const m = await this.meta();
     const entries: Record<string, LearnLesson> = {};
     for (const outline of outlines) {
-      entries[`lesson:${outline.id}`] = {
-        ...outline,
-        status: "pending",
-        teaching: [],
-        videos: [],
-        articles: [],
-        books: [],
-        scripture: [],
-        library: [],
-        quiz: [],
-        warnings: [],
-      };
+      entries[`lesson:${outline.id}`] = lessonShell(outline);
     }
     await this.writeMap(entries);
     m.lessonIds = outlines.map((o) => o.id);
     m.pending = [...m.lessonIds];
     await this.saveMeta(m);
+  }
+
+  /**
+   * Store the outline, folding in any opener answers that landed while the planner was writing.
+   * Research is enqueued by the caller for the returned ids only.
+   */
+  async commitOutline(outlines: LessonOutline[]): Promise<{ researchIds: string[]; summary: string; note: string }> {
+    const scope = await this.getScope();
+    const diagnostic = await this.getOpenerDiagnostic();
+    const adaptable = outlines.map((outline) => ({ ...outline, pending: true, started: false }));
+    const adapted = scope
+      ? planAdaptation(adaptable, diagnostic, {
+          min: LESSON_BANDS[scope.complexity].min,
+          max: LESSON_BANDS[scope.complexity].max,
+          minutes: LESSON_BANDS[scope.complexity].minutes[0],
+        })
+      : { lessons: adaptable, dropIds: [], addIds: [], focusIds: [], note: "" };
+    await this.setOutline(adapted.lessons);
+    const summary = `${adapted.lessons.length} lessons: ${adapted.lessons.map((lesson) => lesson.title).join(" · ")}`;
+    return { researchIds: adapted.lessons.map((lesson) => lesson.id), summary, note: adapted.note };
+  }
+
+  async getOpener(): Promise<OpenerState> {
+    return normalizeOpenerState(await this.ctx.storage.get("opener"));
+  }
+
+  async saveOpener(state: OpenerState): Promise<void> {
+    await this.ctx.storage.put("opener", state);
+  }
+
+  async mutateOpener(update: (state: OpenerState) => OpenerState): Promise<OpenerState> {
+    const next = update(await this.getOpener());
+    await this.saveOpener(next);
+    return next;
+  }
+
+  async getOpenerDiagnostic(): Promise<OpenerDiagnostic> {
+    return (await this.getOpener()).diagnostic;
+  }
+
+  /**
+   * Apply the latest opener diagnostic to lessons that have not started.
+   * In-flight lessons are marked so their queue handlers stop cleanly.
+   * Returns queue work for the caller. Does not fail the plan.
+   */
+  async steerFromOpener(): Promise<OpenerSteer> {
+    const m = await this.meta();
+    const idle = { researchIds: [] as string[], critic: false, round: m.round };
+    if (m.status === "complete" || m.status === "partial" || m.status === "failed" || m.lessonIds.length === 0) return idle;
+    const scope = await this.getScope();
+    if (!scope) return idle;
+
+    const lessons = await this.lessonsFor(m);
+    const core = lessons.filter((lesson) => lessonKind(lesson) === "core");
+    const adaptable: AdaptableLesson[] = [];
+    for (const lesson of core) {
+      adaptable.push({
+        id: lesson.id,
+        order: lesson.order,
+        title: lesson.title,
+        objectives: lesson.objectives,
+        prerequisiteLessonIds: lesson.prerequisiteLessonIds,
+        estimatedMinutes: lesson.estimatedMinutes,
+        searchHints: lesson.searchHints,
+        pending: m.pending.includes(lesson.id),
+        started: await this.lessonStarted(lesson, m.round),
+      });
+    }
+    const band = LESSON_BANDS[scope.complexity];
+    const adapted = planAdaptation(adaptable, (await this.getOpener()).diagnostic, {
+      min: band.min,
+      max: band.max,
+      minutes: band.minutes[0],
+    });
+    if (!adapted.dropIds.length && !adapted.addIds.length && !adapted.focusIds.length) return idle;
+
+    const nextIds = adapted.lessons.map((lesson) => lesson.id);
+    const nextIdSet = new Set(nextIds);
+    for (const id of adapted.dropIds) await this.putScratch(`opener-skip:${id}`, true);
+    for (const lesson of adapted.lessons) {
+      if (adapted.addIds.includes(lesson.id)) {
+        await this.putLesson(lessonShell(lesson));
+        continue;
+      }
+      const existing = await this.getLesson(lesson.id);
+      if (!existing) continue;
+      const started = existing.status !== "pending" || existing.teaching.length > 0;
+      if (started) {
+        if (existing.order !== lesson.order || existing.prerequisiteLessonIds.join() !== lesson.prerequisiteLessonIds.join()) {
+          await this.putLesson({ ...existing, order: lesson.order, prerequisiteLessonIds: lesson.prerequisiteLessonIds });
+        }
+        continue;
+      }
+      await this.putLesson({
+        ...existing,
+        order: lesson.order,
+        title: lesson.title,
+        objectives: lesson.objectives,
+        prerequisiteLessonIds: lesson.prerequisiteLessonIds,
+        estimatedMinutes: lesson.estimatedMinutes,
+        searchHints: lesson.searchHints,
+      });
+    }
+
+    const gaps = m.lessonIds.filter((id) => !core.some((lesson) => lesson.id === id) && !nextIdSet.has(id));
+    m.lessonIds = [...nextIds, ...gaps];
+    m.pending = [...m.pending.filter((id) => nextIdSet.has(id)), ...adapted.addIds.filter((id) => !m.pending.includes(id))];
+    await this.saveMeta(m);
+    if (adapted.note) await this.event(m.stage, adapted.note);
+    const fresh = await this.meta();
+    const critic = fresh.pending.length === 0 && fresh.lessonIds.length > 0 && (fresh.status === "running" || fresh.status === "queued");
+    return { researchIds: adapted.addIds, critic, round: fresh.round };
+  }
+
+  /**
+   * Drop lessons whose research message never made it onto the queue.
+   * They must not stay pending, or the path would wait forever.
+   */
+  async abandonUnqueuedLessons(ids: string[]): Promise<OpenerSteer> {
+    const m = await this.meta();
+    const drop = new Set(ids);
+    for (const id of ids) await this.putScratch(`opener-skip:${id}`, true);
+    m.lessonIds = m.lessonIds.filter((id) => !drop.has(id));
+    m.pending = m.pending.filter((id) => !drop.has(id));
+    await this.saveMeta(m);
+    const critic = m.pending.length === 0 && m.lessonIds.length > 0 && (m.status === "running" || m.status === "queued");
+    return { researchIds: [], critic, round: m.round };
+  }
+
+  private async lessonStarted(lesson: LearnLesson, round: number): Promise<boolean> {
+    if (lesson.status !== "pending" || lesson.teaching.length > 0) return true;
+    if (await this.ctx.storage.get(`scratch:research:${lesson.id}`)) return true;
+    if (await this.ctx.storage.get(`done:research:${lesson.id}:r${round}`)) return true;
+    return false;
   }
 
   async getLesson(id: string): Promise<LearnLesson | undefined> {
@@ -809,4 +943,33 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
 
 function gapRank(lesson: { kind?: string }): number {
   return lessonKind(lesson) === "gap" ? 1 : 0;
+}
+
+function lessonShell(outline: {
+  id: string;
+  order: number;
+  title: string;
+  objectives: string[];
+  prerequisiteLessonIds: string[];
+  estimatedMinutes: number;
+  searchHints: string[];
+}): LearnLesson {
+  return {
+    id: outline.id,
+    order: outline.order,
+    title: outline.title,
+    objectives: outline.objectives,
+    prerequisiteLessonIds: outline.prerequisiteLessonIds,
+    estimatedMinutes: outline.estimatedMinutes,
+    searchHints: outline.searchHints,
+    status: "pending",
+    teaching: [],
+    videos: [],
+    articles: [],
+    books: [],
+    scripture: [],
+    library: [],
+    quiz: [],
+    warnings: [],
+  };
 }
