@@ -1,6 +1,11 @@
 /**
  * Quiz item parser for teach, check, and assemble.
  * Newly generated lesson quizzes are tagged. Items saved before concept tags stay valid.
+ *
+ * Choice order is applied once, in code, when a generated quiz is finalized.
+ * Parsing leaves choices as the model wrote them, so a stored quiz is not
+ * shuffled again on load, render, or grade. Grading compares the choice text
+ * to `answer`, not a slot index.
  */
 import { CONCEPT_ID } from "../../learn/attempts.ts";
 import type { QuizItem } from "../../learn/types.ts";
@@ -26,6 +31,91 @@ conceptLabel is a short human name for that concept.
 For each conceptId, put "alternate" on exactly one item for that concept. The alternate is a second question with the same conceptId, conceptLabel, and objectiveIndex, and it must not contain its own alternate.
 The alternate follows the same quiz rules and must be answerable from the lesson text alone.
 ${SOURCE_TEXT_RULE}`;
+}
+
+/**
+ * Rules for every generated quiz. Choice order is not the model's job:
+ * {@link finalizeGeneratedQuiz} shuffles after this text is satisfied.
+ */
+export function quizGenerationRules(): string {
+  return `Quiz rules: the only supported kinds are multiple choice ("mc") and short answer ("short"). Use both.
+Multiple choice items have exactly 4 choices, and "answer" must exactly equal one choice. Do not place the correct choice in a preferred slot. The app shuffles choices in code and keeps the answer text on the choice it moves.
+Short-answer items have a one-sentence answer and no choices.
+Mix the kinds across the quiz. For 2 items, use one of each. For 3 items, include at least one of each. For 4 or more, at least 40% of the items must be short answer and at least 40% must be multiple choice. A quiz that is almost all multiple choice is invalid.
+When an item has an alternate, use the other kind for that alternate when the lesson supports it, so review is not all multiple choice.
+Every item must be answerable from the lesson text alone.
+objectiveIndex is the 0-based index of the lesson objective the item tests.`;
+}
+
+/** Rewrite prompt: same count and kind as the failed items, then the shared quiz rules. */
+export function rewrittenQuizRules(count: number): string {
+  return `Return exactly ${count} items, in the same order. Keep each rewritten item's kind ("mc" or "short") the same as the failed item it replaces.
+${quizGenerationRules()}`;
+}
+
+/**
+ * How many items of each supported kind a generated quiz must include.
+ * Two items: one of each. Three: at least one of each.
+ * Four or more: at least 40% of each kind.
+ */
+export function quizKindMinimum(count: number): number {
+  if (count < 2) return 0;
+  if (count < 4) return 1;
+  return Math.ceil(count * 0.4);
+}
+
+/** Reject a generated quiz that is almost entirely one kind. */
+export function assertQuizKindMix(items: readonly QuizItem[], path = "quiz"): void {
+  const minimum = quizKindMinimum(items.length);
+  if (minimum === 0) return;
+  let multipleChoice = 0;
+  let shortAnswer = 0;
+  for (const item of items) {
+    if (item.kind === "short") shortAnswer += 1;
+    else multipleChoice += 1;
+  }
+  if (multipleChoice >= minimum && shortAnswer >= minimum) return;
+  throw new Error(
+    `${path} needs a mix of question types (${multipleChoice} multiple choice, ${shortAnswer} short answer). ` +
+      `Include at least ${minimum} multiple choice and ${minimum} short answer.`,
+  );
+}
+
+/** A check rewrite replaces questions. It must not change how many there are or their kinds. */
+export function assertRewrittenKinds(previous: readonly QuizItem[], next: readonly QuizItem[]): void {
+  if (next.length !== previous.length) {
+    throw new Error(`quiz must include exactly ${previous.length} items`);
+  }
+  next.forEach((item, index) => {
+    const before = previous[index];
+    if (before && item.kind !== before.kind) {
+      throw new Error(`quiz[${index}] must stay kind "${before.kind}"`);
+    }
+  });
+}
+
+/**
+ * Shuffle multiple-choice options once and spread the correct choice across slots.
+ * The returned items are new objects. `answer` stays the same string, and that
+ * string is placed at slot `ordinal % choiceCount` so a quiz is not stuck on one index.
+ * Calling this again with the same seed returns the same order.
+ */
+export function shuffleQuizChoices(items: readonly QuizItem[], seed = "quiz"): QuizItem[] {
+  let slot = 0;
+  const takeSlot = () => slot++;
+  return items.map((item, index) => arrangeItem(item, `${seed}:${index}`, takeSlot));
+}
+
+/** Check the kind mix, then shuffle. Used when a full quiz is stored. */
+export function finalizeGeneratedQuiz(items: readonly QuizItem[], seed: string): QuizItem[] {
+  assertQuizKindMix(items);
+  return shuffleQuizChoices(items, seed);
+}
+
+/** Keep rewrite kinds, then shuffle the new choice lists. */
+export function finalizeRewrittenQuiz(previous: readonly QuizItem[], next: readonly QuizItem[], seed: string): QuizItem[] {
+  assertRewrittenKinds(previous, next);
+  return shuffleQuizChoices(next, seed);
 }
 
 export function parseQuizItems(
@@ -110,6 +200,91 @@ function mcChoices(record: Record<string, unknown>, path: string, answer: string
   const choices = strList(record.choices, `${path}.choices`, { min: 2 }).slice(0, 5);
   if (!choices.includes(answer)) throw new Error(`${path}: answer must exactly equal one of the choices`);
   return choices;
+}
+
+function arrangeItem(item: QuizItem, seed: string, takeSlot: () => number): QuizItem {
+  const choices = arrangedChoices(item, seed, takeSlot);
+  const alternate = item.alternate ? arrangeAlternate(item.alternate, `${seed}:alternate`, takeSlot) : undefined;
+  return {
+    ...item,
+    ...(choices ? { choices } : {}),
+    ...(alternate ? { alternate } : {}),
+  };
+}
+
+function arrangeAlternate(
+  alternate: NonNullable<QuizItem["alternate"]>,
+  seed: string,
+  takeSlot: () => number,
+): NonNullable<QuizItem["alternate"]> {
+  const choices = arrangedChoices(alternate, seed, takeSlot);
+  return choices ? { ...alternate, choices } : alternate;
+}
+
+function arrangedChoices(
+  item: { kind: QuizItem["kind"]; question: string; choices?: string[]; answer: string },
+  seed: string,
+  takeSlot: () => number,
+): string[] | undefined {
+  const choices = item.choices;
+  if (item.kind !== "mc" || !choices || choices.length < 2) return undefined;
+  const correctAt = choices.indexOf(item.answer);
+  if (correctAt < 0) return undefined;
+  return placeAnswer(choices, correctAt, `${seed}\n${item.question}`, takeSlot());
+}
+
+/**
+ * Distractors are sorted before the shuffle so a second call sees the same
+ * input even after the correct choice has moved. The correct string is then
+ * written into `slot`. Grading still compares that string, not the slot.
+ */
+function placeAnswer(choices: readonly string[], correctAt: number, seed: string, slot: number): string[] {
+  const answer = choices[correctAt] ?? "";
+  const distractors = choices.filter((_, index) => index !== correctAt).sort(byCodePoint);
+  const shuffled = fisherYates(distractors, mulberry32(hashString(`${seed}\n${answer}\n${distractors.join("\u0001")}`)));
+  const target = slot % choices.length;
+  const next: string[] = [];
+  let distractor = 0;
+  for (let index = 0; index < choices.length; index++) {
+    next.push(index === target ? answer : (shuffled[distractor++] ?? ""));
+  }
+  return next;
+}
+
+function byCodePoint(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+function hashString(input: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index++) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function fisherYates<T>(items: readonly T[], random: () => number): T[] {
+  const next = items.slice();
+  for (let index = next.length - 1; index > 0; index--) {
+    const swapAt = Math.floor(random() * (index + 1));
+    const swap = next[index]!;
+    next[index] = next[swapAt]!;
+    next[swapAt] = swap;
+  }
+  return next;
 }
 
 function readConcept(

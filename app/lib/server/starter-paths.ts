@@ -17,6 +17,7 @@ import type {
 import { isEmptyLearnPath, type Project } from "@/app/lib/projects";
 import { fetchPassagesFromD1, type PassageResult } from "./bible-db";
 import { resolveLibraryRefs } from "./learn/library-cite";
+import { shuffleQuizChoices } from "./learn/quiz-items.ts";
 import type { LibraryEnv } from "./library-search";
 
 const HESED_KEY = "faithful, covenant-based loyalty in action that often goes beyond strict obligation";
@@ -705,7 +706,7 @@ async function attachLibrary(env: LibraryEnv, slots: LibrarySlot[]): Promise<Lib
   return citations;
 }
 
-function toLesson(draft: LessonDraft, scripture: ScriptureReading[], library: LibraryCitation[]): LearnLesson {
+function toLesson(draft: LessonDraft, scripture: ScriptureReading[], library: LibraryCitation[], seed: string): LearnLesson {
   return {
     id: draft.id,
     order: draft.order,
@@ -721,7 +722,7 @@ function toLesson(draft: LessonDraft, scripture: ScriptureReading[], library: Li
     books: [],
     scripture,
     library,
-    quiz: draft.quiz,
+    quiz: shuffleQuizChoices(draft.quiz, seed),
     warnings: [],
     ...(draft.kind === "gap"
       ? { kind: "gap" as const, sourceLessonId: draft.sourceLessonId, sourceConceptIds: draft.sourceConceptIds }
@@ -738,7 +739,7 @@ export async function materializeStarter(id: StarterPathId, env: LibraryEnv, now
       attachScripture(env, lesson.scripture),
       attachLibrary(env, lesson.library),
     ]);
-    lessons.push(toLesson(lesson, scripture, library));
+    lessons.push(toLesson(lesson, scripture, library, `starter:${draft.id}:${lesson.id}`));
   }
   const plan: LearnPlan = {
     id: draft.planId,
@@ -751,7 +752,7 @@ export async function materializeStarter(id: StarterPathId, env: LibraryEnv, now
     objectives: draft.objectives,
     lessons,
     courseBooks: [],
-    finalAssessment: draft.finalAssessment,
+    finalAssessment: shuffleQuizChoices(draft.finalAssessment, `starter:${draft.id}:final`),
     warnings: [],
     createdAt: now,
   };
