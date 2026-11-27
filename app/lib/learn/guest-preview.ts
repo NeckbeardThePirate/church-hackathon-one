@@ -8,8 +8,7 @@
 
 import type { PathMapNode } from "./path-map.ts";
 
-export const GUEST_HONESTY_COPY =
-  "Lessons and quizzes are AI-generated; Scripture and historical sources are retrieved from the library.";
+export const GUEST_HONESTY_COPY = "This lesson is partially AI generated.";
 
 export const GUEST_PATH_TITLE = "The Book of Ruth";
 
