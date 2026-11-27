@@ -5,6 +5,8 @@ import type { PathMapNode, PathNodeState } from "../lib/learn/path-map";
 type Props = {
   nodes: PathMapNode[];
   onOpen: (nodeId: string) => void;
+  /** Marks a node that just appeared, such as the guest sample gap. */
+  highlightId?: string | null;
 };
 
 const STATE_LABEL: Record<PathNodeState, string> = {
@@ -35,11 +37,14 @@ function stateClass(state: PathNodeState): string {
   }
 }
 
-function cardClass(node: PathMapNode): string {
+function cardClass(node: PathMapNode, highlighted: boolean): string {
   const base =
-    "flex w-full min-w-0 max-w-full items-start rounded-xl border px-4 py-3 text-left transition-colors";
+    "flex w-full min-w-0 max-w-full items-start rounded-xl border px-4 py-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]";
   if (node.state === "locked") {
     return `${base} cursor-default border-[var(--line)] bg-[color-mix(in_srgb,var(--sidebar)_72%,var(--canvas))]`;
+  }
+  if (highlighted) {
+    return `${base} border-[color-mix(in_srgb,var(--accent)_70%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_16%,var(--sidebar))] shadow-[inset_3px_0_0_var(--accent)] hover:border-[color-mix(in_srgb,var(--accent)_85%,var(--line))]`;
   }
   if (node.current) {
     return `${base} border-[color-mix(in_srgb,var(--accent)_58%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_12%,var(--sidebar))] shadow-[inset_3px_0_0_var(--accent)] hover:border-[color-mix(in_srgb,var(--accent)_75%,var(--line))]`;
@@ -62,7 +67,15 @@ function eyebrow(node: PathMapNode): string {
   return `Lesson ${node.order}`;
 }
 
-function NodeCard({ node, onOpen }: { node: PathMapNode; onOpen: (nodeId: string) => void }) {
+function NodeCard({
+  node,
+  onOpen,
+  highlighted,
+}: {
+  node: PathMapNode;
+  onOpen: (nodeId: string) => void;
+  highlighted: boolean;
+}) {
   const locked = node.state === "locked";
   const reason = locked ? finishFirst(node.unmet.map((item) => item.title)) : null;
   return (
@@ -73,17 +86,21 @@ function NodeCard({ node, onOpen }: { node: PathMapNode; onOpen: (nodeId: string
       data-path-node={node.id}
       data-path-state={node.state}
       data-path-kind={node.kind}
+      data-path-highlight={highlighted ? "true" : undefined}
       onClick={() => {
         if (locked) return;
         onOpen(node.id);
       }}
-      className={cardClass(node)}
+      className={cardClass(node, highlighted)}
     >
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">
             {node.current ? (
               <span className="mr-2 text-[color-mix(in_srgb,var(--accent)_85%,var(--ink))]">Current</span>
+            ) : null}
+            {highlighted ? (
+              <span className="mr-2 text-[color-mix(in_srgb,var(--accent)_85%,var(--ink))]">New </span>
             ) : null}
             {eyebrow(node)}
           </span>
@@ -120,19 +137,25 @@ function groupsOf(nodes: PathMapNode[]): { head: PathMapNode; gaps: PathMapNode[
 }
 
 /** Vertical path of core lessons, gap lessons, and the final assessment. */
-export function LearnPathMap({ nodes, onOpen }: Props) {
+export function LearnPathMap({ nodes, onOpen, highlightId = null }: Props) {
   const groups = groupsOf(nodes);
   if (!groups.length) return null;
   return (
     <ol className="mt-4 space-y-3 border-l border-[var(--line)] pl-3 sm:pl-4" aria-label="Path map">
       {groups.map((group) => (
-        <li key={group.head.id} className="min-w-0">
-          <NodeCard node={group.head} onOpen={onOpen} />
+        <li
+          key={group.head.id}
+          className={highlightId === group.head.id ? "path-node-enter min-w-0 scroll-mt-4" : "min-w-0 scroll-mt-4"}
+        >
+          <NodeCard node={group.head} onOpen={onOpen} highlighted={highlightId === group.head.id} />
           {group.gaps.length ? (
             <ul className="mt-2 space-y-2 border-l border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] pl-3" aria-label={`Gap lessons for ${group.head.title}`}>
               {group.gaps.map((gap) => (
-                <li key={gap.id} className="min-w-0">
-                  <NodeCard node={gap} onOpen={onOpen} />
+                <li
+                  key={gap.id}
+                  className={highlightId === gap.id ? "path-node-enter min-w-0 scroll-mt-4" : "min-w-0 scroll-mt-4"}
+                >
+                  <NodeCard node={gap} onOpen={onOpen} highlighted={highlightId === gap.id} />
                 </li>
               ))}
             </ul>

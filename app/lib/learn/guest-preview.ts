@@ -1,6 +1,8 @@
 /**
  * Bundled sample path for the signed-out landing.
  * Static on purpose: no D1 read, no session, and nothing to write.
+ * The quick check is client state on top of that bundle. A miss only
+ * adds a sample gap to the map in memory.
  * Scripture is the King James Version. Confession lines are the Westminster Confession.
  */
 
@@ -13,6 +15,72 @@ export const GUEST_PATH_TITLE = "The Book of Ruth";
 
 /** The step a judge sees open when the landing first paints. */
 export const GUEST_OPEN_LESSON_ID = "ruth-field";
+
+/** Header XP before the sample check awards anything. */
+export const GUEST_SAMPLE_BASE_XP = 60;
+
+/** Same amount as a first-try quiz answer. Sample only: nothing is saved. */
+export const GUEST_SAMPLE_CHECK_XP = 5;
+
+/** Practice gap that exists only after a miss. Not part of the bundled path. */
+export const GUEST_SAMPLE_GAP_ID = "gap-ruth-wings";
+
+export type GuestCheckChoice = {
+  id: string;
+  label: string;
+};
+
+export type GuestSampleQuestion = {
+  lessonId: string;
+  prompt: string;
+  choices: readonly GuestCheckChoice[];
+  correctId: string;
+  encourage: string;
+  miss: string;
+  opened: string;
+};
+
+/** One bundled question from The field of Boaz. Graded in the browser. */
+export const GUEST_SAMPLE_QUESTION: GuestSampleQuestion = {
+  lessonId: GUEST_OPEN_LESSON_ID,
+  prompt: "Boaz says Ruth has come to trust under what?",
+  choices: [
+    { id: "wings", label: "The wings of the God of Israel" },
+    { id: "gate", label: "The gate of the nearer kinsman" },
+    { id: "roof", label: "The roof of her mother’s house" },
+  ],
+  correctId: "wings",
+  encourage:
+    "Yes. Boaz is naming the God she has come to trust. She is under the wings of the God of Israel.",
+  miss: "Not that one. The blessing in the field is the wings of the God of Israel. A practice step is now on the path for that line.",
+  opened: "This is what a miss does. A practice step is now on the path for the wings of the God of Israel.",
+};
+
+export type GuestSamplePhase = "idle" | "correct" | "missed" | "opened";
+
+export type GuestSampleState = {
+  pickedId: string | null;
+  /** Null until a choice is picked. */
+  correct: boolean | null;
+  /** True once the sample practice gap is on the map. */
+  gapSpawned: boolean;
+  /** Sample total shown beside the streak. */
+  xp: number;
+  /** How many times this sample has awarded XP. Stays 0 or 1. */
+  awardTick: number;
+};
+
+export const GUEST_SAMPLE_GAP_NODE: PathMapNode = {
+  id: GUEST_SAMPLE_GAP_ID,
+  kind: "gap",
+  title: "Practice: under his wings",
+  order: 3,
+  state: "available",
+  unmet: [],
+  parentId: GUEST_OPEN_LESSON_ID,
+  current: false,
+  estimatedMinutes: 20,
+};
 
 const CONFESSION = "Westminster Confession of Faith";
 
@@ -233,8 +301,124 @@ const LESSONS: Record<string, GuestLessonPreview> = {
     review: "Spaced review · after the quiz",
     xp: "10 XP",
   },
+  [GUEST_SAMPLE_GAP_ID]: {
+    id: GUEST_SAMPLE_GAP_ID,
+    kicker: "Gap lesson · just opened",
+    title: GUEST_SAMPLE_GAP_NODE.title,
+    excerpt: [
+      "This practice stays on the line the check missed. Boaz does not bless Ruth for a gate or a roof. He blesses her for coming to trust under the wings of the God of Israel.",
+      "On a signed-in path, a miss queues a short lesson like this and cites the library. Here the step is a sample. Nothing is graded, and nothing is stored.",
+    ],
+    citations: [
+      {
+        kind: "scripture",
+        reference: "Ruth 2:12",
+        text: "The LORD recompense thy work, and a full reward be given thee of the LORD God of Israel, under whose wings thou art come to trust.",
+        note: "Boaz’s blessing in the field, retrieved again for the line this check is about. King James Version.",
+      },
+      {
+        kind: "confession",
+        label: CONFESSION,
+        detail: "12.1",
+        text: "All those that are justified, God vouchsafeth, in and for His only Son Jesus Christ, to make partakers of the grace of adoption, by which they are taken into the number, and enjoy the liberties and privileges of the children of God, have His name put upon them, receive the spirit of adoption, have access to the throne of grace with boldness, are enabled to cry, Abba, Father, are pitied, protected, provided for, and chastened by Him as by a Father.",
+        note: "Of Adoption. The practice sets Boaz’s wings beside the confession’s line that the children of God are protected by Him as by a Father. It does not swap Ruth’s verse for the confession.",
+      },
+    ],
+    review: "Spaced review · after this practice",
+    xp: "40 XP",
+  },
 };
 
 export function guestLesson(id: string): GuestLessonPreview | null {
   return LESSONS[id] ?? null;
+}
+
+export function initialGuestSample(): GuestSampleState {
+  return {
+    pickedId: null,
+    correct: null,
+    gapSpawned: false,
+    xp: GUEST_SAMPLE_BASE_XP,
+    awardTick: 0,
+  };
+}
+
+export function resetGuestSample(): GuestSampleState {
+  return initialGuestSample();
+}
+
+/** Where the sample check is in its script: unanswered, credited, missed, or opened without a pick. */
+export function guestSamplePhase(state: GuestSampleState): GuestSamplePhase {
+  if (state.correct === true) return "correct";
+  if (state.correct === false) return "missed";
+  if (state.gapSpawned) return "opened";
+  return "idle";
+}
+
+export function guestSampleHeading(state: GuestSampleState): string | null {
+  if (state.correct === true) return "That’s right";
+  if (state.correct === false || state.gapSpawned) return "A practice step opened";
+  return null;
+}
+
+export function guestSampleFeedback(state: GuestSampleState): string | null {
+  if (state.correct === true) return GUEST_SAMPLE_QUESTION.encourage;
+  if (state.correct === false) return GUEST_SAMPLE_QUESTION.miss;
+  if (state.gapSpawned) return GUEST_SAMPLE_QUESTION.opened;
+  return null;
+}
+
+export function guestChoiceVisual(state: GuestSampleState, choiceId: string): "idle" | "correct" | "wrong" {
+  if (state.pickedId === null) return "idle";
+  if (choiceId === GUEST_SAMPLE_QUESTION.correctId) return "correct";
+  if (choiceId === state.pickedId) return "wrong";
+  return "idle";
+}
+
+/**
+ * Record one pick. A later pick is ignored.
+ * The right answer awards sample XP and leaves the map alone.
+ * A wrong answer puts the practice gap on the map.
+ */
+export function pickGuestSample(state: GuestSampleState, choiceId: string): GuestSampleState {
+  if (state.pickedId !== null) return state;
+  const known = GUEST_SAMPLE_QUESTION.choices.some((choice) => choice.id === choiceId);
+  if (!known) return state;
+  const correct = choiceId === GUEST_SAMPLE_QUESTION.correctId;
+  if (correct) {
+    return {
+      pickedId: choiceId,
+      correct: true,
+      gapSpawned: state.gapSpawned,
+      xp: state.xp + GUEST_SAMPLE_CHECK_XP,
+      awardTick: state.awardTick + 1,
+    };
+  }
+  return {
+    pickedId: choiceId,
+    correct: false,
+    gapSpawned: true,
+    xp: state.xp,
+    awardTick: state.awardTick,
+  };
+}
+
+/** The “See what happens when you miss” control. Does not award XP and does not change a pick. */
+export function revealGuestMiss(state: GuestSampleState): GuestSampleState {
+  if (state.gapSpawned) return state;
+  return { ...state, gapSpawned: true };
+}
+
+/** Path nodes for this sample, with the practice gap inserted under its lesson once spawned. */
+export function guestPathNodes(state: GuestSampleState): PathMapNode[] {
+  if (!state.gapSpawned) return GUEST_PATH_NODES.slice();
+  const nodes = GUEST_PATH_NODES.slice();
+  const parentAt = nodes.findIndex((node) => node.id === GUEST_SAMPLE_GAP_NODE.parentId);
+  const insertAt = parentAt >= 0 ? parentAt + 1 : nodes.length;
+  nodes.splice(insertAt, 0, GUEST_SAMPLE_GAP_NODE);
+  return nodes;
+}
+
+export function guestHighlightId(state: GuestSampleState): string | null {
+  return state.gapSpawned ? GUEST_SAMPLE_GAP_ID : null;
 }
