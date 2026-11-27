@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { StudyLamp } from "./StudyLamp";
 
 const ERRORS: Record<string, string> = {
   chatgpt_unconfigured:
@@ -54,7 +55,7 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`w-full ${compact ? "" : "max-w-md"} [scrollbar-gutter:stable]`}>
       <div className="safe-area-x rounded-xl border border-[var(--line)] bg-[var(--sidebar)] p-5 sm:p-6 text-[var(--ink)]">
-        <h1 className="font-serif text-2xl tracking-[-0.02em]">StudyBuddy</h1>
+        <h1 className="study-serif text-2xl tracking-[-0.02em]">StudyBuddy</h1>
         <p className="mt-2 text-sm leading-relaxed text-[var(--ink-muted)]">
           Learn paths cited to Scripture, the confessions, and the church fathers.
         </p>
@@ -72,7 +73,14 @@ export function SignInChoices({ compact = false }: { compact?: boolean }) {
               disabled={pending}
               className="min-h-11 rounded-lg border border-[var(--line)] px-4 py-2.5 text-base text-[var(--ink)] hover:bg-[var(--sidebar-active)] disabled:opacity-50"
             >
-              {pending ? "Signing in…" : "Continue on this computer"}
+              {pending ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <StudyLamp size={22} live />
+                  Opening the study…
+                </span>
+              ) : (
+                "Continue on this computer"
+              )}
             </button>
           ) : null}
         </div>

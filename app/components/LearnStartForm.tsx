@@ -7,6 +7,7 @@ import { MAX_NOTES, MAX_TOPIC, deriveTopic, hasIntake } from "../lib/learn/intak
 import { TRADITIONS, isPerspective, type Perspective } from "../lib/learn/types";
 import { fetchLearnPerspective } from "../lib/workspace-sync";
 import { SourceNote } from "./SourceNote";
+import { StudyLamp } from "./StudyLamp";
 
 export type StartPayload = {
   topic: string;
@@ -37,7 +38,7 @@ type Photo = {
 };
 
 const FIELD =
-  "w-full rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-3 text-base text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))]";
+  "min-w-0 w-full rounded-lg border border-[var(--line)] bg-[var(--sidebar)] px-3 py-3 text-base text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] focus:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))]";
 
 const LABEL = "text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]";
 
@@ -197,13 +198,13 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={onDrop}
-      className={`mx-auto flex w-full max-w-[640px] flex-col gap-6 px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-4 sm:px-10 sm:pt-8 ${
+      className={`mx-auto flex w-full max-w-[640px] flex-col gap-6 overflow-x-clip px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-4 sm:px-10 sm:pt-8 ${
         dragging ? "rounded-2xl outline-dashed outline-2 outline-offset-[-8px] outline-[var(--accent)]" : ""
       }`}
     >
       <header className="flex flex-col gap-2">
         <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">New learn path</p>
-        <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[var(--ink)] sm:text-4xl">What do you want to learn?</h1>
+        <h1 className="break-words text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-[var(--ink)] sm:text-4xl">What do you want to learn?</h1>
         <SourceNote place="intake" />
       </header>
 
@@ -269,14 +270,14 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
               {passages.map((p) => (
                 <li
                   key={p.label}
-                  className="flex min-h-10 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[var(--sidebar-active)] pl-3.5 pr-1 text-sm text-[var(--ink)]"
+                  className="flex max-w-full min-h-11 items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[var(--sidebar-active)] pl-3.5 pr-1 text-sm text-[var(--ink)]"
                 >
-                  <span>{p.label}</span>
+                  <span className="min-w-0 break-words">{p.label}</span>
                   <button
                     type="button"
                     aria-label={`Remove ${p.label}`}
                     onClick={() => setPassages((prev) => prev.filter((x) => x.label !== p.label))}
-                    className="grid size-8 place-items-center rounded-full text-[var(--ink-muted)] hover:text-[var(--ink)]"
+                    className="grid size-11 shrink-0 place-items-center rounded-full text-[var(--ink-muted)] hover:text-[var(--ink)]"
                   >
                     <span aria-hidden>×</span>
                   </button>
@@ -319,8 +320,10 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
                 {p.status !== "done" ? (
                   <span
                     title={p.message}
-                    className={`absolute inset-x-0 bottom-0 truncate bg-[color-mix(in_srgb,var(--canvas)_85%,transparent)] px-1.5 py-1 text-xs ${
-                      p.status === "error" ? "text-[#c0533f]" : "animate-pulse text-[var(--ink)]"
+                    className={`absolute inset-x-0 bottom-0 truncate px-1.5 py-1 text-xs ${
+                      p.status === "error"
+                        ? "bg-[color-mix(in_srgb,var(--canvas)_85%,transparent)] text-[#c0533f]"
+                        : "study-shimmer bg-[var(--line)] text-[var(--ink)]"
                     }`}
                   >
                     {p.status === "reading" ? "Reading…" : (p.message ?? "Failed")}
@@ -330,7 +333,7 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
                   type="button"
                   aria-label={`Remove ${p.name}`}
                   onClick={() => removePhoto(p.id)}
-                  className="absolute right-1 top-1 grid size-9 place-items-center rounded-full bg-[color-mix(in_srgb,var(--canvas)_85%,transparent)] text-[var(--ink)] shadow-sm"
+                  className="absolute right-1 top-1 grid size-11 place-items-center rounded-full bg-[color-mix(in_srgb,var(--canvas)_85%,transparent)] text-[var(--ink)] shadow-sm"
                 >
                   <span aria-hidden>×</span>
                 </button>
@@ -422,7 +425,16 @@ export function LearnStartForm({ projectId, starting, error, onStart }: Props) {
         onClick={submit}
         className="min-h-12 rounded-lg bg-[var(--accent)] px-4 py-2.5 text-base font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {starting ? "Starting…" : reading ? "Reading photos…" : "Build my path"}
+        {starting ? (
+          <span className="inline-flex items-center justify-center gap-2">
+            <StudyLamp size={22} live />
+            Lighting the lamp…
+          </span>
+        ) : reading ? (
+          "Reading photos…"
+        ) : (
+          "Build my path"
+        )}
       </button>
     </section>
   );

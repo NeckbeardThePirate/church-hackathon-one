@@ -4,13 +4,10 @@ import { ClerkLoading, RedirectToSignIn, Show } from "@clerk/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useClerkKey } from "./ClerkAppProvider";
 import { SignInChoices } from "./SignInChoices";
+import { StudyLoading } from "./StudyLoading";
 
 function AuthLoading() {
-  return (
-    <div className="flex min-h-dvh items-center justify-center bg-[var(--canvas)] text-base text-[var(--ink-muted)]">
-      Loading…
-    </div>
-  );
+  return <StudyLoading title="StudyBuddy" />;
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {

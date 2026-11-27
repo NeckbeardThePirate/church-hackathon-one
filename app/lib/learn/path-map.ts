@@ -32,6 +32,8 @@ export type PathMapNode = {
   parentId: string | null;
   current: boolean;
   estimatedMinutes?: number;
+  /** Outline exists, but the teaching and quiz are still being written. */
+  building: boolean;
 };
 
 export type PathMapInput = {
@@ -285,6 +287,7 @@ export function derivePathMap(input: PathMapInput): PathMapNode[] {
       parentId: item.parentId,
       current: false,
       estimatedMinutes: item.lesson.estimatedMinutes,
+      building: item.lesson.status === "pending",
     };
   });
 
@@ -313,6 +316,7 @@ export function derivePathMap(input: PathMapInput): PathMapNode[] {
       unmet: state === "locked" ? coreUnmet : [],
       parentId: null,
       current: false,
+      building: false,
     });
   }
 
