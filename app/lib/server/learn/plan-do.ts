@@ -460,8 +460,10 @@ export class LearnPlanDO extends DurableObject<LearnEnv> {
     await this.ctx.storage.put("opener", state);
   }
 
-  async mutateOpener(update: (state: OpenerState) => OpenerState): Promise<OpenerState> {
-    const next = update(await this.getOpener());
+  async mutateOpener(update: (state: OpenerState) => OpenerState | Promise<OpenerState>): Promise<OpenerState> {
+    // The callback is an RPC function when the worker calls this. Calling it
+    // returns an RpcPromise, which storage and the RPC result cannot serialize.
+    const next = await update(await this.getOpener());
     await this.saveOpener(next);
     return next;
   }
