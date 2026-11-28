@@ -26,7 +26,6 @@ import { locationForPlan, parsePathUrl, pathSearch } from "../lib/learn/path-url
 import {
   combineReadPercent,
   lessonCanBeMarkedRead,
-  readPercentMarksDone,
   scrollDepthPercent,
   sectionVisibilityPercent,
 } from "../lib/learn/read-progress";
@@ -50,12 +49,11 @@ import {
   type PracticeCard,
 } from "../lib/learn/gaps";
 import {
-  countPlanProgress,
   defaultLocation,
   emptyQuiz,
-  isFinalStepComplete,
-  isLessonStepComplete,
   isQuizSettled,
+  quizAnswerSubmitted,
+  releaseUntouchedAnswer,
   mainScrollElement,
   mergeLearnProgress,
   newConceptMastery,
@@ -70,9 +68,9 @@ import {
   type PersistedQuiz,
   type PersistedQuizAnswer,
 } from "../lib/learn/plan-progress";
-import { courseContinue } from "../lib/learn/progress-dashboard";
+import { courseContinue, pathProgressFigures } from "../lib/learn/progress-dashboard";
 import { isStarterPlanId } from "../lib/learn/starters";
-import { attemptPassed, derivePathMap } from "../lib/learn/path-map";
+import { attemptPassed } from "../lib/learn/path-map";
 import { lessonIsStudyable, pathMilestones } from "../lib/learn/path-milestones";
 import {
   articleDoneFor,
@@ -500,10 +498,10 @@ function QuizQuestion({
         </form>
       )}
 
-      {item.kind === "mc" && mcAnswered ? (
+      {item.kind === "mc" && mcAnswered && quizAnswerSubmitted(state) ? (
         <QuizFeedback correct={mcCorrect} rationale={item.rationale} answer={mcCorrect ? undefined : item.answer} />
       ) : null}
-      {item.kind === "short" && state.shortSubmitted ? (
+      {item.kind === "short" && quizAnswerSubmitted(state) ? (
         <QuizFeedback
           correct={shortCorrect}
           partial={shortPartial}
@@ -609,15 +607,16 @@ function QuizSection({
   gradeShort: (item: QuizItem, given: string) => Promise<GradeResult>;
 }) {
   const quiz = normalizeQuiz(saved, items.length);
-  const answeredCount = quiz.answers.filter((a) => a.correct !== null).length;
-  const correctCount = quizCorrectCount(quiz);
+  const counted = quiz.answers.filter((answer) => quizAnswerSubmitted(answer) && answer.correct !== null);
+  const answeredCount = counted.length;
+  const correctCount = counted.filter((answer) => answer.correct === true).length;
   const bestCorrect = Math.max(quiz.bestCorrect ?? 0, correctCount);
-  const missed = quiz.answers.some((answer) => answer.correct === false);
+  const missed = counted.some((answer) => answer.correct === false);
   const allAnswered = quizAllAnswered(quiz);
 
   const updateAnswer = (index: number, answer: PersistedQuizAnswer) => {
-    const next = { ...quiz, answers: [...quiz.answers] };
-    next.answers[index] = answer;
+    const next = { ...quiz, answers: quiz.answers.map(releaseUntouchedAnswer) };
+    next.answers[index] = releaseUntouchedAnswer(answer);
     onSave(next);
   };
 
@@ -712,10 +711,11 @@ function LearnProgressTrack({
     >
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="font-medium uppercase tracking-[0.08em] text-[var(--ink-muted)]">{label}</span>
-        <span className="tabular-nums text-[var(--ink-muted)]">
-          {completed}/{total}
-        </span>
+        <span className="tabular-nums text-[var(--ink)]">{percent}%</span>
       </div>
+      <p className="mt-1 text-[11px] tabular-nums text-[var(--ink-muted)]">
+        {completed}/{total} complete
+      </p>
       <div
         className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--line)]"
         role="progressbar"
@@ -739,11 +739,11 @@ function StepMark({ done }: { done: boolean }) {
       className={`inline-flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] leading-none ${
         done
           ? "border-[color-mix(in_srgb,#6b9f7a_50%,var(--line))] bg-[color-mix(in_srgb,#6b9f7a_18%,var(--sidebar))] text-[color-mix(in_srgb,#6b9f7a_85%,var(--ink))]"
-          : "border-[var(--line)] text-transparent"
+          : "border-[var(--line)] bg-transparent text-transparent"
       }`}
-      aria-hidden
+      aria-label={done ? "Completed" : "Not completed"}
     >
-      ✓
+      {done ? "✓" : ""}
     </span>
   );
 }
@@ -910,7 +910,7 @@ function ReadingProgressBar({ percent, done, onMarkRead }: { percent: number; do
                 : "border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] text-[var(--ink)]"
             }`}
           >
-            {done ? "Read" : "Mark as read"}
+            {done ? "Marked as read" : "Mark as read"}
           </button>
         </span>
       </div>
@@ -920,7 +920,7 @@ function ReadingProgressBar({ percent, done, onMarkRead }: { percent: number; do
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`${pct} percent read`}
+        aria-label={done ? "Marked as read" : `${pct} percent scrolled`}
       >
         <div
           className="h-full rounded-full bg-[color-mix(in_srgb,var(--accent)_78%,var(--ink))] transition-[width] duration-300 ease-out"
@@ -964,7 +964,7 @@ function rememberQuiz(quiz: PersistedQuiz): PersistedQuiz {
 }
 
 function wasGraded(answer: PersistedQuizAnswer | undefined): boolean {
-  if (!answer) return false;
+  if (!answer || !quizAnswerSubmitted(answer)) return false;
   if (answer.correct != null) return true;
   if ((answer.score ?? 0) > 0) return true;
   if (answer.shortSubmitted) return true;
@@ -1046,7 +1046,7 @@ function conceptUpdatesForQuiz(
     if (!item.conceptId) return;
     const answer = next.answers[index];
     const before = previous?.answers[index];
-    if (!answer || answer.correct == null) return;
+    if (!answer || !quizAnswerSubmitted(answer) || answer.correct == null) return;
     if (before && before.correct === answer.correct && (before.score ?? null) === (answer.score ?? null)) return;
     const key = conceptProgressKey(scope, item.conceptId);
     const row =
@@ -1169,7 +1169,8 @@ function applyRead(
   const current = readScrollFor(prev, scope, lessonId);
   const alreadyDone = readDoneFor(prev, scope, lessonId);
   const nextPct = Math.min(100, Math.max(current, forceDone ? 100 : Math.round(percent)));
-  const done = forceDone || readPercentMarksDone(nextPct) || alreadyDone;
+  // Scrolling only moves the bar. "Mark as read" is the credit.
+  const done = forceDone || alreadyDone;
   if (current === nextPct && alreadyDone === done) return prev;
   return withReadState(prev, scope, lessonId, nextPct, done);
 }
@@ -1206,6 +1207,7 @@ export function LearnPlanView({
   );
 
   const [progress, setProgress] = useState<LearnPlanProgress>(hydrated);
+  const [showPlanNotes, setShowPlanNotes] = useState(false);
   const [location, setLocation] = useState<LearnLocation>(() => resolveLocation(plan.lessons, hydrated.location));
   const [reviewFocus, setReviewFocus] = useState<LearnReviewFocus | null>(null);
   const [buildStage, setBuildStage] = useState<LearnStage | undefined>(undefined);
@@ -1228,6 +1230,20 @@ export function LearnPlanView({
   useEffect(() => {
     setOpenerSettled(false);
   }, [buildingPlanId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/auth/providers", { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: unknown) => {
+        if (cancelled || !body || typeof body !== "object") return;
+        if ((body as { dev?: unknown }).dev === true) setShowPlanNotes(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setPlan((current) => {
@@ -1482,14 +1498,13 @@ export function LearnPlanView({
     [commitProgress, scope],
   );
 
-  const lessonSteps = useMemo(
-    () => plan.lessons.map((l) => ({ id: l.id, hasQuiz: l.quiz.length > 0 })),
-    [plan.lessons],
-  );
-  const progressStats = useMemo(
-    () => countPlanProgress(scope, lessonSteps, hasFinal, progress),
-    [scope, lessonSteps, hasFinal, progress],
-  );
+  const pathFigures = pathProgressFigures({
+    lessons: plan.lessons,
+    finalAssessment: hasFinal ? plan.finalAssessment : [],
+    progress,
+    scope,
+    now: Date.now(),
+  });
 
   const activeLesson =
     location.screen === "lesson" && location.lessonId
@@ -1822,15 +1837,16 @@ export function LearnPlanView({
   const sidebar = (
     <aside className="hidden w-52 shrink-0 lg:block" aria-label="Course progress and outline">
       <nav className="sticky top-[72px] max-h-[calc(100dvh-6rem)] overflow-y-auto pr-1 [scrollbar-gutter:stable]">
-        <LearnProgressTrack compact {...progressStats} />
+        <LearnProgressTrack compact {...pathFigures} />
         <NavButton onClick={goOverview} active={location.screen === "overview"} className="mb-3 font-medium">
           Course home
         </NavButton>
         <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--ink-muted)]">Lessons</p>
         <ol className="mt-2 space-y-0.5">
           {plan.lessons.map((lesson) => {
-            const done = isLessonStepComplete(scope, lesson.id, lesson.quiz.length > 0, progress);
-            const readPct = readScrollFor(progress, scope, lesson.id);
+            const done = pathFigures.masteredIds.has(lesson.id);
+            const markedRead = readDoneFor(progress, scope, lesson.id);
+            const mastery = lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress });
             const active = location.screen === "lesson" && location.lessonId === lesson.id;
             return (
               <li key={lesson.id}>
@@ -1841,10 +1857,10 @@ export function LearnPlanView({
                     {lesson.status === "pending" ? (
                       <span className="mt-0.5 block text-[10px] text-[var(--ink-muted)]">Building</span>
                     ) : null}
-                    {lesson.status !== "pending" && !done && (readPct > 0 || lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress }) > 0) ? (
+                    {lesson.status !== "pending" && !done && (mastery > 0 || markedRead) ? (
                       <span className="mt-0.5 block text-[10px] tabular-nums text-[var(--ink-muted)]">
-                        {lessonMasteryPercent({ scope, lessonId: lesson.id, quizCount: lesson.quiz.length, progress })}% mastery
-                        {readPct > 0 ? ` · ${readPct}% read` : ""}
+                        {mastery}% mastery
+                        {markedRead ? " · Marked as read" : ""}
                       </span>
                     ) : null}
                   </span>
@@ -1855,7 +1871,7 @@ export function LearnPlanView({
         </ol>
         {hasFinal ? (
           <NavButton onClick={goFinal} active={location.screen === "final"} className="mt-3">
-            <StepMark done={isFinalStepComplete(scope, progress, true)} />
+            <StepMark done={pathFigures.masteredIds.has(FINAL_LESSON_ID)} />
             <span>Final assessment</span>
           </NavButton>
         ) : null}
@@ -1926,7 +1942,7 @@ export function LearnPlanView({
             <SourceNote place="home" />
 
             <div className="mt-5 lg:hidden">
-              <LearnProgressTrack {...progressStats} />
+              <LearnProgressTrack {...pathFigures} />
             </div>
 
             {resume ? (
@@ -1990,13 +2006,7 @@ export function LearnPlanView({
             <section className="mt-10">
               <h2 className="text-base font-semibold text-[var(--ink)]">Lessons</h2>
               <LearnPathMap
-                nodes={derivePathMap({
-                  lessons: plan.lessons,
-                  finalAssessment: plan.finalAssessment,
-                  progress,
-                  scope,
-                  now: Date.now(),
-                })}
+                nodes={pathFigures.nodes}
                 onOpen={(nodeId) => {
                   if (nodeId === FINAL_LESSON_ID) goFinal();
                   else goLesson(nodeId);
@@ -2004,7 +2014,7 @@ export function LearnPlanView({
               />
             </section>
 
-            {plan.warnings.length ? (
+            {showPlanNotes && plan.warnings.length ? (
               <aside className="mt-12 rounded-xl border border-[var(--line)] bg-[var(--sidebar)] px-4 py-3 text-sm text-[var(--ink-muted)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em]">Plan notes</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5">

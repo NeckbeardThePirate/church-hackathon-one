@@ -5,7 +5,8 @@
 
 import type { LearnPlanProgress } from "./plan-progress.ts";
 import { emptyLearnProgress, type LearnLocation } from "./plan-progress.ts";
-import { derivePathMap, type PathMapNode } from "./path-map.ts";
+import { finalMasteryPercent, lessonMasteryPercent } from "./learner-stats.ts";
+import { derivePathMap, type PathMapInput, type PathMapNode } from "./path-map.ts";
 import { scopeFromProject } from "./progress-scope.ts";
 import { indexMasteryByConcept, reviewQueue } from "./sm2.ts";
 import type { LearnLesson, QuizItem } from "./types.ts";
@@ -42,6 +43,7 @@ type ScopedPath = {
   project: DashboardProject;
   plan: DashboardPlan;
   progress: LearnPlanProgress;
+  scope: NonNullable<ReturnType<typeof scopeFromProject>>;
   nodes: PathMapNode[];
   reviewsDue: number;
   earliestDue: number;
@@ -72,6 +74,7 @@ function scopedPaths(projects: readonly DashboardProject[], now: number): Scoped
       project,
       plan,
       progress,
+      scope,
       nodes,
       reviewsDue: queue.length,
       earliestDue: queue[0]?.concept.dueAt ?? Number.POSITIVE_INFINITY,
@@ -81,14 +84,56 @@ function scopedPaths(projects: readonly DashboardProject[], now: number): Scoped
   return paths;
 }
 
+export type PathProgressFigures = {
+  completed: number;
+  total: number;
+  /** Average of each step's mastery. A step in progress moves this before it is complete. */
+  percent: number;
+  masteredIds: ReadonlySet<string>;
+  nodes: PathMapNode[];
+};
+
+/**
+ * One progress reading for the path card, the lesson rail, and the check marks.
+ * A check is a mastered step. The percent is the average mastery of every step,
+ * so a lesson at 63% does not leave the path at 0.
+ */
+export function pathProgressFigures(input: PathMapInput): PathProgressFigures {
+  const nodes = derivePathMap(input);
+  const masteredIds = new Set(nodes.filter((node) => node.state === "mastered").map((node) => node.id));
+  const lessons = new Map(input.lessons.map((lesson) => [lesson.id, lesson]));
+  const percents = nodes.map((node) => {
+    if (node.kind === "final") {
+      return finalMasteryPercent({
+        scope: input.scope,
+        quizCount: input.finalAssessment?.length ?? 0,
+        progress: input.progress,
+      });
+    }
+    return lessonMasteryPercent({
+      scope: input.scope,
+      lessonId: node.id,
+      quizCount: lessons.get(node.id)?.quiz.length ?? 0,
+      progress: input.progress,
+    });
+  });
+  const percent = percents.length ? Math.round(percents.reduce((sum, value) => sum + value, 0) / percents.length) : 0;
+  return { completed: masteredIds.size, total: nodes.length, percent, masteredIds, nodes };
+}
+
 export function pathSummaries(projects: readonly DashboardProject[], now: number): PathSummary[] {
   return scopedPaths(projects, now).map((path) => {
-    const mastered = path.nodes.filter((node) => node.state === "mastered").length;
-    const percent = path.nodes.length ? Math.round((mastered / path.nodes.length) * 100) : 0;
+    const figures = pathProgressFigures({
+      lessons: path.plan.lessons,
+      finalAssessment: path.plan.finalAssessment,
+      progress: path.progress,
+      scope: path.scope,
+      now,
+    });
     return {
       projectId: path.project.id,
       title: pathTitle(path.project),
-      percent,
+      percent: figures.percent,
       reviewsDue: path.reviewsDue,
     };
   });

@@ -3,9 +3,15 @@ import test from "node:test";
 import {
   claimLegacyProgress,
   emptyLearnProgress,
+  emptyQuiz,
   isLessonStepComplete,
   mergeLearnProgress,
   normalizeLearnProgress,
+  normalizeQuiz,
+  quizAllAnswered,
+  quizAnswerSubmitted,
+  quizCorrectCount,
+  releaseUntouchedAnswer,
   retryMissedQuiz,
   writeLearnProgress,
   type ConceptMastery,
@@ -246,4 +252,32 @@ test("a settled retry is not replaced by the correct answer stored earlier", () 
   } finally {
     globalThis.window = previous;
   }
+});
+
+test("an untouched free-text grade does not count and loses its feedback", () => {
+  const untouched = { mcChoice: null, shortText: "", shortSubmitted: false, correct: false as boolean | null, score: 0 };
+  assert.equal(quizAnswerSubmitted(untouched), false);
+  const released = releaseUntouchedAnswer(untouched);
+  assert.equal(released.correct, null);
+  assert.equal(released.score, undefined);
+  assert.equal(released.shortSubmitted, false);
+
+  const quiz = normalizeQuiz(
+    {
+      answers: [
+        { mcChoice: "Yes", shortText: "", shortSubmitted: false, correct: true },
+        { mcChoice: "No", shortText: "", shortSubmitted: false, correct: true },
+        untouched,
+        { mcChoice: null, shortText: "still typing", shortSubmitted: false, correct: false, score: 0 },
+      ],
+    },
+    4,
+  );
+  assert.equal(quizCorrectCount(quiz), 2);
+  assert.equal(quizAllAnswered(quiz), false);
+  assert.equal(quiz.answers[2]?.correct, null);
+  assert.equal(quiz.answers[3]?.correct, null);
+  assert.equal(quiz.answers[3]?.shortText, "still typing");
+  assert.equal(quizAnswerSubmitted({ mcChoice: null, shortText: "born of the Spirit", shortSubmitted: true, correct: false }), true);
+  assert.equal(quizAllAnswered(emptyQuiz(1)), false);
 });
