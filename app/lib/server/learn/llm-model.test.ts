@@ -135,7 +135,16 @@ test("token budgets stay inside the Haiku 5.5 output cap", () => {
   assert.equal(query.max_tokens, LEARN_MAX_TOKENS_LONG);
   assert.equal("temperature" in query, false);
   assert.deepEqual(query.thinking, { type: "adaptive" });
-  assert.deepEqual(anthropicRequestQuery({ thinking: { type: "disabled" }, messages: [] }).thinking, { type: "disabled" });
+  const disabled = anthropicRequestQuery({
+    thinking: { type: "disabled" },
+    output_config: { effort: "low" },
+    messages: [],
+  });
+  assert.deepEqual(disabled.thinking, { type: "disabled" });
+  assert.equal("output_config" in disabled, false);
+  const omitted = anthropicRequestQuery({ output_config: null, messages: [] });
+  assert.deepEqual(omitted.thinking, { type: "adaptive" });
+  assert.equal("output_config" in omitted, false);
   assert.deepEqual(query.output_config, { effort: "low" });
   assert.deepEqual(query.messages, []);
 });

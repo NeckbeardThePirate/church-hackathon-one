@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { freshOpener, type OpenerDiagnostic } from "../../learn/opener.ts";
+import { freshOpener, openerUserPrompt, type OpenerDiagnostic } from "../../learn/opener.ts";
 import type { LearnLesson, LessonOutline, ScopeResult } from "../../learn/types.ts";
 import { runResearch } from "./stages.ts";
 import { LearnPlanDO } from "./plan-do.ts";
-import { runOpenerAction } from "./opener-quiz.ts";
+import { OPENER_SYSTEM, runOpenerAction } from "./opener-quiz.ts";
 import { LEARN_MAX_TOKENS, type LlmEnv } from "./llm.ts";
 import { env as workersEnv } from "./cloudflare-workers-stub.ts";
 
@@ -193,44 +193,37 @@ test("skip and a timed-out Haiku call finish the check without failing the path"
   assert.ok(again.body.question?.prompt);
 });
 
+const OPENER_QUESTION = {
+  prompt: "How familiar is justification by faith?",
+  probe: "justification by faith",
+  stop: false,
+  choices: [
+    { id: "a", label: "I can explain it", reading: "strength", concept: "justification by faith" },
+    { id: "b", label: "I mix it up with sanctification", reading: "gap", concept: "justification by faith" },
+    { id: "c", label: "I know the phrase only", reading: "gap", concept: "sanctification" },
+    { id: "d", label: "I'm not sure yet", reading: "unsure", concept: "justification by faith" },
+  ],
+};
+
+function questionResponse(): Response {
+  return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(OPENER_QUESTION) }] }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 test("the opener call uses the Haiku catalog id through the gateway", async () => {
   const plan = await bootPlan();
-  let sent = "";
-  let sentMax = 0;
-  let sentEffort = "";
-  let sentThinking = "";
+  let sentQuery: Record<string, unknown> | undefined;
   const env = {
     AI_GATEWAY_ID: "study-buddy",
     AI: {
       gateway(id: string) {
         assert.equal(id, "study-buddy");
         return {
-          async run(request: { query?: { model?: string; max_tokens?: number; output_config?: { effort?: string }; thinking?: { type?: string } } }) {
-            sent = request.query?.model ?? "";
-            sentMax = request.query?.max_tokens ?? 0;
-            sentEffort = request.query?.output_config?.effort ?? "";
-            sentThinking = request.query?.thinking?.type ?? "";
-            return new Response(
-              JSON.stringify({
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify({
-                      prompt: "How familiar is justification by faith?",
-                      probe: "justification by faith",
-                      stop: false,
-                      choices: [
-                        { id: "a", label: "I can explain it", reading: "strength", concept: "justification by faith" },
-                        { id: "b", label: "I mix it up with sanctification", reading: "gap", concept: "justification by faith" },
-                        { id: "c", label: "I know the phrase only", reading: "gap", concept: "sanctification" },
-                        { id: "d", label: "I'm not sure yet", reading: "unsure", concept: "justification by faith" },
-                      ],
-                    }),
-                  },
-                ],
-              }),
-              { status: 200, headers: { "content-type": "application/json" } },
-            );
+          async run(request: { query?: Record<string, unknown> }) {
+            sentQuery = request.query;
+            return questionResponse();
           },
         };
       },
@@ -238,13 +231,62 @@ test("the opener call uses the Haiku catalog id through the gateway", async () =
   } as unknown as LlmEnv;
 
   const opened = await runOpenerAction(env, plan, { type: "next" });
-  assert.equal(sent, "claude-haiku-5-5");
-  assert.equal(sentMax, LEARN_MAX_TOKENS);
-  assert.equal(sentEffort, "low");
-  assert.equal(sentThinking, "disabled");
+  assert.deepEqual(sentQuery, {
+    model: "claude-haiku-5-5",
+    max_tokens: LEARN_MAX_TOKENS,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "low" },
+    system: `${OPENER_SYSTEM}\nReturn ONLY one JSON object. No prose, no code fences.`,
+    messages: [
+      {
+        role: "user",
+        content: openerUserPrompt({
+          topic: "Romans 3",
+          notes: "I want the difference between justification and sanctification.",
+          passages: [],
+          questions: [],
+          answers: [],
+        }),
+      },
+    ],
+  });
   assert.equal(opened.body.status, "asking");
   assert.equal(opened.body.question?.prompt, "How familiar is justification by faith?");
   assert.equal((await plan.info()).status, "queued");
+});
+
+test("a gateway 4xx falls back once without output_config", async () => {
+  const plan = await bootPlan();
+  const sent: Record<string, unknown>[] = [];
+  const env = {
+    AI_GATEWAY_ID: "study-buddy",
+    AI: {
+      gateway() {
+        return {
+          async run(request: { query?: Record<string, unknown> }) {
+            sent.push(request.query ?? {});
+            if (sent.length === 1) {
+              return new Response(JSON.stringify({ error: { message: "output_config.effort is not allowed on this request" } }), {
+                status: 400,
+                headers: { "content-type": "application/json" },
+              });
+            }
+            return questionResponse();
+          },
+        };
+      },
+    },
+  } as unknown as LlmEnv;
+
+  const opened = await runOpenerAction(env, plan, { type: "next" });
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[0]?.thinking, { type: "adaptive" });
+  assert.deepEqual(sent[0]?.output_config, { effort: "low" });
+  assert.equal(sent[0]?.max_tokens, LEARN_MAX_TOKENS);
+  assert.deepEqual(sent[1]?.thinking, { type: "adaptive" });
+  assert.equal("output_config" in (sent[1] ?? {}), false);
+  assert.equal(opened.body.status, "asking");
+  assert.equal(opened.body.question?.prompt, "How familiar is justification by faith?");
 });
 
 test("a retired lesson leaves research without enqueueing the next stage", async () => {

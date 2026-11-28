@@ -12,8 +12,8 @@ type Props = {
 const CHOICE =
   "min-h-11 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2.5 text-left text-sm leading-snug text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:opacity-60";
 
-/** Longer than the server wait so a failure is recorded before this fetch is aborted. */
-const ASK_MS = 14_000;
+/** Longer than the server wait so a slow adaptive answer is recorded before this fetch is aborted. */
+const ASK_MS = 60_000;
 
 /**
  * Short check shown while the path is already being built.

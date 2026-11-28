@@ -76,8 +76,12 @@ export function anthropicRequestQuery(query: Record<string, unknown>): Record<st
     requestedThinking && typeof requestedThinking === "object" && typeof (requestedThinking as { type?: unknown }).type === "string"
       ? (requestedThinking as { type: string }).type
       : "";
-  // Adaptive is the default. The opener turns it off so the first question is not stuck behind a long think.
+  // Adaptive is the default. Haiku 5.5 rejects `output_config.effort` when thinking is disabled.
   next.thinking = thinkingType === "disabled" ? { type: "disabled" } : { type: "adaptive" };
+  if (thinkingType === "disabled" || next.output_config === null) {
+    delete next.output_config;
+    return next;
+  }
   const configured = next.output_config;
   const effort =
     configured && typeof configured === "object" && typeof (configured as { effort?: unknown }).effort === "string"
@@ -85,6 +89,11 @@ export function anthropicRequestQuery(query: Record<string, unknown>): Record<st
       : LEARN_THINKING_EFFORT;
   next.output_config = { effort };
   return next;
+}
+
+/** A 4xx from the gateway will not succeed by sending the same body again. */
+export function isGatewayClientError(message: string): boolean {
+  return /Anthropic via gateway: 4\d\d\b/.test(message);
 }
 
 function readStopReason(value: unknown): string {
@@ -134,12 +143,12 @@ type JsonCall<T> = {
   meta: LlmMeta;
   maxTokens?: number;
   temperature?: number;
-  /** Sent as `output_config.effort` on Anthropic messages. Omitted for Workers AI. */
-  effort?: LlmEffort;
   /**
-   * Anthropic thinking mode. Omitted calls stay adaptive.
-   * `disabled` is for a short check that must answer before the path build.
+   * Sent as `output_config.effort` on Anthropic messages. Omitted for Workers AI.
+   * `"omit"` leaves effort off the Anthropic body.
    */
+  effort?: LlmEffort | "omit";
+  /** Anthropic thinking mode. Omitted calls stay adaptive. */
   thinking?: "adaptive" | "disabled";
   /** Throw to reject the output; the message is fed back to the model on retry. */
   validate: (value: unknown) => T;
@@ -216,7 +225,7 @@ async function complete(
   maxTokens: number,
   temperature: number,
   userId?: string,
-  effort?: LlmEffort,
+  effort?: LlmEffort | "omit",
   thinking?: "adaptive" | "disabled",
 ): Promise<string> {
   if (env.MOCK_AI === "1") return mockModelText(system, user, meta);
@@ -237,7 +246,8 @@ async function complete(
       system: `${system}\nReturn ONLY one JSON object. No prose, no code fences.`,
       messages: [{ role: "user", content: user }],
     };
-    if (effort) query.output_config = { effort };
+    if (effort === "omit") query.output_config = null;
+    else if (effort) query.output_config = { effort };
     if (thinking === "disabled") query.thinking = { type: "disabled" };
     const result = await callAnthropic(env, model, query, attempt > 1 ? { "cf-aig-skip-cache": "true" } : undefined);
     return readAnthropicText(result, meta.stage);
@@ -357,6 +367,7 @@ export async function llmJson<T>(env: LlmEnv, call: JsonCall<T>): Promise<T> {
       return call.validate(extractJson(raw));
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      if (isGatewayClientError(lastError)) throw error instanceof Error ? error : new Error(lastError);
       user = `${call.user}\n\nYour previous answer was rejected: ${lastError}\nReturn corrected JSON only.`;
     }
   }

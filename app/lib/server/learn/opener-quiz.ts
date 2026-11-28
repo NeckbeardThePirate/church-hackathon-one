@@ -16,12 +16,12 @@ import {
   type OpenerState,
   type OpenerSteer,
 } from "@/app/lib/learn/opener";
-import { LEARN_MAX_TOKENS, LEARN_TEXT_MODEL, llmJson, type LlmEnv } from "./llm";
+import { isGatewayClientError, LEARN_MAX_TOKENS, LEARN_TEXT_MODEL, llmJson, type LlmEnv } from "./llm";
 
-/** First question must land inside the client wait. A slow think is a miss, not a longer wait. */
-export const OPENER_TIMEOUT_MS = 10_000;
+/** Long enough for adaptive thinking at low effort. The path build does not wait on this. */
+export const OPENER_TIMEOUT_MS = 45_000;
 
-const OPENER_SYSTEM = `One short familiarity question. Not trivia. Not a verse to recite.
+export const OPENER_SYSTEM = `One short familiarity question. Not trivia. Not a verse to recite.
 Return only this JSON object:
 {"prompt":"How familiar is the main idea?","probe":"the main idea","stop":false,"choices":[
 {"id":"a","label":"I can explain it","reading":"strength","concept":"the main idea"},
@@ -65,6 +65,7 @@ export async function runOpenerAction(
     const state = await host.mutateOpener((current) => commitGeneratedQuestion(current, question));
     return { body: presentOpener(state), steer };
   } catch (error) {
+    logOpenerGatewayFailure(error);
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[learn] opener check closed:", message);
     const failed = await host.mutateOpener((current) => {
@@ -99,11 +100,10 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
       questions: state.questions,
       answers: state.answers,
     }),
-    // Keep the shared token floor. Thinking is off so those tokens are not spent
-    // before the question. If the model rejects that, one adaptive retry follows.
+    // The request Haiku 5.5 accepts: adaptive thinking, low effort, the shared token floor.
+    // `thinking: disabled` together with output_config.effort is rejected immediately.
     maxTokens: LEARN_MAX_TOKENS,
     effort: "low" as const,
-    thinking: "disabled" as const,
     temperature: 0.4,
     meta: { planId, stage: "opener" },
     userId: reserved.userId,
@@ -120,11 +120,26 @@ async function generateOpenerQuestion(env: LlmEnv, host: OpenerHost): Promise<Op
   try {
     return await llmJson(env, call);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/thinking|disabled/i.test(message)) throw error;
-    console.warn(`[learn] opener thinking disabled was rejected, retrying adaptive: ${message}`);
-    return await llmJson(env, { ...call, thinking: "adaptive" });
+    logOpenerGatewayFailure(error);
+    if (!openerRequestRejected(error)) throw error;
+    console.warn(`[learn] opener request rejected, retrying without output_config plan=${planId}`);
+    return await llmJson(env, { ...call, effort: "omit" });
   }
+}
+
+/** A gateway 4xx, including one whose text never says "thinking" or "disabled". */
+function openerRequestRejected(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return isGatewayClientError(message) || /\b4\d\d\b/.test(message);
+}
+
+/** Workers logs: gateway status and the first 500 characters of the body. */
+export function logOpenerGatewayFailure(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/Anthropic via gateway: (\d{3})(?:\s([\s\S]*))?/);
+  const status = match?.[1] ?? "unknown";
+  const body = (match?.[2] ?? message).replace(/\s+/g, " ").trim().slice(0, 500);
+  console.warn(`[learn] opener gateway failure status=${status} body=${body}`);
 }
 
 async function turn(
