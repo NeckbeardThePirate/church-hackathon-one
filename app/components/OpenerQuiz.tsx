@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { openerStep, type OpenerPublic, type OpenerPublicQuestion } from "../lib/learn/opener";
+import { openerAnswerStuck, openerStep, type OpenerPublic, type OpenerPublicQuestion } from "../lib/learn/opener";
 import { StudyShimmer } from "./StudyLamp";
 
 type Props = {
@@ -10,7 +10,7 @@ type Props = {
 };
 
 const CHOICE =
-  "min-h-11 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2.5 text-left text-sm leading-snug text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:opacity-60";
+  "min-h-11 w-full rounded-lg border border-[var(--line)] bg-[var(--canvas)] px-3 py-2.5 text-left text-sm leading-snug text-[var(--ink)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_55%,var(--line))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:pointer-events-none disabled:opacity-60";
 
 /** Longer than the server wait so a slow adaptive answer is recorded before this fetch is aborted. */
 const ASK_MS = 60_000;
@@ -26,6 +26,8 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
   const [attempt, setAttempt] = useState(0);
   const [hidden, setHidden] = useState(false);
   const settled = useRef(false);
+  const pending = useRef(false);
+  const loadEpoch = useRef(0);
   const onSettledRef = useRef(onSettled);
   onSettledRef.current = onSettled;
 
@@ -44,8 +46,9 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
   useEffect(() => {
     if (isOpenerDismissed(planId)) return;
     let live = true;
+    const epoch = ++loadEpoch.current;
     settled.current = false;
-    const signal = { live: () => live && !settled.current };
+    const signal = { live: () => live && !settled.current && epoch === loadEpoch.current && !pending.current };
 
     void (async () => {
       const current = await readOpener(planId).catch(() => null);
@@ -88,23 +91,29 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
   };
 
   const retry = () => {
-    if (busy || settled.current) return;
+    if (pending.current || settled.current) return;
     setFailed(false);
     setView(null);
     setAttempt((value) => value + 1);
   };
 
   const choose = async (question: OpenerPublicQuestion, choiceId: string) => {
-    if (busy || settled.current) return;
+    if (pending.current || settled.current) return;
+    pending.current = true;
+    loadEpoch.current += 1;
     setBusy(true);
     setFailed(false);
+    const payload = { action: "answer" as const, questionId: question.id, choiceId };
     try {
-      const next = await postOpener(planId, { action: "answer", questionId: question.id, choiceId }, ASK_MS);
+      let next = await postOpener(planId, payload, ASK_MS);
+      if (!settled.current && (openerAnswerStuck({ questionId: question.id }, next) || openerStep(next) === "wait")) {
+        await wait(400);
+        if (!settled.current) next = await postOpener(planId, payload, ASK_MS);
+      }
       if (settled.current) return;
       const stepped = openerStep(next);
       if (stepped === "show") {
         setView(next);
-        setBusy(false);
         return;
       }
       if (stepped === "done") {
@@ -113,24 +122,12 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
         settle(next.summary ?? "");
         return;
       }
-      const followed = await askOnce(planId, { live: () => !settled.current });
-      if (settled.current || !followed) return;
-      if (followed.kind === "show") {
-        setView(followed.body);
-        setBusy(false);
-      } else if (followed.kind === "done") {
-        dismissOpener(planId);
-        setHidden(true);
-        settle(followed.body.summary ?? "");
-      } else {
-        setBusy(false);
-        setFailed(true);
-      }
+      setFailed(true);
     } catch {
-      if (!settled.current) {
-        setBusy(false);
-        setFailed(true);
-      }
+      if (!settled.current) setFailed(true);
+    } finally {
+      pending.current = false;
+      if (!settled.current) setBusy(false);
     }
   };
 
@@ -138,25 +135,20 @@ export function OpenerQuiz({ planId, onSettled }: Props) {
 
   const question = view?.status === "asking" ? view.question : undefined;
   const index = view?.index ?? 1;
-  const limit = view?.limit ?? 4;
 
   return (
     <div className="px-4 pb-2 pt-5 sm:px-6 sm:pt-6">
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--ink-muted)]">
-        {question ? `A short check · ${index} of ${limit}` : "A short check"}
+        {question ? `A short check · ${index}` : "A short check"}
       </p>
       {question ? (
         <>
           <div className="mt-3 flex gap-1.5" aria-hidden>
-            {Array.from({ length: limit }, (_, step) => (
+            {Array.from({ length: index }, (_, step) => (
               <span
                 key={step}
                 className={`h-1 flex-1 rounded-full ${
-                  step < index - 1
-                    ? "bg-[var(--accent)]"
-                    : step === index - 1
-                      ? "bg-[linear-gradient(90deg,var(--accent),#e7c56a)]"
-                      : "bg-[color-mix(in_srgb,var(--accent)_22%,var(--line))]"
+                  step === index - 1 ? "bg-[linear-gradient(90deg,var(--accent),#e7c56a)]" : "bg-[var(--accent)]"
                 }`}
               />
             ))}

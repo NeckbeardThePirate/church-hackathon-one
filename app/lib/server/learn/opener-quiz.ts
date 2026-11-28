@@ -26,6 +26,7 @@ export const OPENER_TIMEOUT_MS = 45_000;
 export const OPENER_SYSTEM = `Write one short familiarity question about ONE specific idea in the learner's topic or passage. Not trivia. Not a verse to recite.
 Name that idea in the prompt, the probe, and the concepts. Never write "the main idea" or "a nearby idea".
 Each question must be about a different idea from any earlier one.
+Every choice label except "I'm not sure yet" must include that idea's name. "I can explain it" and "I have only heard of it" are not enough.
 Return one JSON object and nothing else:
 {"prompt":"<question that names the idea>","probe":"<the idea>","stop":false,"choices":[
 {"id":"a","label":"<can explain this idea>","reading":"strength","concept":"<the idea>"},
