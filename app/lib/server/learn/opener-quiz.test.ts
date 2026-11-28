@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { freshOpener, openerUserPrompt, type OpenerDiagnostic } from "../../learn/opener.ts";
+import { beginOpenerTurn, freshOpener, openerUserPrompt, type OpenerDiagnostic } from "../../learn/opener.ts";
 import type { LearnLesson, LessonOutline, ScopeResult } from "../../learn/types.ts";
 import { runResearch } from "./stages.ts";
 import { LearnPlanDO } from "./plan-do.ts";
@@ -89,6 +89,17 @@ async function bootPlan(): Promise<LearnPlanDO> {
 function mockEnv(): LlmEnv {
   return { MOCK_AI: "1", AI: {} } as LlmEnv;
 }
+
+test("mutateOpener awaits an RPC callback before the opener is stored", async () => {
+  const plan = await bootPlan();
+  // A Durable Object RPC function returns a promise. Storing that promise is the
+  // production error: Could not serialize object of type "RpcPromise".
+  await plan.mutateOpener((current) => Promise.resolve(beginOpenerTurn(current, { type: "start" }, 1_000).state));
+  const stored = await plan.getOpener();
+  assert.equal(stored.status, "open");
+  assert.equal(stored.generating, true);
+  assert.equal(typeof (stored as { then?: unknown }).then, "undefined");
+});
 
 test("answering while the outline already exists adds a gap lesson and leaves the plan running", async () => {
   const plan = await bootPlan();

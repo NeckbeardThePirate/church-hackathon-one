@@ -32,7 +32,7 @@ Exactly 4 choices, ids a b c d. reading is the single word strength, gap, or uns
 
 export type OpenerHost = {
   getOpener(): Promise<OpenerState>;
-  mutateOpener(update: (state: OpenerState) => OpenerState): Promise<OpenerState>;
+  mutateOpener(update: (state: OpenerState) => OpenerState | Promise<OpenerState>): Promise<OpenerState>;
   steerFromOpener(): Promise<OpenerSteer>;
   reserveLlm(gap?: boolean): Promise<{ ok: boolean; userId: string }>;
   info(): Promise<{ topic: string; notes: string; planId?: string }>;
