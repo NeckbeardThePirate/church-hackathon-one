@@ -55,7 +55,7 @@ test("MOCK_AI fixtures name references and do not write source wording", () => {
 
 test("a gap lesson and a review item carry retrieved wording into the tutor context", () => {
   const retrieved = "Retrieved Romans wording from the library.";
-  const confession = "Retrieved confession wording from the library.";
+  const confession = "Explain the main idea. Faith receives a gift. Retrieved from the library.";
   const gap = lesson("gap-1", "gap");
   gap.scripture = [{ reference: "Romans 3:21-26", text: retrieved, note: "Why it connects." }];
   gap.library = [

@@ -8,6 +8,7 @@ import type {
   TeachBlock,
   VideoResource,
 } from "./types";
+import { visibleLibraryCards } from "./library-cards";
 import type { LearnLocation } from "./plan-progress";
 
 export type LearnChatMessage = { role: "user" | "assistant"; content: string };
@@ -205,7 +206,7 @@ export function buildLearnChatContext(
 
   if (location.screen === "lesson" && location.lessonId) {
     const lesson = plan.lessons.find((l) => l.id === location.lessonId);
-    if (lesson) base.lesson = serializeLesson(lesson);
+    if (lesson) base.lesson = serializeLesson({ ...lesson, library: visibleLibraryCards(lesson, plan.perspective) });
   }
 
   if (location.screen === "final" && plan.finalAssessment.length) {
@@ -220,7 +221,7 @@ export function buildLearnChatContext(
     base.review = {
       conceptLabel: reviewFocus.conceptLabel,
       question: reviewFocus.question,
-      ...(source ? { lesson: serializeLesson(source) } : {}),
+      ...(source ? { lesson: serializeLesson({ ...source, library: visibleLibraryCards(source, plan.perspective) }) } : {}),
     };
   }
 
