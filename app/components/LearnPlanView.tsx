@@ -13,6 +13,7 @@ import {
 import { bibleGatewayEsvUrl } from "../lib/bible/bible-gateway";
 import { visibleCitationNote } from "../lib/learn/citation-note";
 import { gradeShortAnswerLocal, type GradeResult } from "../lib/learn/grade-answer";
+import { visibleLibraryCards } from "../lib/learn/library-cards";
 import { lessonMasteryPercent, xpReason, type DailyGoalStatus, type XpEventKind } from "../lib/learn/learner-stats";
 import { postLearnAttempt } from "../lib/learn/post-attempt";
 import {
@@ -752,6 +753,7 @@ function LessonBody({
   lesson,
   total,
   planId,
+  perspective,
   articleScroll,
   articleDone,
   openArticleUrl,
@@ -762,6 +764,7 @@ function LessonBody({
   lesson: LearnLesson;
   total: number;
   planId: string;
+  perspective: string;
   articleScroll: Record<string, number>;
   articleDone: Record<string, boolean>;
   openArticleUrl: string | null;
@@ -770,6 +773,7 @@ function LessonBody({
   onArticleDone: (url: string, done: boolean) => void;
 }) {
   const articlesDone = lesson.articles.filter((article) => articleDone[article.url]).length;
+  const library = visibleLibraryCards(lesson, perspective);
   const [playingVideo, setPlayingVideo] = useState<string | null>(null);
   useEffect(() => {
     setPlayingVideo(null);
@@ -869,11 +873,11 @@ function LessonBody({
         </div>
       ) : null}
 
-      {lesson.library?.length ? (
+      {library.length ? (
         <div className="mt-8" data-read-section>
           <h2 className="text-base font-semibold text-[var(--ink)]">Confessions, commentaries, and church fathers</h2>
           <ul className="mt-3 space-y-3">
-            {lesson.library.map((item) => (
+            {library.map((item) => (
               <LibraryCallout key={`${item.source}-${item.id}`} item={item} />
             ))}
           </ul>
@@ -2047,6 +2051,7 @@ export function LearnPlanView({
                 lesson={activeLesson}
                 total={plan.lessons.length}
                 planId={plan.id}
+                perspective={plan.perspective}
                 articleScroll={Object.fromEntries(activeLesson.articles.map((article) => [article.url, articleScrollFor(progress, scope, article.url)]))}
                 articleDone={Object.fromEntries(activeLesson.articles.map((article) => [article.url, articleDoneFor(progress, scope, article.url)]))}
                 openArticleUrl={openArticleUrl}
