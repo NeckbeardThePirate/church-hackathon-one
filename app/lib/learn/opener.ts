@@ -182,6 +182,26 @@ export function promptsRepeat(left: string, right: string): boolean {
   return left.trim().toLowerCase().replace(/\s+/g, " ") === right.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function looksGenericLabel(label: string): boolean {
+  const key = label.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.!?]+$/, "");
+  if (/^<[^>]+>$/.test(key)) return true;
+  if (/\b(main idea|nearby idea|this idea|the idea)\b/.test(key)) return true;
+  return /^(i can explain it|i can explain this|i have only heard of it|i have only heard of this|i only know the words|i mix it up with something nearby|can explain this idea|has only heard of this idea|mixes this idea up with a different named idea)$/.test(key);
+}
+
+/** Keep a label that already names the idea. A stock label is rewritten from the probe. */
+function specificChoiceLabel(label: string, probe: string, concept: string, reading: OpenerReading): string {
+  const idea = shortConceptLabel(probe) || probe;
+  const other = shortConceptLabel(concept) || concept;
+  const hay = label.toLowerCase();
+  if (hay.includes(idea.toLowerCase()) || (other.toLowerCase() !== idea.toLowerCase() && hay.includes(other.toLowerCase()))) return label;
+  if (!looksGenericLabel(label)) return label;
+  if (reading === "unsure") return "I'm not sure yet";
+  if (/mix/i.test(label) && other.toLowerCase() !== idea.toLowerCase()) return clipText(`I mix ${idea} up with ${other}`, 160);
+  if (reading === "strength") return clipText(`I can explain ${idea}`, 160);
+  return clipText(`I have only heard of ${idea}`, 160);
+}
+
 /** Validate one model question. Throws so the caller can retry or close the check. */
 export function parseOpenerQuestion(value: unknown): OpenerQuestionDraft {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("opener question must be an object");
@@ -202,7 +222,7 @@ export function parseOpenerQuestion(value: unknown): OpenerQuestionDraft {
     const reading = readingOf(row.reading, label);
     if (!id || !label || !reading || seen.has(id)) continue;
     seen.add(id);
-    choices.push({ id, label, reading, concept });
+    choices.push({ id, label: specificChoiceLabel(label, probe, concept, reading), reading, concept });
     if (choices.length === 4) break;
   }
   if (!choices.some((choice) => choice.reading === "unsure") && choices.length < 4) {
@@ -314,6 +334,8 @@ export function reduceOpener(state: OpenerState, event: OpenerEvent): { state: O
   const question = state.questions.find((item) => item.id === event.questionId);
   if (!question || state.answers.some((answer) => answer.questionId === question.id)) {
     if (unansweredQuestion(state)) return { state, effects: [{ type: "show" }] };
+    // The click arrived before this question was saved. Keep the in-flight question.
+    if (state.generating) return { state, effects: [{ type: "busy" }] };
     if (shouldContinue(state)) return { state, effects: [{ type: "generate" }] };
     return { state: closeOpener(state, state.answers.length ? "complete" : "unavailable"), effects: [{ type: "close" }] };
   }
@@ -335,10 +357,12 @@ export function beginOpenerTurn(state: OpenerState, event: OpenerEvent, now: num
   if (event.type === "start" && current.generating) return { state: current, effects: [{ type: "busy" }] };
   const reduced = reduceOpener(current, event);
   const generate = reduced.effects.some((effect) => effect.type === "generate");
-  return {
-    state: generate ? { ...reduced.state, generating: true, generatingSince: now } : { ...reduced.state, generating: false, generatingSince: undefined },
-    effects: reduced.effects,
-  };
+  if (generate) {
+    return { state: { ...reduced.state, generating: true, generatingSince: now }, effects: reduced.effects };
+  }
+  // A click that arrived during generation must not drop the lock or start a second question.
+  if (reduced.effects.some((effect) => effect.type === "busy")) return { state: reduced.state, effects: reduced.effects };
+  return { state: { ...reduced.state, generating: false, generatingSince: undefined }, effects: reduced.effects };
 }
 
 export function commitGeneratedQuestion(state: OpenerState, question: OpenerQuestionDraft): OpenerState {
@@ -407,14 +431,61 @@ function concreteConcepts(values: string[]): string[] {
 }
 
 export function openerSummary(diagnostic: OpenerDiagnostic): string {
-  const gaps = concreteConcepts(diagnostic.gaps).slice(0, 3);
-  const strengths = concreteConcepts(diagnostic.strengths).slice(0, 3);
+  const gaps = shortConcepts(diagnostic.gaps);
+  const strengths = shortConcepts(diagnostic.strengths).filter((item) => !gaps.some((gap) => gap.toLowerCase() === item.toLowerCase()));
   if (gaps.length && strengths.length) {
-    return `Your path will lean into ${phrase(gaps)}, with ${phrase(strengths)} treated as familiar.`;
+    return `Your path will lean into ${phrase(gaps)}, and treat ${phrase(strengths)} as familiar.`;
   }
   if (gaps.length) return `Your path will lean into ${phrase(gaps)}.`;
-  if (strengths.length) return `Your path will move ahead where ${phrase(strengths)} is already familiar.`;
+  if (strengths.length === 1) return `Your path will move ahead where ${strengths[0]} is already familiar.`;
+  if (strengths.length) return `Your path will move ahead where ${phrase(strengths)} are already familiar.`;
   return "";
+}
+
+/** True when an answer response is still the question the learner just clicked. */
+export function openerAnswerStuck(
+  asked: { questionId: string },
+  body: { status?: string; question?: { id?: string } } | null | undefined,
+): boolean {
+  return body?.status === "asking" && body.question?.id === asked.questionId;
+}
+
+const TRAILING_LABEL_WORD = new Set(["a", "an", "the", "as", "of", "and", "or", "to", "for", "in", "on", "with"]);
+
+/** A 1–4 word name for a summary or a choice. A short parenthetical such as "kenosis" wins. */
+export function shortConceptLabel(value: string): string {
+  const cleaned = value.trim().replace(/\s+/g, " ");
+  for (const match of cleaned.matchAll(/\(([^)]+)\)/g)) {
+    const inner = match[1]?.trim().replace(/\s+/g, " ") ?? "";
+    const words = inner.split(/\s+/).filter(Boolean);
+    if (!inner || inner.length > 48 || words.length < 1 || words.length > 4 || /\d/.test(inner)) continue;
+    return inner;
+  }
+  const bare = cleaned.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  const head = bare.split(/\s+and\s+/i)[0]?.trim() ?? bare;
+  const words = head.split(/\s+/).filter(Boolean);
+  const kept = words.length <= 4 ? words : words.slice(0, 4);
+  while (kept.length > 1 && TRAILING_LABEL_WORD.has(kept[kept.length - 1]!.toLowerCase())) kept.pop();
+  return kept.join(" ");
+}
+
+function shortConcepts(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of concreteConcepts(values)) {
+    let label = shortConceptLabel(value);
+    if (seen.has(label.toLowerCase())) {
+      const words = value.trim().replace(/\s+/g, " ").split(/\s+/).slice(0, 4);
+      while (words.length > 1 && TRAILING_LABEL_WORD.has(words[words.length - 1]!.toLowerCase())) words.pop();
+      const fuller = words.join(" ");
+      if (!fuller || seen.has(fuller.toLowerCase())) continue;
+      label = fuller;
+    }
+    seen.add(label.toLowerCase());
+    out.push(label);
+    if (out.length === 3) break;
+  }
+  return out;
 }
 
 export function diagnosticBrief(diagnostic: OpenerDiagnostic): string {

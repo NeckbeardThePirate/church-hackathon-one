@@ -8,8 +8,10 @@ import {
   fallbackOpenerQuestion,
   freshOpener,
   isPlaceholderConcept,
+  openerAnswerStuck,
   openerStep,
   openerSummary,
+  shortConceptLabel,
   openerUserPrompt,
   parseOpenerAction,
   parseOpenerQuestion,
@@ -335,4 +337,77 @@ test("the copied prompt example is rejected, and placeholder names never become 
   assert.match(second.prompt, /saved by grace/);
   assert.equal(first.prompt === second.prompt, false);
   assert.equal(/main idea|nearby idea/i.test(`${first.prompt} ${second.prompt} ${first.probe} ${second.probe}`), false);
+});
+
+test("the summary uses short labels and agrees in number", () => {
+  assert.equal(shortConceptLabel("Christ's self-emptying (kenosis) as a model of humility"), "kenosis");
+  assert.equal(shortConceptLabel("Harpagmos and the grasping of equality with God"), "Harpagmos");
+  assert.equal(shortConceptLabel("Christ's exaltation"), "Christ's exaltation");
+  assert.equal(shortConceptLabel("Divine exaltation of Christ after the cross"), "Divine exaltation of Christ");
+  assert.equal(
+    openerSummary({
+      strengths: [
+        "Christ's self-emptying (kenosis) as a model of humility",
+        "Harpagmos and the grasping of equality with God",
+        "Divine exaltation of Christ after the cross",
+      ],
+      gaps: [],
+    }),
+    "Your path will move ahead where kenosis, Harpagmos, and Divine exaltation of Christ are already familiar.",
+  );
+  assert.equal(openerSummary({ strengths: [], gaps: ["kenosis"] }), "Your path will lean into kenosis.");
+  assert.equal(openerSummary({ strengths: [], gaps: ["kenosis", "harpagmos"] }), "Your path will lean into kenosis and harpagmos.");
+  assert.equal(
+    openerSummary({ strengths: ["Christ's exaltation"], gaps: ["kenosis", "harpagmos"] }),
+    "Your path will lean into kenosis and harpagmos, and treat Christ's exaltation as familiar.",
+  );
+});
+
+test("generic choice labels name the idea, and a specific label is kept", () => {
+  const generic = parseOpenerQuestion({
+    prompt: "How familiar is kenosis?",
+    probe: "kenosis",
+    choices: [
+      { id: "a", label: "I can explain it", reading: "strength", concept: "kenosis" },
+      { id: "b", label: "I have only heard of it", reading: "gap", concept: "kenosis" },
+      { id: "c", label: "I mix it up with a nearby idea", reading: "gap", concept: "Christ's exaltation" },
+      { id: "d", label: "I'm not sure yet", reading: "unsure", concept: "kenosis" },
+    ],
+  });
+  assert.equal(generic.choices[0]?.label, "I can explain kenosis");
+  assert.equal(generic.choices[1]?.label, "I have only heard of kenosis");
+  assert.equal(generic.choices[2]?.label, "I mix kenosis up with Christ's exaltation");
+  assert.equal(generic.choices[3]?.label, "I'm not sure yet");
+
+  const specific = parseOpenerQuestion({
+    prompt: "How familiar is harpagmos?",
+    probe: "harpagmos",
+    choices: [
+      { id: "a", label: "I can explain harpagmos as grasping at equality", reading: "strength", concept: "harpagmos" },
+      { id: "b", label: "I have only heard of harpagmos", reading: "gap", concept: "harpagmos" },
+      { id: "c", label: "I mix harpagmos up with kenosis", reading: "gap", concept: "kenosis" },
+      { id: "d", label: "I'm not sure yet", reading: "unsure", concept: "harpagmos" },
+    ],
+  });
+  assert.equal(specific.choices[0]?.label, "I can explain harpagmos as grasping at equality");
+  assert.equal(specific.choices[2]?.label, "I mix harpagmos up with kenosis");
+});
+
+test("an answer that arrives before the question is stored does not start another question", () => {
+  const now = 10_000;
+  const claimed = beginOpenerTurn(freshOpener(), { type: "start" }, now);
+  const missed = beginOpenerTurn(claimed.state, { type: "answer", questionId: "q1", choiceId: "a" }, now + 200);
+  assert.equal(missed.effects.some((effect) => effect.type === "generate"), false);
+  assert.equal(missed.effects.some((effect) => effect.type === "busy"), true);
+  assert.equal(missed.state.generating, true);
+  assert.equal(missed.state.questions.length, 0);
+  assert.equal(missed.state.answers.length, 0);
+  assert.equal(
+    openerAnswerStuck({ questionId: "q1" }, { status: "asking", question: { id: "q1" } }),
+    true,
+  );
+  assert.equal(
+    openerAnswerStuck({ questionId: "q1" }, { status: "asking", question: { id: "q2" } }),
+    false,
+  );
 });
