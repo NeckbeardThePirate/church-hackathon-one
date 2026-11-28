@@ -225,16 +225,23 @@ function SampleCheck({
           ) : null}
         </div>
       ) : null}
-      {sample.gapSpawned ? null : (
-        <button type="button" onClick={onRevealMiss} data-guest-miss className={`${quietLinkClass} mt-3 flex w-fit`}>
-          See what happens when you miss
-        </button>
+      {sample.gapSpawned && !answered ? null : (
+        <div
+          data-guest-sample-actions
+          className="mt-4 flex flex-col items-start gap-3 border-t border-[var(--line)] pt-3"
+        >
+          {sample.gapSpawned ? null : (
+            <button type="button" onClick={onRevealMiss} data-guest-miss className={`${quietLinkClass} flex w-fit`}>
+              See what happens when you miss
+            </button>
+          )}
+          {answered ? (
+            <button type="button" onClick={onReset} data-guest-reset className={`${textLinkClass} flex w-fit`}>
+              Reset sample
+            </button>
+          ) : null}
+        </div>
       )}
-      {answered ? (
-        <button type="button" onClick={onReset} data-guest-reset className={`${textLinkClass} mt-1 flex w-fit`}>
-          Reset sample
-        </button>
-      ) : null}
     </section>
   );
 }

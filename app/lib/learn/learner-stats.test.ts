@@ -235,6 +235,11 @@ test("lesson mastery moves when a lesson is read and when a quiz answer is credi
   );
   const readOnly = lessonMasteryPercent({ scope, lessonId: "l1", quizCount: 2, progress: read });
   assert.ok(readOnly > 0 && readOnly < 100);
+  const scrolledOnly = adoptProgressForScope(
+    normalizeLearnProgress({ v: 3, lessonReadScroll: { l1: 100 } }),
+    scope,
+  );
+  assert.equal(lessonMasteryPercent({ scope, lessonId: "l1", quizCount: 2, progress: scrolledOnly }), 0);
   const answered: LearnPlanProgress = adoptProgressForScope(
     normalizeLearnProgress({
       ...read,

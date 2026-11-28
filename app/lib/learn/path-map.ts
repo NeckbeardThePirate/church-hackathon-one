@@ -4,7 +4,7 @@
  * They do not use isLessonStepComplete.
  */
 
-import type { LearnPlanProgress, PersistedQuiz } from "./plan-progress.ts";
+import { quizAnswerSubmitted, quizCorrectCount, type LearnPlanProgress, type PersistedQuiz } from "./plan-progress.ts";
 import {
   FINAL_LESSON_ID,
   finalQuizFor,
@@ -148,11 +148,7 @@ export function arrangePathLessons(lessons: LearnLesson[]): { lesson: LearnLesso
 function quizStarted(quiz: PersistedQuiz | null | undefined): boolean {
   if (!quiz) return false;
   return quiz.answers.some(
-    (answer) =>
-      answer.correct !== null ||
-      answer.mcChoice !== null ||
-      answer.shortSubmitted ||
-      answer.shortText.trim().length > 0,
+    (answer) => quizAnswerSubmitted(answer) || answer.shortText.trim().length > 0,
   );
 }
 
@@ -160,9 +156,10 @@ function quizStarted(quiz: PersistedQuiz | null | undefined): boolean {
 function submittedCorrect(quiz: PersistedQuiz | null | undefined, itemCount: number): number | null {
   if (!quiz || itemCount <= 0) return null;
   const answers = quiz.answers.slice(0, itemCount);
-  const fullyGraded = answers.length === itemCount && answers.every((answer) => answer.correct !== null);
+  const fullyGraded =
+    answers.length === itemCount && answers.every((answer) => quizAnswerSubmitted(answer) && answer.correct !== null);
   if (quiz.settled !== true && !fullyGraded) return null;
-  const current = answers.filter((answer) => answer.correct === true).length;
+  const current = quizCorrectCount({ ...quiz, answers });
   return Math.max(quiz.bestCorrect ?? 0, current);
 }
 

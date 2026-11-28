@@ -2,7 +2,7 @@ import { findBibleReferences } from "@/app/lib/bible/parse-reference";
 import { visibleCitationNote } from "@/app/lib/learn/citation-note";
 import type { LibraryCitation, Perspective } from "@/app/lib/learn/types";
 import { searchCommentaries, searchConfessions, searchFathers, type CommentaryHit, type ConfessionHit, type FatherHit, type LibraryEnv } from "../library-search";
-import { rankForPerspective } from "./library-rank";
+import { rankForPerspective, retrievalFocus, selectRelevant } from "./library-rank";
 
 export { rankForPerspective };
 
@@ -83,17 +83,41 @@ export async function citeLibrary(
     refs.push(parsed);
   }
   try {
+    const focus = retrievalFocus(`${query}\n${references.join("\n")}`);
+    const searchQuery = [query, ...focus.terms].join(" ").slice(0, 1800);
     const [fathers, confessions, commentaries] = await Promise.all([
-      searchFathers(env, query, { k: 4, refs, mode: "hybrid" }).catch(() => [] as FatherHit[]),
-      searchConfessions(env, query, { k: 4, refs, mode: "hybrid" }).catch(() => [] as ConfessionHit[]),
-      searchCommentaries(env, query, { k: 4, refs, mode: "hybrid" }).catch(() => [] as CommentaryHit[]),
+      searchFathers(env, searchQuery, { k: 8, refs, mode: "hybrid" }).catch(() => [] as FatherHit[]),
+      searchConfessions(env, searchQuery, { k: 12, refs, mode: "hybrid" }).catch(() => [] as ConfessionHit[]),
+      searchCommentaries(env, searchQuery, { k: 8, refs, mode: "hybrid" }).catch(() => [] as CommentaryHit[]),
     ]);
-    const rankedConfessions = rankForPerspective(confessions, perspective);
+    const onPassage = (sources: readonly string[] | undefined) => sources?.includes("verse") === true;
+    const rankedConfessions = selectRelevant(
+      confessions,
+      (hit) => `${hit.document ?? ""} ${hit.label ?? ""} ${hit.title ?? ""} ${hit.text ?? ""}`,
+      focus,
+      {
+        limit: 2,
+        perspective,
+        reformed: (hit) => /westminster|heidelberg|belgic|dort|canons/i.test(`${hit.document ?? ""} ${hit.label ?? ""}`),
+      },
+    );
+    const rankedCommentaries = selectRelevant(
+      commentaries,
+      (hit) => `${hit.author} ${hit.work} ${hit.section ?? ""} ${hit.passage} ${hit.text}`,
+      focus,
+      { limit: 2, keepAnyway: (hit) => onPassage(hit.sources) },
+    );
+    const rankedFathers = selectRelevant(
+      fathers,
+      (hit) => `${hit.author} ${hit.work ?? ""} ${hit.passage} ${hit.text}`,
+      focus,
+      { limit: 2, keepAnyway: (hit) => onPassage(hit.sources) },
+    );
     return {
       citations: [
-        ...rankedConfessions.slice(0, 3).map(toConfession),
-        ...commentaries.slice(0, 2).map(toCommentary),
-        ...fathers.slice(0, 3).map(toFather),
+        ...rankedConfessions.map(toConfession),
+        ...rankedCommentaries.map(toCommentary),
+        ...rankedFathers.map(toFather),
       ].filter((item) => item.text.trim()),
       dropped,
     };

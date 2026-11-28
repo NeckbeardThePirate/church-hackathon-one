@@ -24,6 +24,9 @@ test("teach, gap, review, check, and tutor prompts use that one rule", () => {
     assert.match(chunk(stages, name), /SOURCE_TEXT_RULE/, name);
   }
   assert.match(chat, /SOURCE_TEXT_RULE/);
+  assert.match(chat, /Never abbreviate a lesson/);
+  assert.match(chat, /max_tokens: LEARN_MAX_TOKENS/);
+  assert.doesNotMatch(chat, /L\$\{l\.order\}/);
   assert.match(chat, /practice lesson/);
   assert.match(chat, /teach-time quiz bank/);
   assert.match(chat, /retrieved from the library/);

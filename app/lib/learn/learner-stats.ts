@@ -1,5 +1,5 @@
-import type { LearnPlanProgress } from "./plan-progress.ts";
-import { lessonQuizFor, readDoneFor, readScrollFor, type ProgressScope } from "./progress-scope.ts";
+import { quizAnswerSubmitted, type LearnPlanProgress, type PersistedQuiz } from "./plan-progress.ts";
+import { finalQuizFor, lessonQuizFor, readDoneFor, type ProgressScope } from "./progress-scope.ts";
 
 export type XpLogEntry = { at: number; amount: number; reason: string };
 
@@ -374,9 +374,21 @@ function equivalentReasons(reason: string): string[] {
   return reasons;
 }
 
+function quizCredit(quiz: PersistedQuiz | null | undefined, quizCount: number): number {
+  let points = 0;
+  for (let i = 0; i < quizCount; i++) {
+    const answer = quiz?.answers[i];
+    if (!answer || !quizAnswerSubmitted(answer)) continue;
+    if (answer.correct === true) points += 1;
+    else if ((answer.score ?? 0) >= 0.4) points += 0.5;
+  }
+  return points;
+}
+
 /**
- * Per-lesson mastery from quiz credit and reading for one path.
- * A correct answer is full credit. Partial credit is half. Reading fills the rest, so marking a lesson read moves the number before the quiz.
+ * Per-lesson mastery from submitted quiz credit and an explicit "Mark as read".
+ * Scrolling updates the reading bar only. A correct answer is full credit. Partial credit is half.
+ * Marking a lesson read moves the number before the quiz.
  */
 export function lessonMasteryPercent(input: {
   scope: ProgressScope;
@@ -385,19 +397,23 @@ export function lessonMasteryPercent(input: {
   progress: LearnPlanProgress;
 }): number {
   const { scope, lessonId, quizCount, progress } = input;
-  const read = readDoneFor(progress, scope, lessonId) ? 100 : Math.min(100, Math.max(0, readScrollFor(progress, scope, lessonId)));
+  const read = readDoneFor(progress, scope, lessonId) ? 100 : 0;
   if (quizCount <= 0) return read;
-  const quiz = lessonQuizFor(progress, scope, lessonId);
-  let points = 0;
-  for (let i = 0; i < quizCount; i++) {
-    const answer = quiz?.answers[i];
-    if (!answer) continue;
-    if (answer.correct === true) points += 1;
-    else if ((answer.score ?? 0) >= 0.4) points += 0.5;
-  }
+  const points = quizCredit(lessonQuizFor(progress, scope, lessonId), quizCount);
   if (points <= 0) return Math.round(read * 0.35);
   const quizPct = (points / quizCount) * 100;
   return Math.min(100, Math.round(quizPct * 0.75 + read * 0.25));
+}
+
+/** Final-assessment mastery from submitted answers only. There is no reading credit. */
+export function finalMasteryPercent(input: {
+  scope: ProgressScope;
+  quizCount: number;
+  progress: LearnPlanProgress;
+}): number {
+  const { scope, quizCount, progress } = input;
+  if (quizCount <= 0) return 0;
+  return Math.round((quizCredit(finalQuizFor(progress, scope), quizCount) / quizCount) * 100);
 }
 
 export function lessonMasteryList(

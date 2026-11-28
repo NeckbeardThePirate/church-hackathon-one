@@ -157,7 +157,7 @@ test("an earlier due review wins, and a finished path points at the final", () =
   const summaries = pathSummaries([done, older], now);
   const doneSummary = summaries.find((item) => item.projectId === "done");
   const olderSummary = summaries.find((item) => item.projectId === "older");
-  assert.equal(doneSummary?.percent, 50);
+  assert.equal(doneSummary?.percent, 38);
   assert.equal(olderSummary?.reviewsDue, 1);
   assert.equal(nextLearningAction([], now).kind, "none");
 });
@@ -246,7 +246,7 @@ test("continue prefers a due review, then a ready gap, over the next core lesson
   assert.equal(due?.label, "Review 1 due");
 });
 
-test("path percent counts mastered nodes, so partial lesson scores can leave a path at 0%", () => {
+test("path percent averages each step's mastery, so a partial lesson moves the path before it is complete", () => {
   const scope = { projectId: "lords", planId: "plan-lords" };
   const lessons = [
     lesson({ id: "l1", order: 1, title: "Address", quiz: questions(4, "l1") }),
@@ -275,5 +275,5 @@ test("path percent counts mastered nodes, so partial lesson scores can leave a p
     ],
     now,
   )[0];
-  assert.equal(summary?.percent, 0);
+  assert.equal(summary?.percent, 39);
 });

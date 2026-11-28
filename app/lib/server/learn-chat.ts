@@ -1,4 +1,10 @@
+import { findBibleReferences } from "../bible/parse-reference";
+import type { LearnChatContext, LearnChatInput, LearnChatMessage, SerializedLesson } from "../learn/agent-context";
+import { isPerspective } from "../learn/types";
 import { runWorkersAi, workersGatewayCall } from "./ai-gateway";
+import { fetchPassagesFromD1 } from "./bible-db";
+import { citeLibrary } from "./learn/library-cite";
+import { retrievalFocus } from "./learn/library-rank";
 import {
   LEARN_MAX_TOKENS,
   LEARN_THINKING_EFFORT,
@@ -9,7 +15,6 @@ import {
   type LlmEnv,
 } from "./learn/llm";
 import { SOURCE_TEXT_RULE } from "./learn/source-policy";
-import type { LearnChatContext, LearnChatInput, LearnChatMessage, SerializedLesson } from "../learn/agent-context";
 
 const clip = (text: string | undefined, n: number) => {
   const t = (text ?? "").trim();
@@ -21,7 +26,9 @@ const SYSTEM = `You are a patient tutor inside a structured learning course. The
 Rules:
 - Ground explanations in the TEACHING text and in scripture, confession, commentary, or church-father passages provided in the context.
 - ${SOURCE_TEXT_RULE}
+- When RETRIEVED FOR THIS QUESTION is present, cite it. Name each scripture reference you use, quote only that retrieved wording, and name a library source by its label when you use it. Do not answer a passage question with no citation when a retrieved passage is in the context.
 - When the focus is a practice (gap) lesson or a review item, use the same rule: quote only the retrieved wording in that focus, and do not write any other verse, confession, commentary, or church-father text.
+- Refer to a lesson by its title. Never abbreviate a lesson as L1, L2, or any other L-number.
 - When mentioning a video, article, or book, name it and you may mention its URL from the context.
 - Do not invent resources, URLs, or ratings that are not in the context.
 - Quiz: help the learner think through questions without giving away answers unless they paste their attempt and ask you to check it, or they explicitly ask for the answer key.
@@ -136,7 +143,7 @@ function buildContextBlock(ctx: LearnChatContext): string {
           .join("\n")}`
       : "",
     ctx.lessonOutline?.length
-      ? `Lesson map:\n${ctx.lessonOutline.map((l) => `- L${l.order} ${l.title}`).join("\n")}`
+      ? `Lesson map:\n${ctx.lessonOutline.map((l) => `- Lesson ${l.order}: ${l.title}`).join("\n")}`
       : "",
     ctx.finalQuestions?.length
       ? `Final assessment questions:\n${ctx.finalQuestions.map((q, i) => `${i + 1}. [${q.kind}] ${q.question}`).join("\n")}`
@@ -205,7 +212,96 @@ function onceText(text: string): ReadableStream<Uint8Array> {
   });
 }
 
-type ChatEnv = Pick<LlmEnv, "AI" | "AI_GATEWAY_ID" | "AI_GATEWAY_TOKEN" | "ANTHROPIC_API_KEY" | "LEARN_MODEL_WORKER">;
+type ChatEnv = Pick<LlmEnv, "AI" | "AI_GATEWAY_ID" | "AI_GATEWAY_TOKEN" | "ANTHROPIC_API_KEY" | "LEARN_MODEL_WORKER"> & {
+  BIBLE?: D1Database;
+  LIBRARY_VECTORS?: VectorizeIndex;
+};
+
+type TutorPack = {
+  scripture: { reference: string; text: string }[];
+  library: { label: string; detail?: string; text: string }[];
+};
+
+const emptyTutorPack = (): TutorPack => ({ scripture: [], library: [] });
+
+async function retrieveTutorSources(env: ChatEnv, input: LearnChatInput): Promise<TutorPack> {
+  if (!env.BIBLE) return emptyTutorPack();
+  const question = [...(input.messages ?? [])].reverse().find((message) => message.role === "user")?.content ?? "";
+  const lesson = input.context.lesson;
+  const blob = [question, input.context.topic, lesson?.title ?? "", lesson?.teaching ?? "", ...(lesson?.scripture.map((row) => row.reference) ?? [])].join("\n");
+  const focus = retrievalFocus(blob);
+  const seen = new Set<string>();
+  const refs: ReturnType<typeof findBibleReferences> = [];
+  for (const text of [...focus.refs, question, ...(lesson?.scripture.map((row) => row.reference) ?? [])]) {
+    for (const ref of findBibleReferences(text)) {
+      const key = `${ref.book.slug}:${ref.chapter}:${ref.verseStart}:${ref.verseEnd ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push(ref);
+      if (refs.length >= 4) break;
+    }
+    if (refs.length >= 4) break;
+  }
+  const loaded = refs.length
+    ? await fetchPassagesFromD1(
+        env.BIBLE,
+        refs.map((ref) => ({ slug: ref.book.slug, chapter: ref.chapter, verseStart: ref.verseStart, verseEnd: ref.verseEnd })),
+      ).catch(() => [])
+    : [];
+  const scripture = loaded.flatMap((passage, index) => {
+    const ref = refs[index];
+    const text = passage?.verses.map((verse) => verse.text).join(" ").trim() ?? "";
+    if (!ref || !text) return [];
+    return [{ reference: passage?.reference || ref.label, text: clip(text, 900) }];
+  });
+  const perspective = isPerspective(input.context.perspective) ? input.context.perspective : "neutral";
+  const cited = await citeLibrary(
+    env,
+    [question, lesson?.title ?? "", ...focus.terms].filter(Boolean).join(". "),
+    scripture.map((row) => row.reference),
+    perspective,
+  ).catch(() => ({ citations: [], dropped: [] }));
+  return {
+    scripture,
+    library: cited.citations.slice(0, 3).map((item) => ({
+      label: item.label,
+      detail: item.detail,
+      text: clip(item.text, 700),
+    })),
+  };
+}
+
+function formatTutorRetrieval(pack: TutorPack): string {
+  if (!pack.scripture.length && !pack.library.length) return "";
+  const scripture = pack.scripture.map((row) => `- ${row.reference}: ${row.text}`).join("\n\n");
+  const library = pack.library.map((row) => `- ${row.label}${row.detail ? ` (${row.detail})` : ""}: ${row.text}`).join("\n\n");
+  return [
+    "RETRIEVED FOR THIS QUESTION (quote only this wording, and cite each reference you use):",
+    scripture ? `Scripture:\n${scripture}` : "",
+    library ? `Library:\n${library}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function citationFooter(pack: TutorPack): string {
+  const lines = [
+    ...pack.scripture.map((row) => `- ${row.reference}`),
+    ...pack.library.map((row) => `- ${row.label}${row.detail ? ` (${row.detail})` : ""}`),
+  ];
+  return lines.length ? `\n\n**Sources**\n${lines.join("\n")}` : "";
+}
+
+function appendText(stream: ReadableStream<Uint8Array>, extra: string): ReadableStream<Uint8Array> {
+  if (!extra) return stream;
+  const tail = new TextEncoder().encode(extra);
+  const out = new TransformStream<Uint8Array, Uint8Array>({
+    flush(controller) {
+      controller.enqueue(tail);
+    },
+  });
+  return stream.pipeThrough(out);
+}
 
 export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Promise<ReadableStream<Uint8Array>> {
   const history = (input.messages ?? [])
@@ -217,8 +313,11 @@ export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Prom
     throw new Error("messages must end with a user turn");
   }
 
-  const system = `${SYSTEM}\n\n${buildContextBlock(input.context)}`;
+  const retrieved = await retrieveTutorSources(env, input).catch(() => emptyTutorPack());
+  const retrievedBlock = formatTutorRetrieval(retrieved);
+  const system = `${SYSTEM}\n\n${buildContextBlock(input.context)}${retrievedBlock ? `\n\n${retrievedBlock}` : ""}`;
   const model = learnModelId(env, "worker");
+  const footer = citationFooter(retrieved);
 
   if (model.startsWith("anthropic/")) {
     const result = await callAnthropic(env, model, {
@@ -232,9 +331,9 @@ export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Prom
         const detail = (await result.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 500);
         throw new Error(`Anthropic via gateway: ${result.status}${detail ? ` ${detail}` : ""}`);
       }
-      return textStreamFrom(result.body);
+      return appendText(textStreamFrom(result.body), footer);
     }
-    return onceText(await readAnthropicText(result, "tutor"));
+    return onceText(`${await readAnthropicText(result, "tutor")}${footer}`);
   }
 
   const upstream = (await runWorkersAi(
@@ -250,5 +349,5 @@ export async function streamLearnChat(env: ChatEnv, input: LearnChatInput): Prom
     workersGatewayCall(env.AI_GATEWAY_ID, { stage: "chat" }),
   )) as unknown as ReadableStream<Uint8Array>;
 
-  return textStreamFrom(upstream);
+  return appendText(textStreamFrom(upstream), footer);
 }

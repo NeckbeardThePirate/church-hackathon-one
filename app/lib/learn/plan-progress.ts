@@ -305,11 +305,12 @@ export function emptyQuiz(count: number): PersistedQuiz {
 
 export function normalizeQuiz(saved: PersistedQuiz | undefined | null, count: number): PersistedQuiz {
   const flags = quizFlags(saved);
-  if (!saved?.answers?.length) return { ...emptyQuiz(count), ...flags };
-  if (saved.answers.length === count) return { ...saved, ...flags };
+  const source = saved?.answers?.length ? saved.answers.map(releaseUntouchedAnswer) : [];
+  if (!source.length) return { ...emptyQuiz(count), ...flags };
+  if (source.length === count) return { ...saved, answers: source, ...flags };
   const next = emptyQuiz(count);
-  for (let i = 0; i < Math.min(saved.answers.length, count); i++) {
-    next.answers[i] = saved.answers[i]!;
+  for (let i = 0; i < Math.min(source.length, count); i++) {
+    next.answers[i] = source[i]!;
   }
   return { ...next, ...flags };
 }
@@ -338,12 +339,34 @@ export function isQuizSettled(quiz: PersistedQuiz | null | undefined): boolean {
   return quiz.settled === true || quizAllAnswered(quiz);
 }
 
+/**
+ * A real submission: a chosen option, or free text the learner sent to Check.
+ * A grade with neither was never answered and must not count or show feedback.
+ */
+export function quizAnswerSubmitted(answer: PersistedQuizAnswer | undefined): boolean {
+  if (!answer) return false;
+  if (typeof answer.mcChoice === "string" && answer.mcChoice.trim().length > 0) return true;
+  return answer.shortSubmitted === true && answer.shortText.trim().length > 0;
+}
+
+/** Drop a grade that landed on a question the learner did not answer. Draft text is kept. */
+export function releaseUntouchedAnswer(answer: PersistedQuizAnswer): PersistedQuizAnswer {
+  if (quizAnswerSubmitted(answer)) return answer;
+  if (answer.correct == null && answer.score == null && answer.shortSubmitted !== true) return answer;
+  return {
+    mcChoice: null,
+    shortText: answer.shortText,
+    shortSubmitted: false,
+    correct: null,
+  };
+}
+
 export function quizAllAnswered(quiz: PersistedQuiz): boolean {
-  return quiz.answers.length > 0 && quiz.answers.every((a) => a.correct !== null);
+  return quiz.answers.length > 0 && quiz.answers.every((answer) => quizAnswerSubmitted(answer) && answer.correct !== null);
 }
 
 export function quizCorrectCount(quiz: PersistedQuiz): number {
-  return quiz.answers.filter((a) => a.correct === true).length;
+  return quiz.answers.filter((answer) => quizAnswerSubmitted(answer) && answer.correct === true).length;
 }
 
 function migrateLegacy(raw: Record<string, unknown>): LearnPlanProgress {

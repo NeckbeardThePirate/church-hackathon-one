@@ -256,6 +256,8 @@ test("signed-out landing mounts the preview and leaves the signed-in branch alon
   assert.match(view, /Try a quick check/);
   assert.match(view, /See what happens when you miss/);
   assert.match(view, /Reset sample/);
+  assert.match(view, /data-guest-sample-actions/);
+  assert.match(view, /border-t border-\[var\(--line\)\]/);
   assert.match(view, /pickGuestSample/);
   assert.match(view, /revealGuestMiss/);
   assert.match(view, /guestPathNodes/);
