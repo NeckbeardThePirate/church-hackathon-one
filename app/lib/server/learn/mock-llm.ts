@@ -131,20 +131,28 @@ export function mockModelText(system: string, user: string, meta: LlmMeta): stri
   });
 }
 
-/** Sequential opener. The second question onward sees the earlier answers in the prompt. */
+/** Sequential opener. Each question names a different idea from the topic, never the placeholder example. */
 function mockOpener(user: string): string {
+  const topic = /Topic:\s*(.+)/.exec(user)?.[1]?.split("\n")[0]?.trim() || "this study";
   const count = (user.match(/Chose:/g) ?? []).length;
-  const probe = count >= 2 ? "what to emphasize" : count === 1 ? "the unclear part" : "the main idea";
+  const ideas = [
+    `grace in ${topic}`,
+    `faith in ${topic}`,
+    `works in ${topic}`,
+    `the gift in ${topic}`,
+  ];
+  const probe = ideas[count] ?? ideas[ideas.length - 1]!;
+  const other = ideas[(count + 1) % ideas.length]!;
   const prompt =
-    count >= 2 ? "What should the path emphasize?" : count === 1 ? "What still feels unclear?" : "How familiar is the main idea?";
+    count >= 2 ? `What should the path emphasize about ${probe}?` : count === 1 ? `What still feels unclear about ${probe}?` : `How familiar is ${probe}?`;
   return JSON.stringify({
     prompt,
     probe,
     stop: count >= 2,
     choices: [
-      { id: "a", label: "I can explain it", reading: "strength", concept: probe },
-      { id: "b", label: "I only know the words", reading: "gap", concept: probe },
-      { id: "c", label: "I mix it up with something nearby", reading: "gap", concept: `${probe} mix-up` },
+      { id: "a", label: `I can explain ${probe}`, reading: "strength", concept: probe },
+      { id: "b", label: `I have only heard of ${probe}`, reading: "gap", concept: probe },
+      { id: "c", label: `I mix ${probe} up with ${other}`, reading: "gap", concept: other },
       { id: "d", label: "I'm not sure yet", reading: "unsure", concept: probe },
     ],
   });

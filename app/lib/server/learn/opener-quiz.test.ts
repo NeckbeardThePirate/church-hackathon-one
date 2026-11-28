@@ -120,7 +120,7 @@ test("answering while the outline already exists adds a gap lesson and leaves th
   assert.equal(info.lessonIds.includes("l1"), true);
   assert.equal(info.lessonIds.includes(answered.steer.researchIds[0]!), true);
   const added = await plan.getLesson(answered.steer.researchIds[0]!);
-  assert.match(added?.title ?? "", /main idea/i);
+  assert.equal(added?.title, "Grace in Romans 3");
   assert.equal(added?.status, "pending");
 
   const again = await plan.steerFromOpener();
@@ -255,6 +255,7 @@ test("the opener call uses the Haiku catalog id through the gateway", async () =
           topic: "Romans 3",
           notes: "I want the difference between justification and sanctification.",
           passages: [],
+          concepts: ["justification by faith"],
           questions: [],
           answers: [],
         }),
@@ -264,6 +265,50 @@ test("the opener call uses the Haiku catalog id through the gateway", async () =
   assert.equal(opened.body.status, "asking");
   assert.equal(opened.body.question?.prompt, "How familiar is justification by faith?");
   assert.equal((await plan.info()).status, "queued");
+});
+
+test("a copied placeholder question is replaced with the topic and logged", async () => {
+  const plan = await bootPlan();
+  const template = {
+    prompt: "How familiar is the main idea?",
+    probe: "the main idea",
+    stop: false,
+    choices: [
+      { id: "a", label: "I can explain it", reading: "strength", concept: "the main idea" },
+      { id: "b", label: "I have only heard of it", reading: "gap", concept: "the main idea" },
+      { id: "c", label: "I mix it up with a nearby idea", reading: "gap", concept: "a nearby idea" },
+      { id: "d", label: "I'm not sure yet", reading: "unsure", concept: "the main idea" },
+    ],
+  };
+  const env = {
+    AI_GATEWAY_ID: "study-buddy",
+    AI: {
+      gateway() {
+        return {
+          async run() {
+            return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(template) }] }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          },
+        };
+      },
+    },
+  } as unknown as LlmEnv;
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((item) => String(item)).join(" "));
+  };
+  try {
+    const opened = await runOpenerAction(env, plan, { type: "next" });
+    assert.equal(opened.body.status, "asking");
+    assert.equal(opened.body.question?.prompt, "How familiar is justification by faith?");
+    assert.equal(/main idea|nearby idea/i.test(opened.body.question?.prompt ?? ""), false);
+    assert.equal(warnings.some((line) => line.includes("opener fallback question")), true);
+  } finally {
+    console.warn = original;
+  }
 });
 
 test("a gateway 4xx falls back once without output_config", async () => {

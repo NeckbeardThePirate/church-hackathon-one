@@ -168,6 +168,20 @@ function readingOf(value: unknown, label: string): OpenerReading | null {
   return null;
 }
 
+/** The example that used to ship in the prompt. A copied answer must not steer the path. */
+export function isPlaceholderConcept(value: string): boolean {
+  const key = value.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!key) return true;
+  if (/^<[^>]+>$/.test(key)) return true;
+  if (/\bmain idea\b/.test(key)) return true;
+  if (/\bnearby idea\b/.test(key)) return true;
+  return false;
+}
+
+export function promptsRepeat(left: string, right: string): boolean {
+  return left.trim().toLowerCase().replace(/\s+/g, " ") === right.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 /** Validate one model question. Throws so the caller can retry or close the check. */
 export function parseOpenerQuestion(value: unknown): OpenerQuestionDraft {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("opener question must be an object");
@@ -196,7 +210,63 @@ export function parseOpenerQuestion(value: unknown): OpenerQuestionDraft {
     choices.push({ id, label: "I'm not sure yet", reading: "unsure", concept: probe });
   }
   if (choices.length < 3) throw new Error("choices need at least 3 items");
+  if (isPlaceholderConcept(probe) || choices.some((choice) => choice.reading !== "unsure" && isPlaceholderConcept(choice.concept))) {
+    throw new Error('name a specific idea from the topic or passage, not "the main idea" or "a nearby idea"');
+  }
+  if (/how familiar is the main idea\??$/i.test(prompt)) {
+    throw new Error('name a specific idea from the topic or passage, not "the main idea"');
+  }
   return { prompt, probe, stop: raw.stop === true, choices };
+}
+
+const FALLBACK_ANGLES = [
+  (idea: string) => `How familiar is ${idea}?`,
+  (idea: string) => `What still feels unclear about ${idea}?`,
+  (idea: string) => `Could you explain ${idea} without looking it up?`,
+  (idea: string) => `Where do you want more help with ${idea}?`,
+];
+
+/**
+ * A question built from the topic, the passage, and the outline when the model
+ * does not return a specific one. Never uses the placeholder example.
+ */
+export function fallbackOpenerQuestion(input: {
+  topic: string;
+  references: string[];
+  concepts: string[];
+  asked: string[];
+}): OpenerQuestionDraft {
+  const asked = new Set(input.asked.map((item) => conceptKey(item)));
+  const pool = uniqueConcepts([...input.concepts, ...input.references, input.topic]);
+  const idea = pool.find((item) => !asked.has(conceptKey(item))) ?? pool[0] ?? "this passage";
+  const other = pool.find((item) => conceptKey(item) !== conceptKey(idea));
+  const mix = other ?? "another part of this passage";
+  const angle = FALLBACK_ANGLES[Math.min(input.asked.length, FALLBACK_ANGLES.length - 1)] ?? FALLBACK_ANGLES[0]!;
+  return {
+    prompt: angle(idea),
+    probe: clipText(idea, 80),
+    stop: false,
+    choices: [
+      { id: "a", label: `I can explain ${idea}`, reading: "strength", concept: idea },
+      { id: "b", label: `I have only heard of ${idea}`, reading: "gap", concept: idea },
+      { id: "c", label: `I mix ${idea} up with ${mix}`, reading: "gap", concept: mix === idea ? idea : mix },
+      { id: "d", label: "I'm not sure yet", reading: "unsure", concept: idea },
+    ],
+  };
+}
+
+function uniqueConcepts(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const label = value.trim().replace(/\s+/g, " ");
+    if (!label || isPlaceholderConcept(label)) continue;
+    const key = conceptKey(label);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
 }
 
 export function unansweredQuestion(state: OpenerState): OpenerQuestion | undefined {
@@ -332,9 +402,13 @@ export function presentOpener(state: OpenerState, pending = false): OpenerPublic
   };
 }
 
+function concreteConcepts(values: string[]): string[] {
+  return values.map((item) => item.trim()).filter((item) => item && !isPlaceholderConcept(item));
+}
+
 export function openerSummary(diagnostic: OpenerDiagnostic): string {
-  const gaps = diagnostic.gaps.slice(0, 3);
-  const strengths = diagnostic.strengths.slice(0, 3);
+  const gaps = concreteConcepts(diagnostic.gaps).slice(0, 3);
+  const strengths = concreteConcepts(diagnostic.strengths).slice(0, 3);
   if (gaps.length && strengths.length) {
     return `Your path will lean into ${phrase(gaps)}, with ${phrase(strengths)} treated as familiar.`;
   }
@@ -344,8 +418,8 @@ export function openerSummary(diagnostic: OpenerDiagnostic): string {
 }
 
 export function diagnosticBrief(diagnostic: OpenerDiagnostic): string {
-  const strengths = diagnostic.strengths.map((item) => item.trim()).filter(Boolean);
-  const gaps = diagnostic.gaps.map((item) => item.trim()).filter(Boolean);
+  const strengths = concreteConcepts(diagnostic.strengths);
+  const gaps = concreteConcepts(diagnostic.gaps);
   if (!strengths.length && !gaps.length) return "";
   const lines = ["Opener check (answered while this path was being built):"];
   if (strengths.length) lines.push(`Already familiar: ${strengths.join("; ")}.`);
@@ -369,23 +443,34 @@ export function openerUserPrompt(input: {
   topic: string;
   notes: string;
   passages: { reference: string; text: string }[];
+  concepts?: string[];
   questions: OpenerQuestion[];
   answers: OpenerAnswer[];
 }): string {
   const lines = [
     `Topic: ${input.topic.trim() || "Study"}`,
     `This is question ${input.answers.length + 1} of at most ${OPENER_MAX_QUESTIONS}.`,
+    `Ask about one specific idea from the topic or the passage. Do not say "the main idea" or "a nearby idea".`,
   ];
   const notes = input.notes.trim();
   if (notes) lines.push(`Learner notes:\n"""\n${clipBody(notes, 400)}\n"""`);
   const passages = input.passages.slice(0, 4).filter((passage) => passage.reference.trim());
   if (passages.length) {
     lines.push(
-      `Passages the learner chose (wording supplied for you; do not ask them to recite it):\n${passages
-        .map((passage) => `- ${passage.reference}: ${clipBody(passage.text.trim(), 160)}`)
+      `Passages the learner chose (do not ask them to recite the wording):\n${passages
+        .map((passage) => {
+          const text = passage.text.trim();
+          return text ? `- ${passage.reference}: ${clipBody(text, 800)}` : `- ${passage.reference}`;
+        })
         .join("\n")}`,
     );
   }
+  const concepts = uniqueConcepts(input.concepts ?? []);
+  if (concepts.length) {
+    lines.push(`Ideas already on this path. Prefer one that has not been asked:\n${concepts.slice(0, 8).map((concept) => `- ${concept}`).join("\n")}`);
+  }
+  const asked = uniqueConcepts(input.questions.map((question) => question.probe));
+  if (asked.length) lines.push(`Already asked. Choose a different idea:\n${asked.map((concept) => `- ${concept}`).join("\n")}`);
   if (input.answers.length) {
     const prior = input.answers.map((answer, index) => {
       const question = input.questions.find((item) => item.id === answer.questionId);
@@ -408,8 +493,8 @@ export function planAdaptation(
   diagnostic: OpenerDiagnostic,
   band: AdaptationBand,
 ): OutlineAdaptation {
-  const strengths = diagnostic.strengths.map((item) => item.trim()).filter(Boolean);
-  const gaps = diagnostic.gaps.map((item) => item.trim()).filter(Boolean);
+  const strengths = concreteConcepts(diagnostic.strengths);
+  const gaps = concreteConcepts(diagnostic.gaps);
   if (!strengths.length && !gaps.length) {
     return { lessons: [...lessons], dropIds: [], addIds: [], focusIds: [], note: "" };
   }
