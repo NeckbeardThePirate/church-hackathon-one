@@ -5,7 +5,9 @@ import {
   OPENER_MIN_QUESTIONS,
   beginOpenerTurn,
   diagnosticBrief,
+  fallbackOpenerQuestion,
   freshOpener,
+  isPlaceholderConcept,
   openerStep,
   openerSummary,
   openerUserPrompt,
@@ -291,4 +293,46 @@ test("an empty check leaves the outline alone, and the planner lines name the ga
   assert.match(scopeSteerLine({ strengths: ["assurance"], gaps: ["adoption"] }), /adoption/);
   assert.match(planSteerLine({ strengths: ["assurance"], gaps: ["adoption"] }, 4), /exactly 4 lessons/);
   assert.equal(openerSummary({ strengths: ["assurance"], gaps: [] }), "Your path will move ahead where assurance is already familiar.");
+});
+
+test("the copied prompt example is rejected, and placeholder names never become lessons", () => {
+  assert.equal(isPlaceholderConcept("the main idea"), true);
+  assert.equal(isPlaceholderConcept("a nearby idea"), true);
+  assert.throws(() =>
+    parseOpenerQuestion({
+      prompt: "How familiar is the main idea?",
+      probe: "the main idea",
+      stop: false,
+      choices: [
+        { id: "a", label: "I can explain it", reading: "strength", concept: "the main idea" },
+        { id: "b", label: "I have only heard of it", reading: "gap", concept: "the main idea" },
+        { id: "c", label: "I mix it up with a nearby idea", reading: "gap", concept: "a nearby idea" },
+        { id: "d", label: "I'm not sure yet", reading: "unsure", concept: "the main idea" },
+      ],
+    }),
+  );
+  const shaped = planAdaptation(PATH, { strengths: ["the main idea"], gaps: ["a nearby idea", "grace through faith"] }, BAND);
+  assert.equal(shaped.lessons.some((lesson) => /main idea|nearby idea/i.test(lesson.title)), false);
+  assert.equal(shaped.lessons.some((lesson) => lesson.title === "Grace through faith"), true);
+  const onlyPlaceholders = planAdaptation(PATH, { strengths: ["the main idea"], gaps: ["a nearby idea"] }, BAND);
+  assert.deepEqual(onlyPlaceholders.addIds, []);
+  assert.equal(onlyPlaceholders.lessons.length, PATH.length);
+  assert.equal(openerSummary({ strengths: ["the main idea"], gaps: ["a nearby idea"] }), "");
+
+  const first = fallbackOpenerQuestion({
+    topic: "Ephesians 2",
+    references: ["Ephesians 2:1-10"],
+    concepts: ["dead in trespasses", "saved by grace", "not by works"],
+    asked: [],
+  });
+  const second = fallbackOpenerQuestion({
+    topic: "Ephesians 2",
+    references: ["Ephesians 2:1-10"],
+    concepts: ["dead in trespasses", "saved by grace", "not by works"],
+    asked: [first.probe],
+  });
+  assert.match(first.prompt, /dead in trespasses/);
+  assert.match(second.prompt, /saved by grace/);
+  assert.equal(first.prompt === second.prompt, false);
+  assert.equal(/main idea|nearby idea/i.test(`${first.prompt} ${second.prompt} ${first.probe} ${second.probe}`), false);
 });
